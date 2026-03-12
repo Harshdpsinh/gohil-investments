@@ -1,0 +1,22 @@
+// storage.rules
+// ─────────────────────────────────────────────────────────────
+// PASTE THIS into Firebase Console → Storage → Rules tab.
+// Allows signed-in users to read/write files only under
+// the clients/ folder.  Max file size 10 MB.
+// ─────────────────────────────────────────────────────────────
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /clients/{clientId}/{allPaths=**} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('application/pdf|image/.*');
+    }
+
+    // Block everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
