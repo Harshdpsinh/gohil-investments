@@ -1,30 +1,34 @@
-// src/firebase/storage.js  (Cloudinary — free, no credit card)
+// src/firebase/storage.js
+// PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
+// Images use /image/ endpoint. Both are publicly accessible.
 import { addDocMeta, deleteDocMeta } from './firestore'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
-function cloudinaryUpload(file, folder, onProgress = () => {}) {
+function cloudinaryUpload(file, folder, onProgress = () => {}, resourceType = 'image') {
   return new Promise((resolve, reject) => {
     if (!CLOUD || !PRESET) {
-      reject(new Error('Cloudinary not configured. Add VITE_CLOUDINARY_CLOUD_NAME and VITE_CLOUDINARY_UPLOAD_PRESET to your .env file.'))
-      return
+      reject(new Error('Cloudinary not configured.')); return
     }
+    const safeName = file.name.replace(/\s+/g, '_')
+    const baseName = safeName.replace(/\.[^/.]+$/, '')
     const fd = new FormData()
-    fd.append('file', file)
+    fd.append('file',          file)
     fd.append('upload_preset', PRESET)
-    fd.append('folder', folder)
-    fd.append('public_id', `${Date.now()}_${file.name.replace(/\s/g, '_')}`)
+    fd.append('folder',        folder)
+    fd.append('public_id',     `${Date.now()}_${baseName}`)
+
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/auto/upload`, true)
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${resourceType}/upload`, true)
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         const data = JSON.parse(xhr.responseText)
-        resolve({ url: data.secure_url, publicId: data.public_id, name: file.name, size: file.size, type: file.type, format: data.format })
+        resolve({ url: data.secure_url, publicId: data.public_id, name: file.name, size: file.size, type: file.type, format: data.format || '' })
       } else {
-        const err = JSON.parse(xhr.responseText)
-        reject(new Error(err.error?.message || 'Upload failed'))
+        try { reject(new Error(JSON.parse(xhr.responseText).error?.message || `Upload failed (${xhr.status})`)) }
+        catch { reject(new Error(`Upload failed with status ${xhr.status}`)) }
       }
     }
     xhr.onerror = () => reject(new Error('Network error during upload'))
@@ -33,20 +37,19 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
 }
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
-  const meta = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress)
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  const meta  = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress, isPdf ? 'raw' : 'image')
   await addDocMeta(clientId, meta)
   return meta
 }
+
 export async function deleteClientDocument(clientId, docId) {
   await deleteDocMeta(clientId, docId)
 }
 
-// Upload a policy PDF — returns { url, name }
-// Caller must call savePolicyPdfUrl(policyId, url, name) to persist it.
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
-  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-    throw new Error('Only PDF files are allowed for policy documents.')
-  }
-  const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress)
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  if (!isPdf) throw new Error('Only PDF files are allowed.')
+  const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress, 'raw')
   return { url: meta.url, name: meta.name }
 }

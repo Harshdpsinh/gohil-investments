@@ -1,9 +1,12 @@
 // src/pages/PoliciesPage.jsx
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
-import { addPolicy, updatePolicy, deletePolicy, addClient, savePolicyPdfUrl } from '../firebase/firestore'
+import {
+  addPolicy, updatePolicy, deletePolicy, addClient,
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber
+} from '../firebase/firestore'
 import { uploadPolicyPdf } from '../firebase/storage'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
@@ -18,9 +21,38 @@ import { fmtDate, fmtCurrency, daysUntil, renewalStatus } from '../utils/dateUti
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
   downloadTemplate, parseImportFile, normaliseDate,
-  POLICY_IMPORT_HEADERS, POLICY_IMPORT_SAMPLE
+  HEALTH_IMPORT_HEADERS, HEALTH_IMPORT_SAMPLE, parseHealthRow,
+  LIFE_IMPORT_HEADERS,   LIFE_IMPORT_SAMPLE,   parseLifeRow,
+  MOTOR_IMPORT_HEADERS,  MOTOR_IMPORT_SAMPLE,  parseMotorRow,
 } from '../utils/exportUtils'
 import toast from 'react-hot-toast'
+
+// ── Fuzzy match (Levenshtein distance) ───────────────────────
+function levenshtein(a, b) {
+  const m = a.length, n = b.length
+  const dp = Array.from({length: m+1}, (_,i) => Array.from({length: n+1}, (_,j) => j === 0 ? i : 0))
+  for (let j = 1; j <= n; j++) dp[0][j] = j
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+  return dp[m][n]
+}
+function fuzzyMatch(input, candidates, threshold = 0.75) {
+  // Returns candidates with similarity > threshold
+  const a = input.toLowerCase().trim()
+  return candidates
+    .map(c => {
+      const b = (c.name || '').toLowerCase().trim()
+      const maxLen = Math.max(a.length, b.length)
+      if (maxLen === 0) return null
+      const sim = 1 - levenshtein(a, b) / maxLen
+      return sim >= threshold ? { ...c, similarity: sim } : null
+    })
+    .filter(Boolean)
+    .sort((x,y) => y.similarity - x.similarity)
+    .slice(0, 3)
+}
 
 const TYPES  = ['Health','Life','Motor','Home','Travel','Marine','Fire','Other']
 const FREQS  = ['Yearly','Half-Yearly','Quarterly','Monthly']
@@ -439,103 +471,308 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
   )
 }
 
-// ── Import Modal (same as before, kept intact) ────────────────
-function ImportModal({ clients, onClose, onImported }) {
-  const fileRef=useRef()
-  const [step,setStep]=useState('upload')
-  const [rows,setRows]=useState(null)
-  const [unmapped,setUnmapped]=useState([])
-  const [importing,setImporting]=useState(false)
-  const [errors,setErrors]=useState([])
-  const onFileChange=async e=>{const file=e.target.files[0];if(!file)return;try{const raw=await parseImportFile(file);setRows(raw);setErrors([])}catch(err){toast.error(err.message)}}
-  const onClickImport=()=>{
-    if(!rows?.length)return
-    const names=[...new Set(rows.map(r=>String(r['Client Name']||r['Client']||'').trim()).filter(Boolean))]
-    const unmatched=names.filter(n=>!clients.some(c=>c.name.toLowerCase().trim()===n.toLowerCase()))
-    if(unmatched.length>0){setUnmapped(unmatched);setStep('mapping')}else{doImport({})}
-  }
-  const doImport=async(overrides)=>{
-    setImporting(true);const errs=[];let ok=0
-    for(const[i,r]of rows.entries()){
-      const pNo=String(r['Policy No']||r['Policy Number']||'').trim()
-      const eName=String(r['Client Name']||r['Client']||'').trim()
-      if(!pNo){errs.push(`Row ${i+2}: Missing Policy No`);continue}
-      let mc=clients.find(c=>c.name.toLowerCase().trim()===eName.toLowerCase())
-      const ov=overrides[eName];if(!mc&&ov?.id)mc={id:ov.id,name:ov.name}
-      const data={policyNumber:pNo,clientId:mc?.id||'',clientName:mc?.name||eName,
-        policyType:String(r['Policy Type']||r['Type']||'Health').trim(),
-        insurer:String(r['Insurer']||'').trim(),planName:String(r['Plan Name']||r['Plan']||'').trim(),
-        premium:String(r['Premium']||'').trim(),sumAssured:String(r['Sum Assured']||'').trim(),
-        frequency:String(r['Frequency']||'Yearly').trim(),
-        startDate:normaliseDate(r['Start Date']),expiryDate:normaliseDate(r['Expiry Date']),
-        status:String(r['Status']||'Active').trim(),nominee:String(r['Nominee']||'').trim(),
-        nomineeRelation:String(r['Nominee Relation']||'').trim(),
-        fyCommission:String(r['FY Commission %']||r['Commission %']||'').trim(),
-        ryCommission:String(r['RY Commission %']||'').trim(),notes:String(r['Notes']||'').trim()}
-      try{await addPolicy(data);ok++}catch(err){errs.push(`Row ${i+2} (${pNo}): ${err.message}`)}
+// ── Shared client-mapping step (reused by all 3 import modals) ──
+function ClientMappingStep({ unmapped, clients, onConfirm, onBack }) {
+  const [resolution, setResolution] = useState({})
+  const [saving, setSaving] = useState(false)
+  const setRes = (name, val) => setResolution(p => ({ ...p, [name]: val }))
+
+  const confirm = async () => {
+    setSaving(true)
+    const map = {}
+    for (const name of unmapped) {
+      const res = resolution[name] || { type: 'skip' }
+      if (res.type === 'existing') {
+        map[name] = { id: res.clientId, name: res.clientName }
+      } else if (res.type === 'new') {
+        try {
+          const ref = await addClient({ name, mobile: '', email: '', kycStatus: 'Pending' })
+          map[name] = { id: ref.id, name }
+          toast.success(`"${name}" created`)
+        } catch { map[name] = { id: '', name } }
+      } else {
+        map[name] = { id: '', name }
+      }
     }
-    setImporting(false);setErrors(errs)
-    if(ok>0){toast.success(`🎉 ${ok} policies imported!`);onImported();if(!errs.length)onClose();else setStep('upload')}
+    setSaving(false)
+    onConfirm(map)
   }
-  // Mapping step
-  const [resolution,setResolution]=useState({})
-  const setRes=(name,val)=>setResolution(p=>({...p,[name]:val}))
-  const [saving,setSaving]=useState(false)
-  const confirmMapping=async()=>{
-    setSaving(true);const map={}
-    for(const name of unmapped){
-      const res=resolution[name]||{type:'skip'}
-      if(res.type==='existing'){map[name]={id:res.clientId,name:res.clientName}}
-      else if(res.type==='new'){try{const ref=await addClient({name,mobile:'',email:'',kycStatus:'Pending'});map[name]={id:ref.id,name};toast.success(`"${name}" created`)}catch(err){map[name]={id:'',name}}}
-      else{map[name]={id:'',name}}
-    }
-    setSaving(false);setStep('upload');doImport(map)
-  }
-  if(step==='mapping')return(
+
+  return (
     <div className="space-y-4">
       <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-        <p className="text-sm font-semibold text-orange-700">⚠️ {unmapped.length} client names not found</p>
+        <p className="text-sm font-semibold text-orange-700">⚠️ {unmapped.length} client name(s) not found in your database</p>
+        <p className="text-xs text-orange-600 mt-1">For each name below — create a new client, map to existing, or skip.</p>
       </div>
-      <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-        {unmapped.map(name=>{
-          const res=resolution[name]||{type:'skip'}
-          return(
-            <div key={name} className="border border-gray-200 rounded-xl p-3">
-              <p className="text-sm font-semibold mb-2">"{name}"</p>
+      <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+        {unmapped.map(name => {
+          const res = resolution[name] || { type: 'skip' }
+          return (
+            <div key={name} className="border border-gray-200 rounded-xl p-3 bg-white">
+              <p className="text-sm font-semibold text-gray-800 mb-2">"{name}"</p>
               <div className="flex gap-2 flex-wrap mb-2">
-                <button onClick={()=>setRes(name,{type:'new'})} className={`px-3 py-1 text-xs rounded-lg border ${res.type==='new'?'bg-blue-600 text-white':'bg-white text-blue-600 border-blue-300'}`}>➕ New client</button>
-                <button onClick={()=>setRes(name,{type:'skip'})} className={`px-3 py-1 text-xs rounded-lg border ${res.type==='skip'?'bg-gray-500 text-white':'bg-white text-gray-500 border-gray-300'}`}>⏭ Import without</button>
+                <button onClick={() => setRes(name, { type: 'new' })}
+                  className={`px-3 py-1 text-xs rounded-lg border font-medium ${res.type==='new'?'bg-blue-600 text-white border-blue-600':'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'}`}>
+                  ➕ Create new client
+                </button>
+                <button onClick={() => setRes(name, { type: 'skip' })}
+                  className={`px-3 py-1 text-xs rounded-lg border font-medium ${res.type==='skip'?'bg-gray-500 text-white border-gray-500':'bg-white text-gray-500 border-gray-300 hover:bg-gray-50'}`}>
+                  ⏭ Import without linking
+                </button>
               </div>
-              <select value={res.type==='existing'?res.clientId:''} onChange={e=>{const id=e.target.value;if(!id)return;const cl=clients.find(c=>c.id===id);setRes(name,{type:'existing',clientId:id,clientName:cl?.name||name})}} className="form-select text-xs">
-                <option value="">— Map to existing client —</option>
-                {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              <select
+                value={res.type==='existing' ? res.clientId : ''}
+                onChange={e => {
+                  const id = e.target.value
+                  if (!id) return
+                  const cl = clients.find(c => c.id === id)
+                  setRes(name, { type: 'existing', clientId: id, clientName: cl?.name || name })
+                }}
+                className="form-select text-xs w-full">
+                <option value="">— Or map to existing client —</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
+              {res.type === 'existing' && <p className="text-xs text-green-600 mt-1 font-medium">✅ Will be linked to: {res.clientName}</p>}
             </div>
           )
         })}
       </div>
       <div className="flex gap-3">
-        <button onClick={confirmMapping} disabled={saving} className="btn-primary">{saving?'⏳…':'✅ Confirm & Import'}</button>
-        <button onClick={()=>setStep('upload')} className="btn-secondary">Back</button>
+        <button onClick={confirm} disabled={saving} className="btn-primary">
+          {saving ? '⏳ Creating clients…' : '✅ Confirm & Import'}
+        </button>
+        <button onClick={onBack} className="btn-secondary">← Back</button>
       </div>
     </div>
   )
-  return(
+}
+
+// ── Generic typed import modal ────────────────────────────────
+function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, clients, onClose, onImported }) {
+  const fileRef   = useRef()
+  const [step,       setStep]       = useState('upload')
+  const [rows,       setRows]       = useState(null)
+  const [unmapped,   setUnmapped]   = useState([])
+  const [importing,  setImporting]  = useState(false)
+  const [errors,     setErrors]     = useState([])
+  // Auto-assign: when ON, unmatched client names are auto-created silently
+  const [autoAssign, setAutoAssign] = useState(true)
+
+  const onFileChange = async e => {
+    const file = e.target.files[0]; if (!file) return
+    try {
+      const raw = await parseImportFile(file)
+      setRows(raw); setErrors([])
+      toast.success(`${raw.length} rows loaded`)
+    } catch(err) { toast.error(err.message) }
+  }
+
+  const onClickImport = () => {
+    if (!rows?.length) return
+    const names = [...new Set(rows.map(r => String(r['Client Name']||'').trim()).filter(Boolean))]
+    const unmatched = names.filter(n => !clients.some(c => c.name.toLowerCase().trim() === n.toLowerCase()))
+
+    if (autoAssign) {
+      // Auto mode: create all unmatched clients silently, skip mapping step
+      doImport({}, true)
+    } else {
+      // Manual mode: show mapping UI for unmatched names
+      if (unmatched.length > 0) { setUnmapped(unmatched); setStep('mapping') }
+      else doImport({})
+    }
+  }
+
+  const doImport = async (overrides, autoCreate = false) => {
+    setImporting(true); const errs = []; let ok = 0
+    // Cache of auto-created clients in this session to avoid duplicates
+    const autoCreated = {}
+
+    for (const [i, r] of rows.entries()) {
+      const data = parseRow(r)
+      const pNo  = data.policyNumber
+      if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
+
+      const eName = data.clientName
+      let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
+
+      // Check override map
+      const ov = overrides[eName]; if (!mc && ov?.id) mc = { id: ov.id, name: ov.name }
+
+      // Auto-assign: create client if still not found
+      if (!mc && autoCreate && eName) {
+        if (autoCreated[eName.toLowerCase()]) {
+          // Already created in this import session — reuse
+          mc = autoCreated[eName.toLowerCase()]
+        } else {
+          try {
+            const ref = await addClient({ name: eName, mobile: '', email: '', kycStatus: 'Pending' })
+            mc = { id: ref.id, name: eName }
+            autoCreated[eName.toLowerCase()] = mc
+          } catch(err) { errs.push(`Row ${i+2}: Could not create client "${eName}" — ${err.message}`) }
+        }
+      }
+
+      data.clientId   = mc?.id   || ''
+      data.clientName = mc?.name || eName
+
+      try { await addPolicy(data); ok++ }
+      catch(err) { errs.push(`Row ${i+2} (${pNo}): ${err.message}`) }
+    }
+    setImporting(false); setErrors(errs)
+    if (ok > 0) {
+      const created = Object.keys(autoCreated).length
+      toast.success(`🎉 ${ok} policies imported!${created>0?` ${created} new clients auto-created.`:''}`)
+      onImported()
+      if (!errs.length) onClose()
+      else setStep('upload')
+    } else if (errs.length) {
+      toast.error('Import failed — see errors below')
+    }
+  }
+
+  const colorMap = {
+    green:  { bg:'bg-green-50',  border:'border-green-200',  text:'text-green-700'  },
+    purple: { bg:'bg-purple-50', border:'border-purple-200', text:'text-purple-700' },
+    orange: { bg:'bg-orange-50', border:'border-orange-200', text:'text-orange-700' },
+  }
+  const c = colorMap[color] || colorMap.green
+
+  if (step === 'mapping') return (
+    <ClientMappingStep
+      unmapped={unmapped} clients={clients}
+      onConfirm={map => { setStep('upload'); doImport(map) }}
+      onBack={() => setStep('upload')}
+    />
+  )
+
+  return (
     <div className="space-y-4">
+      {/* Auto-assign toggle */}
+      <div className={`rounded-xl p-3 border flex items-start gap-3 ${autoAssign?'bg-green-50 border-green-200':'bg-gray-50 border-gray-200'}`}>
+        <input type="checkbox" checked={autoAssign} onChange={e=>setAutoAssign(e.target.checked)}
+               className="w-5 h-5 mt-0.5 cursor-pointer flex-shrink-0" />
+        <div>
+          <p className={`text-sm font-semibold ${autoAssign?'text-green-700':'text-gray-600'}`}>
+            ⚡ Auto-Assign Clients {autoAssign?'(ON — Recommended)':'(OFF)'}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {autoAssign
+              ? 'Client names in your file will be matched automatically. New names not found in your database will be created as new clients instantly — no manual mapping needed.'
+              : 'You will be shown a mapping screen for any client names not found in your database.'}
+          </p>
+        </div>
+      </div>
+
+      {/* Step 1 */}
+      <div className={`${c.bg} border ${c.border} rounded-xl p-4`}>
+        <p className={`text-sm font-semibold ${c.text} mb-2`}>
+          Step 1 — Download the {icon} {policyType} template
+        </p>
+        <p className="text-xs text-gray-500 mb-3">
+          Fill in the template with your policy data. The first row is the header — do not change column names.
+          The second row is a sample — replace it with your data.
+        </p>
+        <button
+          onClick={() => downloadTemplate(headers, `${policyType} Policies`, `${policyType.toLowerCase()}_policies_import`, sample)}
+          className="btn-primary text-sm">
+          ⬇ Download {policyType} Template ({headers.length} columns)
+        </button>
+      </div>
+
+      {/* Step 2 */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-        <p className="text-sm font-semibold text-blue-700 mb-1">Step 1 — Download template</p>
-        <button onClick={()=>downloadTemplate(POLICY_IMPORT_HEADERS,'Policies','policies_import',POLICY_IMPORT_SAMPLE)} className="btn-primary text-sm">⬇ Download Template</button>
-      </div>
-      <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-        <p className="text-sm font-semibold text-green-700 mb-2">Step 2 — Upload filled file</p>
+        <p className="text-sm font-semibold text-blue-700 mb-2">Step 2 — Upload your filled file</p>
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={onFileChange} className="text-sm" />
-        {rows&&<p className="text-xs text-green-700 mt-2 font-medium">✅ {rows.length} rows loaded</p>}
+        {rows && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded">
+              ✅ {rows.length} {policyType} rows ready to import
+            </span>
+            <button onClick={() => { setRows(null); if(fileRef.current) fileRef.current.value='' }}
+                    className="text-xs text-gray-400 hover:text-red-500">✕ Clear</button>
+          </div>
+        )}
       </div>
-      {errors.length>0&&<div className="bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">{errors.map((e,i)=><p key={i}>• {e}</p>)}</div>}
+
+      {/* Column preview */}
+      <details className="bg-gray-50 border border-gray-200 rounded-xl">
+        <summary className="px-4 py-2 text-xs font-semibold text-gray-600 cursor-pointer">
+          📋 View all {headers.length} columns in this template
+        </summary>
+        <div className="px-4 pb-3 pt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 max-h-48 overflow-y-auto">
+            {headers.map((h, i) => (
+              <div key={h} className="flex items-center gap-1.5 text-xs text-gray-600">
+                <span className="text-gray-300 font-mono w-4 text-right flex-shrink-0">{i+1}</span>
+                <span className="truncate">{h}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
+
+      {/* Errors */}
+      {errors.length > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 max-h-40 overflow-y-auto">
+          <p className="text-xs font-semibold text-red-700 mb-1">⚠️ Import errors:</p>
+          {errors.map((e, i) => <p key={i} className="text-xs text-red-600">• {e}</p>)}
+        </div>
+      )}
+
       <div className="flex gap-3">
-        <button onClick={onClickImport} disabled={!rows||importing} className="btn-primary">{importing?'⏳…':`✅ Import ${rows?.length||0} Policies`}</button>
+        <button onClick={onClickImport} disabled={!rows || importing} className="btn-primary">
+          {importing ? '⏳ Importing…' : `✅ Import ${rows?.length || 0} ${policyType} Policies`}
+        </button>
         <button onClick={onClose} className="btn-secondary">Cancel</button>
       </div>
+    </div>
+  )
+}
+
+// ── Import type selector modal ────────────────────────────────
+function ImportModal({ clients, onClose, onImported }) {
+  const [type, setType] = useState(null) // null | 'Health' | 'Life' | 'Motor'
+
+  if (type === 'Health') return (
+    <TypedImportModal policyType="Health" icon="🏥" color="green"
+      headers={HEALTH_IMPORT_HEADERS} sample={HEALTH_IMPORT_SAMPLE} parseRow={parseHealthRow}
+      clients={clients} onClose={onClose} onImported={onImported} />
+  )
+  if (type === 'Life') return (
+    <TypedImportModal policyType="Life" icon="🛡️" color="purple"
+      headers={LIFE_IMPORT_HEADERS} sample={LIFE_IMPORT_SAMPLE} parseRow={parseLifeRow}
+      clients={clients} onClose={onClose} onImported={onImported} />
+  )
+  if (type === 'Motor') return (
+    <TypedImportModal policyType="Motor" icon="🚗" color="orange"
+      headers={MOTOR_IMPORT_HEADERS} sample={MOTOR_IMPORT_SAMPLE} parseRow={parseMotorRow}
+      clients={clients} onClose={onClose} onImported={onImported} />
+  )
+
+  // Type selector screen
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-gray-600">Choose the type of policies you want to import. Each type has its own template with the correct columns.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {[
+          { type:'Health', icon:'🏥', color:'green',  desc:'Sum Insured, Members, Coverage details',    cols: HEALTH_IMPORT_HEADERS.length },
+          { type:'Life',   icon:'🛡️', color:'purple', desc:'Sum Assured, PPT, Policy Term, Sub-type',   cols: LIFE_IMPORT_HEADERS.length   },
+          { type:'Motor',  icon:'🚗', color:'orange', desc:'Registration No, IDV, NCB, Vehicle details', cols: MOTOR_IMPORT_HEADERS.length  },
+        ].map(({ type: t, icon, color, desc, cols }) => {
+          const bg = { green:'bg-green-50 border-green-200 hover:bg-green-100', purple:'bg-purple-50 border-purple-200 hover:bg-purple-100', orange:'bg-orange-50 border-orange-200 hover:bg-orange-100' }[color]
+          const tx = { green:'text-green-700', purple:'text-purple-700', orange:'text-orange-700' }[color]
+          return (
+            <button key={t} onClick={() => setType(t)}
+                    className={`${bg} border rounded-2xl p-5 text-left transition-all hover:shadow-md cursor-pointer`}>
+              <p className="text-3xl mb-2">{icon}</p>
+              <p className={`font-bold text-base ${tx}`}>{t} Policies</p>
+              <p className="text-xs text-gray-500 mt-1">{desc}</p>
+              <p className="text-xs text-gray-400 mt-2">{cols} columns</p>
+            </button>
+          )
+        })}
+      </div>
+      <button onClick={onClose} className="btn-secondary w-full">Cancel</button>
     </div>
   )
 }
@@ -545,11 +782,15 @@ export default function PoliciesPage() {
   const { clients }           = useClients()
   const { policies, loading } = usePolicies()
   const { isAdmin }           = useAuth()
-  const [search,     setSearch]     = useState('')
-  const [typeFilter, setTypeFilter] = useState('All')
-  const [modal,      setModal]      = useState(null)
-  const [selected,   setSelected]   = useState(null)
-  const [delOpen,    setDelOpen]    = useState(false)
+  const [search,      setSearch]      = useState('')
+  const [typeFilter,  setTypeFilter]  = useState('All')
+  const [modal,       setModal]       = useState(null)
+  const [selected,    setSelected]    = useState(null)
+  const [delOpen,     setDelOpen]     = useState(false)
+  // Bulk delete
+  const [selectedIds,  setSelectedIds]  = useState(new Set())
+  const [bulkDelOpen,  setBulkDelOpen]  = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -560,12 +801,51 @@ export default function PoliciesPage() {
     })
   }, [policies, search, typeFilter])
 
+  // ── Duplicate detector ───────────────────────────────────
+  const [dupWarning, setDupWarning] = useState('')
+  const checkDup = useCallback(async (policyNumber) => {
+    if (!policyNumber?.trim()) { setDupWarning(''); return }
+    const exists = await checkDuplicatePolicyNumber(policyNumber)
+    setDupWarning(exists ? `⚠️ Policy number "${policyNumber}" already exists in your database!` : '')
+  }, [])
+
+  // ── WhatsApp helper ──────────────────────────────────────
+  const openWhatsApp = (policy) => {
+    const client = clients.find(c => c.id === policy.clientId)
+    const mobile = client?.mobile?.replace(/\D/g,'')
+    if (!mobile) { toast.error('No mobile number on file for this client'); return }
+    const expiry  = fmtDate(policy.expiryDate)
+    const premium = policy.premium ? `₹${Number(policy.premium).toLocaleString('en-IN')}` : ''
+    const msg = encodeURIComponent(
+      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy (${policy.insurer} - ${policy.planName || ''}) is due for renewal.\n\n📋 Policy No: ${policy.policyNumber}\n📅 Expiry Date: ${expiry}\n💰 Premium: ${premium}\n\nKindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\nFor any assistance, please contact us.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory`
+    )
+    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+  }
+
+  // ── Bulk select ──────────────────────────────────────────
+  const allFilteredIds = filtered.map(p => p.id)
+  const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.has(id))
+  const someSelected   = allFilteredIds.some(id => selectedIds.has(id))
+  const toggleOne  = id => setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
+  const toggleAll  = () => {
+    if (allSelected) setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.delete(id)); return n })
+    else             setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.add(id)); return n })
+  }
+  const clearSel = () => setSelectedIds(new Set())
+
+  const onBulkDelete = async () => {
+    setBulkDeleting(true)
+    try { await bulkDeletePolicies([...selectedIds]); toast.success(`✅ ${selectedIds.size} policies deleted`); clearSel(); setBulkDelOpen(false) }
+    catch(err) { toast.error(err.message) }
+    finally { setBulkDeleting(false) }
+  }
+
   const onAdd    = async form => { await addPolicy(form);                toast.success('Policy added!');   setModal(null) }
   const onEdit   = async form => { await updatePolicy(selected.id,form); toast.success('Policy updated!'); setModal(null) }
   const onDelete = async ()   => { await deletePolicy(selected.id);      toast.success('Policy deleted') }
 
   if (loading) return (
-    <div className="p-8 text-gray-400 flex items-center gap-2">
+    <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
       <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading policies…
     </div>
   )
@@ -573,18 +853,22 @@ export default function PoliciesPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-bold text-gray-900">Policies</h1><p className="text-sm text-gray-500">{policies.length} total</p></div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Policies</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{policies.length} total</p>
+        </div>
         <div className="flex gap-2 flex-wrap">
           {isAdmin&&<button className="btn-secondary" onClick={()=>setModal('import')}>⬆ Import</button>}
-          <button className="btn-primary" onClick={()=>{setSelected(null);setModal('add')}}>+ Add Policy</button>
+          <button className="btn-primary" onClick={()=>{setSelected(null);setDupWarning('');setModal('add')}}>+ Add Policy</button>
         </div>
       </div>
+
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
         <SearchBar value={search} onChange={setSearch} placeholder="Policy No, client, insurer…" />
         <div className="flex gap-1 flex-wrap">
           {['All',...TYPES].map(t=>(
             <button key={t} onClick={()=>setTypeFilter(t)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${typeFilter===t?'bg-blue-600 text-white':'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>{t}</button>
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${typeFilter===t?'bg-blue-600 text-white':'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>{t}</button>
           ))}
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
@@ -593,57 +877,87 @@ export default function PoliciesPage() {
           <button onClick={()=>exportToPDF(filtered,POLICY_COLS,'Policy List','policies')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
+      {/* Duplicate warning */}
+      {dupWarning && (
+        <div className="bg-orange-50 dark:bg-orange-900/30 border border-orange-300 rounded-xl px-4 py-3 text-sm text-orange-700 dark:text-orange-300 font-semibold">
+          {dupWarning}
+        </div>
+      )}
+      {/* Bulk delete bar */}
+      {someSelected && (
+        <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-xl px-4 py-3">
+          <span className="text-sm font-semibold text-red-700 dark:text-red-300">{selectedIds.size} policies selected</span>
+          <button onClick={()=>setBulkDelOpen(true)} className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">🗑️ Delete Selected</button>
+          <button onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
+        </div>
+      )}
       <div className="table-container">
-        <table className="min-w-full"><thead><tr>
-          {['Policy No','Client','Type','Insurer','Premium','Expiry','Days','Yr','Status','FY%','RY%','PDF','Actions'].map(h=>(
-            <th key={h} className="table-header">{h}</th>
-          ))}
-        </tr></thead>
-        <tbody className="bg-white">
-          {filtered.length===0
-            ?<tr><td colSpan={13} className="text-center text-gray-400 py-10">No policies found</td></tr>
-            :filtered.map(p=>{
-              const st=renewalStatus(p.expiryDate)
-              const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
-              return(
-                <tr key={p.id} className="table-row">
-                  <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
-                  <td className="table-cell font-medium">{p.clientName||'—'}</td>
-                  <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
-                  <td className="table-cell text-xs">{p.insurer}</td>
-                  <td className="table-cell">{fmtCurrency(p.premium)}</td>
-                  <td className="table-cell">{fmtDate(p.expiryDate)}</td>
-                  <td className="table-cell">{daysUntil(p.expiryDate)!==null?`${daysUntil(p.expiryDate)}d`:'—'}</td>
-                  <td className="table-cell text-xs text-center text-gray-500">{p.policyYear?`Y${p.policyYear}`:'Y1'}</td>
-                  <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
-                  <td className="table-cell text-xs text-center text-blue-600 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>
-                  <td className="table-cell text-xs text-center text-green-600 font-semibold">{p.ryCommission?`${p.ryCommission}%`:'—'}</td>
-                  <td className="table-cell text-center">
-                    {p.policyPdfUrl?<a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">📄 View</a>:<span className="text-xs text-gray-300">—</span>}
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex gap-1">
-                      <button onClick={()=>{setSelected(p);setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Edit</button>
-                      {isAdmin&&<button onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100">Del</button>}
-                    </div>
-                  </td>
-                </tr>
-              )
-            })
-          }
-        </tbody></table>
+        <table className="min-w-full">
+          <thead><tr>
+            <th className="table-header w-10">
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
+            </th>
+            {['Policy No','Client','Type','Insurer','Premium','Expiry','Days','Yr','Status','FY%','RY%','WhatsApp','PDF','Actions'].map(h=>(
+              <th key={h} className="table-header">{h}</th>
+            ))}
+          </tr></thead>
+          <tbody className="bg-white dark:bg-gray-800">
+            {filtered.length===0
+              ?<tr><td colSpan={15} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
+              :filtered.map(p=>{
+                const st=renewalStatus(p.expiryDate)
+                const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
+                return(
+                  <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''}`}>
+                    <td className="table-cell">
+                      <input type="checkbox" checked={selectedIds.has(p.id)} onChange={()=>toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
+                    </td>
+                    <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
+                    <td className="table-cell font-medium">{p.clientName||'—'}</td>
+                    <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
+                    <td className="table-cell text-xs">{p.insurer}</td>
+                    <td className="table-cell">{fmtCurrency(p.premium)}</td>
+                    <td className="table-cell">{fmtDate(p.expiryDate)}</td>
+                    <td className="table-cell">{daysUntil(p.expiryDate)!==null?`${daysUntil(p.expiryDate)}d`:'—'}</td>
+                    <td className="table-cell text-xs text-center text-gray-500 dark:text-gray-400">{p.policyYear?`Y${p.policyYear}`:'Y1'}</td>
+                    <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
+                    <td className="table-cell text-xs text-center text-blue-600 dark:text-blue-400 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>
+                    <td className="table-cell text-xs text-center text-green-600 dark:text-green-400 font-semibold">{p.ryCommission?`${p.ryCommission}%`:'—'}</td>
+                    <td className="table-cell text-center">
+                      <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
+                    </td>
+                    <td className="table-cell text-center">
+                      {p.policyPdfUrl
+                        ?<a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
+                        :<span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex gap-1">
+                        <button onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                        {isAdmin&&<button onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })
+            }
+          </tbody>
+        </table>
       </div>
       <Modal open={modal==='add'} onClose={()=>setModal(null)} title="Add New Policy" size="xl">
-        <PolicyForm clients={clients} onSave={onAdd} onCancel={()=>setModal(null)} />
+        <PolicyForm clients={clients} onSave={onAdd} onCancel={()=>setModal(null)} onPolicyNumberChange={checkDup} dupWarning={dupWarning} />
       </Modal>
       <Modal open={modal==='edit'} onClose={()=>setModal(null)} title="Edit Policy" size="xl">
-        {selected&&<PolicyForm initial={selected} clients={clients} onSave={onEdit} onCancel={()=>setModal(null)} />}
+        {selected&&<PolicyForm initial={selected} clients={clients} onSave={onEdit} onCancel={()=>setModal(null)} onPolicyNumberChange={()=>{}} dupWarning="" />}
       </Modal>
-      <Modal open={modal==='import'} onClose={()=>setModal(null)} title="📥 Import Policies" size="lg">
+      <Modal open={modal==='import'} onClose={()=>setModal(null)} title="📥 Import Policies — Choose Type" size="lg">
         <ImportModal clients={clients} onClose={()=>setModal(null)} onImported={()=>{}} />
       </Modal>
       <ConfirmDialog open={delOpen} onClose={()=>setDelOpen(false)} onConfirm={onDelete}
                      title="Delete Policy?" message={`Delete "${selected?.policyNumber}"?`} danger />
+      <ConfirmDialog open={bulkDelOpen} onClose={()=>setBulkDelOpen(false)} onConfirm={onBulkDelete}
+                     title={`Delete ${selectedIds.size} Policies?`}
+                     message={`Permanently delete ${selectedIds.size} selected policies? Cannot be undone.`} danger />
     </div>
   )
 }

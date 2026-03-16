@@ -1,8 +1,9 @@
 // src/pages/ClientsPage.jsx
 import { useState, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
-import { addClient, updateClient, deleteClient, getDocMeta } from '../firebase/firestore'
+import { addClient, cascadeUpdateClient, deleteClient, bulkDeleteClients, getDocMeta } from '../firebase/firestore'
 import { uploadClientDocument, deleteClientDocument } from '../firebase/storage'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal        from '../components/ui/Modal'
@@ -158,12 +159,20 @@ function DocumentManager({ clientId }) {
 export default function ClientsPage() {
   const { clients, loading } = useClients()
   const { policies }         = usePolicies()
+  const navigate = useNavigate()
   const [search,    setSearch]    = useState('')
   const [kycFilter, setKycFilter] = useState('All')
   const [modal,     setModal]     = useState(null)
   const [selected,  setSelected]  = useState(null)
   const [delOpen,   setDelOpen]   = useState(false)
   const [showGapsOnly, setShowGapsOnly] = useState(false)
+  // Bulk select state
+  const [selectedIds,  setSelectedIds]  = useState(new Set())
+  const [bulkDelOpen,  setBulkDelOpen]  = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  // Birthday greeting
+  const [greetingClient, setGreetingClient] = useState(null)
+  const [greetingMsg,    setGreetingMsg]    = useState('')
 
   // Pre-compute per-client data
   const clientData = useMemo(() =>
@@ -189,9 +198,56 @@ export default function ClientsPage() {
 
   const kycBadge = s => s==='Complete'?'badge-green':s==='In Progress'?'badge-yellow':'badge-red'
 
-  const onAdd    = async form => { await addClient(form);               toast.success('Client added!');   setModal(null) }
-  const onEdit   = async form => { await updateClient(selected.id,form); toast.success('Client updated!'); setModal(null) }
-  const onDelete = async ()   => { await deleteClient(selected.id);      toast.success('Client deleted') }
+  const onAdd    = async form => { await addClient(form);                       toast.success('Client added!');   setModal(null) }
+  const onEdit   = async form => { await cascadeUpdateClient(selected.id,form); toast.success('Client updated — changes reflected everywhere!'); setModal(null) }
+  const onDelete = async ()   => { await deleteClient(selected.id);             toast.success('Client deleted') }
+
+  // ── Birthday greeting generator ──────────────────────────
+  const openGreeting = (client) => {
+    const policies_count = policies.filter(p => p.clientId === client.id && p.status === 'Active').length
+    const msg = `🎂 Dear ${client.name},\n\nWishing you a very Happy Birthday! 🎉\n\nMay this special day bring you joy, good health, and prosperity.\n\nThank you for trusting *Gohil Investments* with your financial and insurance needs. We are committed to protecting what matters most to you.\n\nYou currently have ${policies_count} active polic${policies_count===1?'y':'ies'} with us. If you need any assistance or wish to review your coverage, we are always here to help.\n\nOnce again, Happy Birthday! 🎈\n\n*Harshdip Gohil*\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📍 Bhavnagar, Gujarat`
+    setGreetingClient(client)
+    setGreetingMsg(msg)
+    setModal('greeting')
+  }
+
+  const sendBirthdayWA = () => {
+    const mobile = greetingClient?.mobile?.replace(/\D/g,'')
+    if (!mobile) { toast.error('No mobile number'); return }
+    window.open(`https://wa.me/91${mobile}?text=${encodeURIComponent(greetingMsg)}`, '_blank')
+  }
+
+  // Bulk select helpers
+  const allFilteredIds = filtered.map(c => c.id)
+  const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.has(id))
+  const someSelected   = allFilteredIds.some(id => selectedIds.has(id))
+
+  const toggleOne = id => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.delete(id)); return n })
+    } else {
+      setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.add(id)); return n })
+    }
+  }
+  const clearSelection = () => setSelectedIds(new Set())
+
+  const onBulkDelete = async () => {
+    setBulkDeleting(true)
+    try {
+      await bulkDeleteClients([...selectedIds])
+      toast.success(`✅ ${selectedIds.size} client(s) deleted`)
+      clearSelection()
+      setBulkDelOpen(false)
+    } catch(err) { toast.error(err.message) }
+    finally { setBulkDeleting(false) }
+  }
 
   if (loading) return (
     <div className="p-8 text-gray-400 flex items-center gap-2">
@@ -236,11 +292,38 @@ export default function ClientsPage() {
         </div>
       </div>
 
+      {/* Bulk delete action bar — appears when any row is selected */}
+      {someSelected && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <span className="text-sm font-semibold text-red-700">
+            {selectedIds.size} client{selectedIds.size > 1 ? 's' : ''} selected
+          </span>
+          <button onClick={() => setBulkDelOpen(true)}
+                  className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">
+            🗑️ Delete Selected
+          </button>
+          <button onClick={clearSelection}
+                  className="px-3 py-1.5 bg-white border border-red-200 text-red-600 text-xs font-semibold rounded-lg hover:bg-red-50">
+            ✕ Clear Selection
+          </button>
+          <span className="text-xs text-red-500 ml-auto">
+            ⚠️ This will also delete all linked policies
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       <div className="table-container">
         <table className="min-w-full">
           <thead>
             <tr>
+              <th className="table-header w-10">
+                <input type="checkbox"
+                       checked={allSelected}
+                       onChange={toggleAll}
+                       className="w-4 h-4 cursor-pointer"
+                       title={allSelected ? 'Deselect all' : 'Select all visible'} />
+              </th>
               {['Name','Mobile','Email','PAN','Policies','KYC','Birthday','Coverage Gaps','Actions'].map(h=>(
                 <th key={h} className="table-header">{h}</th>
               ))}
@@ -250,7 +333,13 @@ export default function ClientsPage() {
             {filtered.length===0
               ? <tr><td colSpan={9} className="text-center text-gray-400 py-10">No clients found</td></tr>
               : filtered.map(c=>(
-                <tr key={c.id} className={`table-row ${c._bday!==null?'bg-pink-50/40':''}`}>
+                <tr key={c.id} className={`table-row ${selectedIds.has(c.id)?'bg-blue-50':c._bday!==null?'bg-pink-50/40':''}`}>
+                  <td className="table-cell">
+                    <input type="checkbox"
+                           checked={selectedIds.has(c.id)}
+                           onChange={()=>toggleOne(c.id)}
+                           className="w-4 h-4 cursor-pointer" />
+                  </td>
                   <td className="table-cell">
                     <span className="font-semibold text-gray-900 cursor-pointer hover:text-blue-600"
                           onClick={()=>{setSelected(c);setModal('view')}}>{c.name}</span>
@@ -284,8 +373,11 @@ export default function ClientsPage() {
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-1">
-                      <button onClick={()=>{setSelected(c);setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Edit</button>
-                      <button onClick={()=>{setSelected(c);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100">Del</button>
+                      <button onClick={()=>{setSelected(c);setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                      {c._bday !== null && c._bday <= 7 && (
+                        <button onClick={()=>openGreeting(c)} className="px-2 py-1 text-xs bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 rounded hover:bg-pink-100" title="Send Birthday Greeting">🎂</button>
+                      )}
+                      <button onClick={()=>{setSelected(c);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
                     </div>
                   </td>
                 </tr>
@@ -348,6 +440,46 @@ export default function ClientsPage() {
       <ConfirmDialog open={delOpen} onClose={()=>setDelOpen(false)} onConfirm={onDelete}
                      title="Delete Client?"
                      message={`This will permanently delete "${selected?.name}" and all linked policies.`} danger />
+
+      {/* Birthday greeting modal */}
+      <Modal open={modal==='greeting'} onClose={()=>setModal(null)} title={`🎂 Birthday Greeting — ${greetingClient?.name}`} size="lg">
+        <div className="space-y-4">
+          <div className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-3">
+            <p className="text-xs text-pink-700 dark:text-pink-300 font-semibold">
+              🎈 {greetingClient?._bday === 0 ? "Today is their birthday!" : `Birthday in ${greetingClient?._bday} day(s)`}
+            </p>
+          </div>
+          <div>
+            <label className="form-label">WhatsApp Message</label>
+            <textarea
+              value={greetingMsg}
+              onChange={e => setGreetingMsg(e.target.value)}
+              className="form-input font-mono text-xs"
+              rows={14}
+            />
+          </div>
+          <div className="flex gap-3">
+            <button onClick={sendBirthdayWA} className="btn-whatsapp text-sm px-4 py-2">
+              📱 Send via WhatsApp
+            </button>
+            <button onClick={() => { navigator.clipboard.writeText(greetingMsg); toast.success('Copied!') }}
+                    className="btn-secondary">
+              📋 Copy Message
+            </button>
+            <button onClick={() => setModal(null)} className="btn-secondary">Close</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={bulkDelOpen}
+        onClose={()=>setBulkDelOpen(false)}
+        onConfirm={onBulkDelete}
+        title={`Delete ${selectedIds.size} Client${selectedIds.size>1?'s':''}?`}
+        message={`This will permanently delete ${selectedIds.size} client${selectedIds.size>1?'s':''} and ALL their linked policies. This cannot be undone.`}
+        danger
+      />
     </div>
   )
 }

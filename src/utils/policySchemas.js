@@ -1,174 +1,203 @@
 // src/utils/policySchemas.js
-// Defines type-specific data structures for Health, Life, Motor policies.
-// Base fields (policyNumber, clientId, insurer, premium, dates etc.) live in PoliciesPage.
-// These schemas define the EXTRA fields rendered per policy type.
+// ─────────────────────────────────────────────────────────────
+// v4 — added Star Health & New India Assurance specific fields
+// ─────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────
 // HEALTH SCHEMA
-// ─────────────────────────────────────────────────────────────
 export const HEALTH_DEFAULTS = {
-  // Coverage
-  sumInsured:          '',   // ₹ — primary coverage amount
-  cumulativeBonus:     '',   // ₹ — accrued NCB/CB on policy
-  cumulativeBonusPct:  '',   // % — bonus rate
-  roomRentLimit:       '',   // ₹/day or 'No Limit'
-  coPay:               '',   // % co-pay on claims
-  restoreBenefit:      false,// boolean toggle
-  // Portability
-  isPortability:       false,
-  prevInsurer:         '',
-  prevPolicyNo:        '',
-  portabilityNCB:      '',   // ₹ NCB carried over from prev insurer
-  // Waiting period anchor
-  dateOfFirstEntry:    '',   // ISO date — used to calc PED waiting period remaining
-  // Members list (Family Floater / Group)
-  members: [
-    { name:'', dob:'', age:'', relationship:'Self', ped:'' },
-    { name:'', dob:'', age:'', relationship:'Spouse', ped:'' },
-  ],
+  sumInsured:         '',
+  cumulativeBonus:    '',
+  cumulativeBonusPct: '',
+  roomRentLimit:      '',
+  coPay:              '',
+  restoreBenefit:     false,
+  dateOfFirstEntry:   '',
+  isPortability:      false,
+  prevInsurer:        '',
+  prevPolicyNo:       '',
+  portabilityNCB:     '',
+  members:            [],
+  // Star Health specific
+  starHospitalCash:   '',       // Daily hospital cash benefit
+  starAyush:          false,    // AYUSH treatment cover
+  starModernTreatment: false,   // Modern treatment cover
+  starNRIBenefit:     false,    // NRI benefit rider
+  starWellness:       false,    // Star Wellness program enrolled
+  // General health add-ons
+  criticalIllness:    false,
+  maternityBenefit:   false,
+  dentalOpd:          false,
+  visionOpd:          false,
+  opdCover:           '',       // OPD limit ₹
 }
 
-export const HEALTH_RELATIONSHIPS = ['Self','Spouse','Son','Daughter','Father','Mother','Father-in-Law','Mother-in-Law','Other']
+export const HEALTH_RELATIONSHIPS = [
+  'Self','Spouse','Son','Daughter','Father','Mother',
+  'Father-in-Law','Mother-in-Law','Brother','Sister','Other'
+]
 
-// ─────────────────────────────────────────────────────────────
 // LIFE SCHEMA
-// ─────────────────────────────────────────────────────────────
 export const LIFE_DEFAULTS = {
-  sumAssured:       '',   // ₹ death benefit
-  ppt:              '',   // Premium Paying Term in years
-  policyTerm:       '',   // Total policy term in years
-  maturityDate:     '',   // ISO date (auto-calc from startDate + policyTerm)
-  policySubType:    'Term', // Term | Endowment | ULIP | Money-Back | Whole Life
-  // Loan
-  loanAgainstPolicy: false,
-  surrenderValue:   '',   // ₹ current surrender value (manual)
-  // Nominee
+  sumAssured:       '',
+  policySubType:    'Term',
+  ppt:              '',
+  policyTerm:       '',
+  maturityDate:     '',
+  surrenderValue:   '',
+  loanAgainstPolicy:'',
+  smoker:           false,
   nomineeName:      '',
   nomineeRelation:  '',
   nomineeDob:       '',
   nomineePan:       '',
-  // Appointee (if nominee is minor)
   appointeeName:    '',
   appointeeRelation:'',
-  // Life health data
-  height:           '',
-  weight:           '',
-  smoker:           false,
-  familyIllness:    '',
+  // LIC specific
+  licBonusAdditions: '',    // Bonus additions to date
+  licFAB:            '',    // Final Additional Bonus
+  licLoyaltyAddition:'',   // Loyalty addition
+  licPolicyStatus:   '',   // From LIC Mitra: active/paid up/surrendered
+  licMode:           '',   // Quarterly/Half-yearly/Yearly
+  // General life add-ons
+  accidentalDeath:   false,
+  criticalIllness:   false,
+  waiverOfPremium:   false,
+  returnOfPremium:   false,
 }
 
-export const LIFE_SUBTYPES = ['Term','Endowment','ULIP','Money-Back','Whole Life','Pension','Child Plan']
+export const LIFE_SUBTYPES = [
+  'Term','Endowment','ULIP','Money-Back','Whole Life',
+  'Pension','Child Plan','Guaranteed Return'
+]
 
-// ─────────────────────────────────────────────────────────────
 // MOTOR SCHEMA
-// ─────────────────────────────────────────────────────────────
 export const MOTOR_DEFAULTS = {
-  // Vehicle identity
-  vehicleType:      '4W',   // 2W | 4W | Commercial | Trailer
-  registrationNo:   '',
-  make:             '',     // e.g. Maruti, Hyundai
-  model:            '',     // e.g. Swift, Creta
-  variant:          '',
-  year:             '',     // manufacturing year
-  fuelType:         'Petrol',
-  engineNo:         '',
-  chassisNo:        '',
-  colour:           '',
-  // Cover
-  coverType:        'Comprehensive',  // Comprehensive | Third Party | OD Only
-  idv:              '',   // ₹ Insured Declared Value
-  ncbPct:           '0',  // % 0/20/25/35/45/50
-  prevNcbPct:       '0',  // % carried from last year
-  // Add-ons (Comprehensive only)
+  vehicleType:       '4W',
+  registrationNo:    '',
+  make:              '',
+  model:             '',
+  variant:           '',
+  year:              '',
+  fuelType:          'Petrol',
+  engineNo:          '',
+  chassisNo:         '',
+  coverType:         'Comprehensive',
+  idv:               '',
+  ncbPct:            '0',
+  prevNcbPct:        '0',
   addons: {
     zeroDep:          false,
     engineProtect:    false,
-    rsa:              false,       // Roadside Assistance
+    rsa:              false,
     keyReplace:       false,
     consumables:      false,
     returnToInvoice:  false,
     tyreProtect:      false,
     personalAccident: false,
+    // New India Assurance specific
+    legalLiability:   false,   // Legal liability to paid driver
+    imtEndorsements:  '',      // IMT endorsement numbers
   },
-  // Finance / hypothecation
-  isHypothecated:   false,
-  hypothecationBank:'',
-  // TP details
-  tpPolicyNo:       '',    // if OD-only, store separate TP policy no
-  tpInsurer:        '',
-  tpExpiry:         '',
+  isHypothecated:    false,
+  hypothecationBank: '',
+  tpPolicyNo:        '',
+  tpInsurer:         '',
+  tpExpiry:          '',
+  // New India Assurance specific
+  niaSurveyorName:   '',      // Surveyor assigned for claims
+  niaOfficeCode:     '',      // NIA office/branch code
+  niaGdRef:          '',      // GD reference number for theft
 }
 
-export const MOTOR_VEHICLE_TYPES = ['2W','4W','Commercial','Trailer']
-export const MOTOR_FUEL_TYPES    = ['Petrol','Diesel','CNG','Electric','Hybrid']
-export const MOTOR_COVER_TYPES   = ['Comprehensive','Third Party','OD Only']
+export const MOTOR_VEHICLE_TYPES = ['2W','4W','Commercial','Trailer','Construction Equipment']
+export const MOTOR_FUEL_TYPES    = ['Petrol','Diesel','CNG','Electric','Hybrid','CNG+Petrol']
+export const MOTOR_COVER_TYPES   = ['Comprehensive','Third Party','OD Only','Standalone TP']
 export const MOTOR_NCB_OPTIONS   = ['0','20','25','35','45','50']
 
-// ─────────────────────────────────────────────────────────────
-// HELPER: get blank schema for a type
-// ─────────────────────────────────────────────────────────────
+// STAR HEALTH specific plan names
+export const STAR_HEALTH_PLANS = [
+  'Star Comprehensive','Medi Classic','Family Health Optima',
+  'Senior Citizens Red Carpet','Diabetes Safe','Cardiac Care',
+  'Cancer Care Platinum','Arogya Sanjeevani','Young Star',
+  'Star Women Care','Star Critical Illness','Star Accident Care',
+]
+
+// NEW INDIA ASSURANCE specific plan names
+export const NEW_INDIA_PLANS = [
+  'New India Floater Mediclaim','New India Mediclaim Policy',
+  'New India Top Up Mediclaim','Senior Citizen Mediclaim',
+  'Arogya Sanjeevani','Jan Arogya','New India Janata Mediclaim',
+  'Vehicle Insurance','Householder','Fire & Burglary',
+]
+
+// ── Type defaults ─────────────────────────────────────────────
 export function getTypeDefaults(policyType) {
-  switch (policyType) {
+  switch(policyType) {
     case 'Health': return { ...HEALTH_DEFAULTS }
-    case 'Life':   return { ...LIFE_DEFAULTS }
-    case 'Motor':  return { ...MOTOR_DEFAULTS }
+    case 'Life':   return { ...LIFE_DEFAULTS   }
+    case 'Motor':  return { ...MOTOR_DEFAULTS  }
     default:       return {}
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// KYC LOCKED FIELDS (used during renewal — these are read-only)
-// ─────────────────────────────────────────────────────────────
+// ── Insurer detection ─────────────────────────────────────────
+export function isStarHealth(insurer) {
+  return (insurer||'').toLowerCase().includes('star')
+}
+export function isNewIndia(insurer) {
+  return (insurer||'').toLowerCase().includes('new india')
+}
+export function isLIC(insurer) {
+  return (insurer||'').toLowerCase().includes('lic') || (insurer||'').toLowerCase().includes('life insurance corporation')
+}
+
+// ── KYC locked fields ─────────────────────────────────────────
 export const KYC_LOCKED_FIELDS = ['clientName','dob','gender','pan','aadhar']
 
-// ─────────────────────────────────────────────────────────────
-// COVERAGE GAP RULES (used for cross-sell flags on ClientsPage)
-// Each rule: given existing policy types → flag if missing type
-// ─────────────────────────────────────────────────────────────
+// ── Coverage gap rules ────────────────────────────────────────
 export const COVERAGE_GAP_RULES = [
   {
-    id:       'no_health',
-    label:    'No Health Cover',
-    color:    'bg-red-100 text-red-700',
-    requires: [],          // always check
-    missing:  'Health',
+    id: 'no-health',
+    label: '🏥 No Health Cover',
+    color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+    check: (policies) => !policies.some(p =>
+      p.policyType === 'Health' && p.status === 'Active'
+    ),
   },
   {
-    id:       'no_life',
-    label:    'No Life Cover',
-    color:    'bg-orange-100 text-orange-700',
-    requires: [],
-    missing:  'Life',
+    id: 'no-life',
+    label: '🛡️ No Life Cover',
+    color: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+    check: (policies) => !policies.some(p =>
+      p.policyType === 'Life' && p.status === 'Active'
+    ),
   },
   {
-    id:       'no_term',
-    label:    'No Term Plan',
-    color:    'bg-yellow-100 text-yellow-700',
-    requires: ['Life'],    // only flag if has some Life (but not Term sub-type — checked separately)
-    missing:  '__term__',  // special — checked via policySubType === 'Term'
+    id: 'no-term',
+    label: '📋 No Term Plan',
+    color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+    check: (policies) => !policies.some(p =>
+      p.policyType === 'Life' && p.policySubType === 'Term' && p.status === 'Active'
+    ),
   },
   {
-    id:       'no_motor',
-    label:    'No Motor Cover',
-    color:    'bg-blue-100 text-blue-700',
-    requires: ['__has_motor_hint__'], // flag if registration no exists in any policy
-    missing:  'Motor',
+    id: 'no-motor',
+    label: '🚗 No Motor Cover',
+    color: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    check: (policies) => !policies.some(p =>
+      p.policyType === 'Motor' && p.status === 'Active'
+    ),
+  },
+  {
+    id: 'no-critical',
+    label: '❤️ No Critical Illness',
+    color: 'bg-pink-100 text-pink-700 dark:bg-pink-900 dark:text-pink-300',
+    check: (policies) => !policies.some(p =>
+      (p.criticalIllness || p.policyType === 'Life' && p.policySubType?.includes('Critical')) && p.status === 'Active'
+    ),
   },
 ]
 
 export function computeCoverageGaps(clientPolicies) {
-  const types = new Set(clientPolicies.filter(p => p.status === 'Active').map(p => p.policyType))
-  const gaps  = []
-
-  if (!types.has('Health')) gaps.push({ id:'no_health', label:'No Health Cover', color:'bg-red-100 text-red-700' })
-  if (!types.has('Life'))   gaps.push({ id:'no_life',   label:'No Life Cover',   color:'bg-orange-100 text-orange-700' })
-  if (types.has('Life')) {
-    const hasTermPlan = clientPolicies.some(p => p.status==='Active' && p.policyType==='Life' && p.policySubType==='Term')
-    if (!hasTermPlan) gaps.push({ id:'no_term', label:'No Term Plan', color:'bg-yellow-100 text-yellow-700' })
-  }
-  if (!types.has('Motor') && clientPolicies.some(p => p.registrationNo)) {
-    gaps.push({ id:'no_motor', label:'No Motor Cover', color:'bg-blue-100 text-blue-700' })
-  }
-
-  return gaps
+  return COVERAGE_GAP_RULES.filter(rule => rule.check(clientPolicies))
 }

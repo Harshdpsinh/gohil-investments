@@ -43,12 +43,79 @@ export async function getAllClients() {
 export async function updateClient(id, data) {
   return updateDoc(doc(db,CLIENTS,id), { ...data, updatedAt: serverTimestamp() })
 }
+
+/**
+ * cascadeUpdateClient(id, data)
+ *
+ * Updates the client record AND propagates the new name to every
+ * linked policy's clientName field in one batch write.
+ * This ensures global consistency — editing a client name reflects
+ * everywhere: Policies, Renewals, Claims, Proposals tables.
+ */
+export async function cascadeUpdateClient(id, data) {
+  const batch = writeBatch(db)
+
+  // 1. Update the client document itself
+  batch.update(doc(db, CLIENTS, id), { ...data, updatedAt: serverTimestamp() })
+
+  // 2. If name changed, propagate to all linked policies
+  if (data.name) {
+    const pols = await getDocs(query(collection(db, POLICIES), where('clientId', '==', id)))
+    pols.docs.forEach(d => {
+      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
+    })
+    // Propagate to claims
+    const cls = await getDocs(query(collection(db, CLAIMS), where('clientId', '==', id)))
+    cls.docs.forEach(d => {
+      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
+    })
+    // Propagate to tasks
+    const tsk = await getDocs(query(collection(db, TASKS), where('clientId', '==', id)))
+    tsk.docs.forEach(d => {
+      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
+    })
+  }
+
+  return batch.commit()
+}
+
 export async function deleteClient(id) {
   const pols = await getDocs(query(collection(db,POLICIES), where('clientId','==',id)))
   const batch = writeBatch(db)
   pols.docs.forEach(d => batch.delete(d.ref))
   batch.delete(doc(db,CLIENTS,id))
   return batch.commit()
+}
+
+/**
+ * bulkDeleteClients(ids[])
+ *
+ * Deletes multiple clients and all their linked policies in one
+ * batched operation. Firestore batches support max 500 ops —
+ * this function chunks automatically for large selections.
+ */
+export async function bulkDeleteClients(ids) {
+  // Gather all policy refs for these clients
+  const allPolicyRefs = []
+  for (const id of ids) {
+    const pols = await getDocs(query(collection(db, POLICIES), where('clientId', '==', id)))
+    pols.docs.forEach(d => allPolicyRefs.push(d.ref))
+  }
+
+  // Chunk into batches of 400 (safe under 500 limit)
+  const allRefs = [
+    ...ids.map(id => doc(db, CLIENTS, id)),
+    ...allPolicyRefs,
+  ]
+  const chunks = []
+  for (let i = 0; i < allRefs.length; i += 400) {
+    chunks.push(allRefs.slice(i, i + 400))
+  }
+  for (const chunk of chunks) {
+    const batch = writeBatch(db)
+    chunk.forEach(ref => batch.delete(ref))
+    await batch.commit()
+  }
 }
 export function subscribeClients(callback) {
   return onSnapshot(query(clientsRef(), orderBy('createdAt','desc')),
@@ -96,6 +163,30 @@ export async function updatePolicy(id, data) {
   return updateDoc(doc(db,POLICIES,id), { ...data, updatedAt: serverTimestamp() })
 }
 export async function deletePolicy(id) { return deleteDoc(doc(db,POLICIES,id)) }
+
+/**
+ * bulkDeletePolicies(ids[])
+ * Deletes multiple policies in chunked batches.
+ */
+export async function bulkDeletePolicies(ids) {
+  const chunks = []
+  for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
+  for (const chunk of chunks) {
+    const batch = writeBatch(db)
+    chunk.forEach(id => batch.delete(doc(db, POLICIES, id)))
+    await batch.commit()
+  }
+}
+
+/**
+ * checkDuplicatePolicyNumber(policyNumber)
+ * Returns true if a policy with this number already exists.
+ */
+export async function checkDuplicatePolicyNumber(policyNumber) {
+  if (!policyNumber?.trim()) return false
+  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
+  return !s.empty
+}
 export function subscribePolicies(callback) {
   return onSnapshot(query(policiesRef(), orderBy('expiryDate','asc')),
     s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))

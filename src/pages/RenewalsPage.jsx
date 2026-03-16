@@ -1,6 +1,7 @@
 // src/pages/RenewalsPage.jsx
 import { useState, useMemo } from 'react'
-import { usePolicies }  from '../hooks/usePolicies'
+import { usePolicies } from '../hooks/usePolicies'
+import { useClients }  from '../hooks/useClients'
 import { saveRenewal, getPolicyChain } from '../firebase/firestore'
 import { fmtDate, fmtCurrency, daysUntil } from '../utils/dateUtils'
 import { exportToCSV, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
@@ -419,34 +420,95 @@ function RenewalForm({ policy, onSave, onCancel }) {
 // ── Main Page ─────────────────────────────────────────────────
 export default function RenewalsPage() {
   const { policies, loading } = usePolicies()
-  const [dayWindow, setDayWindow]   = useState(30)
-  const [search,    setSearch]      = useState('')
-  const [typeTab,   setTypeTab]     = useState('All')
-  const [renewModal, setRenewModal] = useState(null)   // policy object
-  const [compareModal, setCompareModal] = useState(null) // { current, previous }
+  const { clients }           = useClients()
+  const [dayWindow,    setDayWindow]    = useState(30)
+  const [search,       setSearch]       = useState('')
+  const [typeTab,      setTypeTab]      = useState('All')
+  const [categoryTab,  setCategoryTab]  = useState('All')  // All / Health / Life / Motor / General
+  const [renewModal,   setRenewModal]   = useState(null)
+  const [compareModal, setCompareModal] = useState(null)
   const [loadingChain, setLoadingChain] = useState(false)
+  const [selectedIds,  setSelectedIds]  = useState(new Set())
+  const [bulkWAOpen,   setBulkWAOpen]   = useState(false)
+
+  // Build client mobile lookup map
+  const clientMap = useMemo(() => {
+    const m = {}
+    clients.forEach(c => { m[c.id] = c })
+    return m
+  }, [clients])
+
+  // Category → policy types mapping
+  const CATEGORY_MAP = {
+    'Health':  ['Health'],
+    'Life':    ['Life'],
+    'Motor':   ['Motor'],
+    'General': ['Home','Travel','Marine','Fire','Other'],
+  }
 
   const renewals = useMemo(() => {
     const q = search.toLowerCase()
     return policies.filter(p => {
       const d = daysUntil(p.expiryDate)
       if (d === null) return false
-      const inWindow = dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)
+      const inWindow  = dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)
       if (!inWindow) return false
+      const matchCat  = categoryTab === 'All' || (CATEGORY_MAP[categoryTab]||[]).includes(p.policyType)
       const matchType = typeTab === 'All' || p.policyType === typeTab
-      const matchQ = !q ||
-        p.clientName?.toLowerCase().includes(q) ||
-        p.policyNumber?.toLowerCase().includes(q) ||
-        p.insurer?.toLowerCase().includes(q)
-      // Only show Active (not already Renewed-Out/Archived)
-      return matchType && matchQ && p.status === 'Active'
+      const matchQ    = !q || p.clientName?.toLowerCase().includes(q) ||
+                              p.policyNumber?.toLowerCase().includes(q) ||
+                              p.insurer?.toLowerCase().includes(q)
+      return matchCat && matchType && matchQ && p.status === 'Active'
     }).sort((a,b) => daysUntil(a.expiryDate) - daysUntil(b.expiryDate))
-  }, [policies, dayWindow, search, typeTab])
+  }, [policies, dayWindow, search, typeTab, categoryTab])
+
+  // Count per category for badges
+  const categoryCounts = useMemo(() => {
+    const base = policies.filter(p => {
+      const d = daysUntil(p.expiryDate)
+      return d !== null && (dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)) && p.status === 'Active'
+    })
+    return {
+      All:     base.length,
+      Health:  base.filter(p => p.policyType === 'Health').length,
+      Life:    base.filter(p => p.policyType === 'Life').length,
+      Motor:   base.filter(p => p.policyType === 'Motor').length,
+      General: base.filter(p => ['Home','Travel','Marine','Fire','Other'].includes(p.policyType)).length,
+    }
+  }, [policies, dayWindow])
 
   const types = useMemo(() => {
     const s = new Set(policies.map(p=>p.policyType).filter(Boolean))
     return ['All',...s]
   }, [policies])
+
+  // Bulk select
+  const allIds  = renewals.map(p => p.id)
+  const allSel  = allIds.length > 0 && allIds.every(id => selectedIds.has(id))
+  const someSel = allIds.some(id => selectedIds.has(id))
+  const toggleOne = id => setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
+  const toggleAll = () => {
+    if (allSel) setSelectedIds(prev => { const n=new Set(prev); allIds.forEach(id=>n.delete(id)); return n })
+    else        setSelectedIds(prev => { const n=new Set(prev); allIds.forEach(id=>n.add(id)); return n })
+  }
+  const clearSel = () => setSelectedIds(new Set())
+
+  // Get mobile from client record
+  const getClientMobile = (policy) => {
+    const client = clientMap[policy.clientId]
+    return (client?.mobile || policy.mobile || policy.phone || '').replace(/\D/g,'')
+  }
+
+  // WhatsApp single
+  const openWhatsApp = (policy) => {
+    const mobile = getClientMobile(policy)
+    if (!mobile) { toast.error('No mobile number for this client — add it in the Clients page'); return }
+    const days = daysUntil(policy.expiryDate)
+    const msg = encodeURIComponent(
+      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy is due for renewal${days !== null && days >= 0 ? ` in *${days} days*` : ' — it has expired'}.\n\n📋 Policy No: ${policy.policyNumber}\n🏢 Insurer: ${policy.insurer}\n📅 Expiry: ${fmtDate(policy.expiryDate)}\n💰 Premium: ₹${Number(policy.premium||0).toLocaleString('en-IN')}\n\nPlease contact us to renew your policy at the earliest.\n\n*Gohil Investments*\n📍 Bhavnagar, Gujarat`
+    )
+    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+  }
 
   const onSaveRenewal = async (newData) => {
     await saveRenewal(renewModal.id, newData)
@@ -456,15 +518,13 @@ export default function RenewalsPage() {
 
   const onViewCompare = async (policy) => {
     setLoadingChain(true)
-    try {
-      const chain = await getPolicyChain(policy.id)
-      setCompareModal(chain)
-    } catch(err) { toast.error(err.message) }
+    try { const chain = await getPolicyChain(policy.id); setCompareModal(chain) }
+    catch(err) { toast.error(err.message) }
     finally { setLoadingChain(false) }
   }
 
   if (loading) return (
-    <div className="p-8 text-gray-400 flex items-center gap-2">
+    <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
       <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
       Loading renewals…
     </div>
@@ -474,8 +534,8 @@ export default function RenewalsPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Renewal Tracker</h1>
-          <p className="text-sm text-gray-500">{renewals.length} policies · from {policies.length} total</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Renewal Tracker</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{renewals.length} policies · from {policies.length} total</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <button onClick={() => exportToCSV(renewals, POLICY_COLS, 'renewals')} className="btn-secondary text-xs">⬇ CSV</button>
@@ -497,56 +557,127 @@ export default function RenewalsPage() {
         ))}
       </div>
 
+      {/* Category tabs — Health / Life / Motor / General / All */}
+      <div className="flex gap-1 flex-wrap border-b border-gray-200 dark:border-gray-700 pb-1">
+        {[
+          { key:'All',     label:'All',     icon:'📋' },
+          { key:'Health',  label:'Health',  icon:'🏥' },
+          { key:'Life',    label:'Life',    icon:'🛡️' },
+          { key:'Motor',   label:'Motor',   icon:'🚗' },
+          { key:'General', label:'General', icon:'🏠' },
+        ].map(({ key, label, icon }) => (
+          <button key={key} onClick={() => { setCategoryTab(key); setTypeTab('All') }}
+                  className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors border-b-2
+                    ${categoryTab===key
+                      ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
+            {icon} {label}
+            <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold
+              ${categoryTab===key ? 'bg-blue-100 text-blue-700 dark:bg-blue-800 dark:text-blue-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+              {categoryCounts[key] || 0}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
         <div className="flex gap-1 flex-wrap">
           {WINDOW_OPTIONS.map(w => (
             <button key={w.days} onClick={() => setDayWindow(w.days)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                dayWindow===w.days ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                dayWindow===w.days ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}>{w.label}</button>
           ))}
         </div>
-        <div className="flex gap-1 flex-wrap">
-          {types.map(t => (
-            <button key={t} onClick={() => setTypeTab(t)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                typeTab===t ? 'bg-green-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}>{t}</button>
-          ))}
-        </div>
-        <input type="search" placeholder="Search…" value={search}
-               onChange={e=>setSearch(e.target.value)} className="form-input w-52" />
+        <input type="search" placeholder="Search client, policy, insurer…" value={search}
+               onChange={e=>setSearch(e.target.value)} className="form-input w-60" />
       </div>
+
+      {/* Bulk WhatsApp bar */}
+      {someSel && (
+        <div className="flex items-center gap-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl px-4 py-3">
+          <span className="text-sm font-semibold text-green-700 dark:text-green-300">{selectedIds.size} policies selected</span>
+          <button onClick={() => setBulkWAOpen(true)}
+                  className="px-4 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700">
+            📱 WhatsApp All Selected
+          </button>
+          <button onClick={clearSel}
+                  className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-green-200 text-green-700 dark:text-green-300 text-xs font-semibold rounded-lg">
+            ✕ Clear
+          </button>
+        </div>
+      )}
+
+      {/* Bulk WhatsApp info modal */}
+      <Modal open={bulkWAOpen} onClose={() => setBulkWAOpen(false)} title="📱 Bulk WhatsApp Renewal Reminders" size="md">
+        <div className="space-y-4">
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-xl p-4">
+            <p className="text-sm font-semibold text-green-700 dark:text-green-300">
+              Send renewal reminders to {selectedIds.size} clients
+            </p>
+            <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+              Each WhatsApp will open separately in a new tab. Allow popups if blocked.
+            </p>
+          </div>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {renewals.filter(p => selectedIds.has(p.id)).map(p => (
+              <div key={p.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{p.clientName}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{p.policyNumber} · {fmtDate(p.expiryDate)} · 📱 {getClientMobile(p)||'No mobile'}</p>
+                </div>
+                <button onClick={() => openWhatsApp(p)} className="btn-whatsapp text-xs">📱 Send</button>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => {
+              renewals.filter(p => selectedIds.has(p.id)).forEach((p, i) => {
+                setTimeout(() => openWhatsApp(p), i * 500)
+              })
+              setBulkWAOpen(false)
+              clearSel()
+            }} className="btn-success">📱 Send All ({selectedIds.size})</button>
+            <button onClick={() => setBulkWAOpen(false)} className="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Table */}
       <div className="table-container">
         <table className="min-w-full">
           <thead>
             <tr>
+              <th className="table-header w-10">
+                <input type="checkbox" checked={allSel} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
+              </th>
               {['#','Client','Phone','Policy No','Type','Insurer','Premium','Expiry','Yr','Status','Actions'].map(h=>(
                 <th key={h} className="table-header">{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white">
+          <tbody className="bg-white dark:bg-gray-800">
             {renewals.length === 0
-              ? <tr><td colSpan={11} className="text-center py-12 text-gray-400">🎉 No renewals in this window</td></tr>
+              ? <tr><td colSpan={12} className="text-center py-12 text-gray-400 dark:text-gray-500">🎉 No renewals in this window</td></tr>
               : renewals.map((p,i) => (
-                <tr key={p.id} className={`table-row ${
-                  daysUntil(p.expiryDate)<0   ? 'bg-red-50'    :
-                  daysUntil(p.expiryDate)<=15 ? 'bg-orange-50' :
-                  daysUntil(p.expiryDate)<=30 ? 'bg-yellow-50' : ''
+                <tr key={p.id} className={`table-row ${selectedIds.has(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' :
+                  daysUntil(p.expiryDate)<0   ? 'bg-red-50 dark:bg-red-900/10'    :
+                  daysUntil(p.expiryDate)<=15 ? 'bg-orange-50 dark:bg-orange-900/10' :
+                  daysUntil(p.expiryDate)<=30 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''
                 }`}>
-                  <td className="table-cell text-gray-400">{i+1}</td>
+                  <td className="table-cell">
+                    <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
+                  </td>
+                  <td className="table-cell text-gray-400 dark:text-gray-500">{i+1}</td>
                   <td className="table-cell font-semibold">{p.clientName||'—'}</td>
-                  <td className="table-cell text-xs">{p.mobile||p.phone||'—'}</td>
+                  <td className="table-cell text-xs">{getClientMobile(p) || '—'}</td>
                   <td className="table-cell font-mono text-xs">{p.policyNumber}</td>
                   <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                   <td className="table-cell">{p.insurer}</td>
                   <td className="table-cell">{fmtCurrency(p.premium)}</td>
                   <td className="table-cell">{fmtDate(p.expiryDate)}</td>
-                  <td className="table-cell text-center text-xs text-gray-500 font-semibold">
+                  <td className="table-cell text-center text-xs text-gray-500 dark:text-gray-400 font-semibold">
                     {p.policyYear ? `Y${p.policyYear}` : 'Y1'}
                   </td>
                   <td className="table-cell">{statusBadge(daysUntil(p.expiryDate))}</td>
@@ -558,10 +689,10 @@ export default function RenewalsPage() {
                       </button>
                       <button onClick={() => onViewCompare(p)}
                               disabled={loadingChain}
-                              className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200">
+                              className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
                         {loadingChain ? '…' : '📊 Compare'}
                       </button>
-                      <WhatsAppButton policy={p} />
+                      <button onClick={() => openWhatsApp(p)} className="btn-whatsapp">📱</button>
                     </div>
                   </td>
                 </tr>
