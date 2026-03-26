@@ -1,5 +1,5 @@
 // src/components/layout/Layout.jsx
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Sidebar from './Sidebar'
 
 export default function Layout({ children }) {
@@ -36,8 +36,18 @@ export default function Layout({ children }) {
           </div>
           <div className="w-9" />
         </header>
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto" id="main-scroll" onScroll={e => {
+          const btn = document.getElementById('back-to-top')
+          if (btn) btn.classList.toggle('visible', e.target.scrollTop > 300)
+        }}>
           <div className="page-enter">{children}</div>
+          <button
+            id="back-to-top"
+            className="back-to-top"
+            onClick={() => document.getElementById('main-scroll')?.scrollTo({ top: 0, behavior: 'smooth' })}
+            title="Back to top">
+            ↑
+          </button>
         </main>
       </div>
     </div>

@@ -6,7 +6,7 @@ import { addDocMeta, deleteDocMeta } from './firestore'
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 
-function cloudinaryUpload(file, folder, onProgress = () => {}, resourceType = 'image') {
+function cloudinaryUpload(file, folder, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     if (!CLOUD || !PRESET) {
       reject(new Error('Cloudinary not configured.')); return
@@ -20,7 +20,9 @@ function cloudinaryUpload(file, folder, onProgress = () => {}, resourceType = 'i
     fd.append('public_id',     `${Date.now()}_${baseName}`)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${resourceType}/upload`, true)
+    // Always use /auto/upload — works for images, PDFs, all file types
+    // Unsigned presets support /auto/ but NOT /raw/
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/auto/upload`, true)
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -38,7 +40,7 @@ function cloudinaryUpload(file, folder, onProgress = () => {}, resourceType = 'i
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  const meta  = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress, isPdf ? 'raw' : 'image')
+  const meta  = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress)
   await addDocMeta(clientId, meta)
   return meta
 }
@@ -50,6 +52,6 @@ export async function deleteClientDocument(clientId, docId) {
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
   if (!isPdf) throw new Error('Only PDF files are allowed.')
-  const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress, 'raw')
+  const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress)
   return { url: meta.url, name: meta.name }
 }

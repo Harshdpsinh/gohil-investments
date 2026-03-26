@@ -2,9 +2,10 @@
 import { useState, useMemo } from 'react'
 import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
+import { useAuth }       from '../hooks/useAuth'
 import { updatePolicy } from '../firebase/firestore'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
-import { fmtDate, fmtCurrency } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
 import toast from 'react-hot-toast'
 import { format, parseISO, isValid } from 'date-fns'
@@ -63,6 +64,15 @@ function CommCell({ policyId, field, value }) {
 export default function CommissionPage() {
   const { policies, loading } = usePolicies()
   const { clients }           = useClients()
+  const { isAdmin }           = useAuth()
+
+  // Fix #12: block non-admin direct URL access
+  if (!isAdmin) return (
+    <div className="p-8 text-center">
+      <p className="text-2xl mb-2">🔒</p>
+      <p className="text-gray-600 dark:text-gray-400 font-medium">Access restricted to administrators only.</p>
+    </div>
+  )
   const [search,      setSearch]      = useState('')
   const [typeFilter,  setTypeFilter]  = useState('All')
   const [yearFilter,  setYearFilter]  = useState('All')  // FY1 / FY2+
@@ -88,7 +98,7 @@ export default function CommissionPage() {
       let mM = true
       if (monthFilter !== 'All' && p.startDate) {
         try {
-          const d = p.startDate?.seconds ? new Date(p.startDate.seconds*1000) : parseISO(p.startDate)
+          const d = parseAnyDate(p.startDate)
           mM = isValid(d) && d.getMonth() === MONTHS.indexOf(monthFilter)
         } catch { mM = true }
       }
@@ -109,7 +119,7 @@ export default function CommissionPage() {
       byInsurer[p.insurer]  = (byInsurer[p.insurer]  || 0) + p.totalComm
       if (p.startDate) {
         try {
-          const d = p.startDate?.seconds ? new Date(p.startDate.seconds*1000) : parseISO(p.startDate)
+          const d = parseAnyDate(p.startDate)
           if (isValid(d)) byMonth[d.getMonth()] += p.totalComm
         } catch {}
       }
@@ -142,7 +152,7 @@ export default function CommissionPage() {
         <div className="flex gap-2 flex-wrap">
           <button onClick={()=>exportToCSV(filtered,COMM_COLS,'commission')} className="btn-secondary text-xs">⬇ CSV</button>
           <button onClick={()=>exportToExcel(filtered,COMM_COLS,'Commission','commission')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={()=>exportToPDF(filtered,COMM_COLS,'Commission Report','commission')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={async()=>await exportToPDF(filtered,COMM_COLS,'Commission Report','commission')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
 

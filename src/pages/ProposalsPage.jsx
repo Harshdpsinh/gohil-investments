@@ -11,6 +11,42 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { fmtDateTime } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
 
+// ── Known insurers (shared with PoliciesPage) ─────────────────
+const KNOWN_INSURERS_LIST = [
+  'Star Health & Allied Insurance','New India Assurance','ICICI Lombard',
+  'HDFC ERGO','Bajaj Allianz','Niva Bupa (Max Bupa)','Care Health Insurance',
+  'Aditya Birla Health Insurance','Tata AIG','Oriental Insurance',
+  'United India Insurance','National Insurance','LIC of India',
+  'HDFC Life','ICICI Prudential Life','SBI Life','Max Life Insurance',
+  'Bajaj Allianz Life','Kotak Life Insurance','Tata AIA Life',
+  'HDFC ERGO Motor','Bajaj Allianz Motor','Digit Insurance',
+]
+function InsurerCombo({ value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ]       = useState(value || '')
+  const filtered = q.length >= 1
+    ? KNOWN_INSURERS_LIST.filter(i => i.toLowerCase().includes(q.toLowerCase())).slice(0,8)
+    : KNOWN_INSURERS_LIST.slice(0,8)
+  const pick = name => { setQ(name); onChange(name); setOpen(false) }
+  return (
+    <div className="relative">
+      <input type="text" value={q}
+        onChange={e=>{ setQ(e.target.value); onChange(e.target.value); setOpen(true) }}
+        onFocus={()=>setOpen(true)} onBlur={()=>setTimeout(()=>setOpen(false),150)}
+        placeholder="Type or select insurer…" className="form-input" />
+      {open && (
+        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+          {filtered.map(ins=>(
+            <button key={ins} type="button" onMouseDown={()=>pick(ins)}
+              className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30">{ins}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 const POLICY_TYPES = ['Health','Life','General']
 const PLAN_TYPES   = ['Individual','Family Floater','Group']
 const FREQS        = ['Yearly','Half-Yearly','Quarterly','Monthly']
@@ -223,7 +259,9 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
       <fieldset className="border border-gray-200 rounded-xl p-4 space-y-3">
         <legend className="text-xs font-bold text-blue-700 uppercase px-2">2. Plan Summary</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {inp('insurer','Insurance Company','text',{ placeholder:'e.g. ICICI Lombard' })}
+          <div><label className="form-label">Insurance Company</label>
+            <InsurerCombo value={form.insurer||''} onChange={v=>setForm(p=>({...p,insurer:v}))} />
+          </div>
           {inp('planName','Plan Name')}
           {inp('sumAssured','Sum Insured/Assured (₹)','number')}
           {inp('premium','Annual Premium (₹)','number')}
@@ -331,11 +369,11 @@ export default function ProposalsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-5">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Proposals</h1>
-          <p className="text-sm text-gray-500">{proposals.length} saved proposals</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Proposals</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{proposals.length} saved proposals</p>
         </div>
         <button className="btn-primary" onClick={() => { setSelected(null); setModal('add') }}>
           + New Proposal
@@ -356,7 +394,7 @@ export default function ProposalsPage() {
                   ))}
                 </tr>
               </thead>
-              <tbody className="bg-white">
+              <tbody className="bg-white dark:bg-gray-800">
                 {proposals.length === 0
                   ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No proposals yet.</td></tr>
                   : proposals.map(p => (

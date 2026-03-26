@@ -1,9 +1,9 @@
 // src/pages/RenewalsPage.jsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { usePolicies } from '../hooks/usePolicies'
 import { useClients }  from '../hooks/useClients'
 import { saveRenewal, getPolicyChain } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, daysUntil } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, daysUntil, parseAnyDate, toInputDate, computeNextPremiumDue, daysUntilPremium, normaliseFrequency, frequencyDays } from '../utils/dateUtils'
 import { exportToCSV, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
@@ -12,6 +12,68 @@ import {
 } from '../utils/policySchemas'
 import Modal from '../components/ui/Modal'
 import toast from 'react-hot-toast'
+
+// ── Known insurers for renewal form dropdown ───────────────────
+const KNOWN_INSURERS = [
+  // Health
+  'Star Health & Allied Insurance','New India Assurance','ICICI Lombard',
+  'HDFC ERGO','Bajaj Allianz','Niva Bupa (Max Bupa)','Care Health Insurance',
+  'Aditya Birla Health Insurance','Tata AIG','Oriental Insurance',
+  'United India Insurance','National Insurance','ManipalCigna Health Insurance',
+  'Reliance Health Insurance','SBI Health Insurance',
+  // Life
+  'LIC of India','HDFC Life','ICICI Prudential Life','SBI Life',
+  'Max Life Insurance','Bajaj Allianz Life','Kotak Life Insurance',
+  'Tata AIA Life','Aditya Birla Sun Life','PNB MetLife',
+  'Canara HSBC Life','Edelweiss Tokio Life','IndiaFirst Life',
+  // Motor
+  'HDFC ERGO Motor','New India Assurance Motor','Bajaj Allianz Motor',
+  'ICICI Lombard Motor','Reliance General Insurance','Tata AIG Motor',
+  'Royal Sundaram','Shriram General Insurance','Digit Insurance',
+  'Kotak Mahindra General Insurance','Zuno General Insurance',
+  // General
+  'Tata AIG General Insurance','Bajaj Allianz General Insurance',
+  'ICICI Lombard General Insurance','SBI General Insurance',
+]
+
+function InsurerSelect({ value, onChange }) {
+  const [open,  setOpen]  = useState(false)
+  const [query, setQuery] = useState(value || '')
+  const ref = useRef(null)
+
+  useEffect(() => { setQuery(value || '') }, [value])
+  useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const filtered = query.length >= 1
+    ? KNOWN_INSURERS.filter(i => i.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : KNOWN_INSURERS.slice(0, 8)
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        type="text" value={query} className="form-input"
+        placeholder="Type or select insurer…"
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && filtered.length > 0 && (
+        <ul className="absolute z-50 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg mt-1 max-h-48 overflow-y-auto">
+          {filtered.map(ins => (
+            <li key={ins}
+                className="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 text-gray-800 dark:text-gray-200"
+                onMouseDown={() => { onChange(ins); setQuery(ins); setOpen(false) }}>
+              {ins}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 const WINDOW_OPTIONS = [
   { label:'Overdue',    days:-1   },
@@ -46,56 +108,13 @@ const WA_TEMPLATE = (p) =>
   `*${fmtDate(p.expiryDate)}*.\n\n` +
   `💰 Premium: *${fmtCurrency(p.premium)}*\n` +
   `🔁 Frequency: ${p.frequency || 'Yearly'}\n\n` +
-  `Please contact us to process the renewal.\n\nRegards,\nHarshdipsinh Gohil\nGohil Investments\n7698997894`
+  `Please contact us to process the renewal.\n\n*Gohil Investments*
+Wealth Management & Insurance Advisory
+📞 *Harshdipsinh Gohil* — 7698997894
+📞 Pradipsinh Gohil — 9426204547
+📍 Bhavnagar, Gujarat`
 
-let waTabRef = null
-function openWhatsApp(policy, useWeb = false) {
-  const phone = (policy.mobile || policy.phone || '').replace(/\D/g, '')
-  const msg   = encodeURIComponent(WA_TEMPLATE(policy))
-  if (!useWeb) {
-    const iframe = document.createElement('iframe')
-    iframe.style.cssText = 'display:none;width:0;height:0;border:none;'
-    iframe.src = phone ? `whatsapp://send?phone=91${phone}&text=${msg}` : `whatsapp://send?text=${msg}`
-    document.body.appendChild(iframe)
-    setTimeout(() => { try { document.body.removeChild(iframe) } catch(_) {} }, 3000)
-    toast.success('Opening WhatsApp Desktop…', { duration:2500 })
-    return
-  }
-  const url = phone
-    ? `https://web.whatsapp.com/send?phone=91${phone}&text=${msg}`
-    : `https://web.whatsapp.com/send?text=${msg}`
-  if (waTabRef && !waTabRef.closed) { waTabRef.location.href = url; waTabRef.focus() }
-  else waTabRef = window.open(url, 'gohil_whatsapp')
-}
-
-function WhatsAppButton({ policy }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative">
-      <div className="flex">
-        <button onClick={() => { openWhatsApp(policy,false); setOpen(false) }}
-                title="Open in WhatsApp Desktop"
-                className="px-2 py-1 text-xs bg-green-500 text-white rounded-l hover:bg-green-600">📱 WA</button>
-        <button onClick={() => setOpen(p=>!p)}
-                className="px-1 py-1 text-xs bg-green-600 text-white rounded-r border-l border-green-400 hover:bg-green-700">▾</button>
-      </div>
-      {open && (
-        <div className="absolute right-0 top-8 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-56 py-1">
-          <button onClick={() => { openWhatsApp(policy,false); setOpen(false) }}
-                  className="w-full text-left px-4 py-2.5 text-xs hover:bg-gray-50 flex items-center gap-2">
-            <span className="text-base">📱</span>
-            <div><p className="font-semibold text-gray-800">WhatsApp Desktop</p><p className="text-gray-400">No new tab</p></div>
-          </button>
-          <button onClick={() => { openWhatsApp(policy,true); setOpen(false) }}
-                  className="w-full text-left px-4 py-2.5 text-xs hover:bg-gray-50 flex items-center gap-2">
-            <span className="text-base">🌐</span>
-            <div><p className="font-semibold text-gray-800">WhatsApp Web</p><p className="text-gray-400">Reuses 1 tab</p></div>
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
+// WhatsApp handled by component-level openWhatsApp with clientMap lookup
 
 // ── Comparison Panel ──────────────────────────────────────────
 function ComparisonPanel({ current, previous, onClose }) {
@@ -162,7 +181,7 @@ function ComparisonPanel({ current, previous, onClose }) {
           <span className="w-3 h-3 rounded bg-gray-100 inline-block ml-2"></span> Same
         </div>
       </div>
-      <div className="overflow-auto rounded-xl border border-gray-200">
+      <div className="overflow-auto rounded-xl border border-gray-200 dark:border-gray-700">
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
@@ -177,7 +196,7 @@ function ComparisonPanel({ current, previous, onClose }) {
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-100">
+          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
             {rows.map(([field, prev, curr]) => (
               <tr key={field} className={prev === curr ? '' : 'hover:bg-gray-50'}>
                 <td className="table-cell text-gray-500 font-medium">{field}</td>
@@ -217,12 +236,18 @@ function RenewalForm({ policy, onSave, onCancel }) {
       nomineeRelation: policy.nomineeRelation || '',
       notes:        policy.notes         || '',
       // Auto-calc new dates: start = old expiry, new expiry = old expiry + 1yr
-      startDate:  policy.expiryDate || '',
+      startDate: toInputDate(policy.expiryDate) || '',
       expiryDate: (() => {
-        if (!policy.expiryDate) return ''
-        const d = new Date(policy.expiryDate)
-        d.setFullYear(d.getFullYear() + 1)
-        return d.toISOString().split('T')[0]
+        // For policies where the renewal period = frequency (Health/Motor = 1 year)
+        // For Life/long-term policies, renewal is just the next premium installment
+        const freq = normaliseFrequency(policy.frequency || 'Yearly')
+        const intervalDays = frequencyDays(freq)
+        const base = parseAnyDate(policy.expiryDate) || parseAnyDate(policy.startDate)
+        if (!base) return ''
+        // If interval is yearly (365 days), add 1 year to expiry
+        // Otherwise add the interval to the last premium date
+        const next = new Date(base.getTime() + intervalDays * 86400000)
+        return toInputDate(next) || ''
       })(),
     }
     // Merge type-specific fields from old policy
@@ -299,7 +324,10 @@ function RenewalForm({ policy, onSave, onCancel }) {
       <fieldset className="border border-blue-200 rounded-xl p-4">
         <legend className="text-xs font-bold text-blue-700 uppercase px-2">✏️ Editable — Policy Details</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-          {inp('insurer','Insurer *','text',{placeholder:'Can change for portability'})}
+          <div>
+            <label className="form-label">Insurer *</label>
+            <InsurerSelect value={form.insurer||''} onChange={v=>set('insurer',v)} />
+          </div>
           {inp('planName','Plan Name')}
           {inp('premium','New Premium (₹)','number')}
           {sel('frequency','Frequency',FREQS)}
@@ -446,27 +474,63 @@ export default function RenewalsPage() {
     'General': ['Home','Travel','Marine','Fire','Other'],
   }
 
+  // Fix #6: Type-specific max window rules
+  // Health & General policies only show if expiring within 30 days regardless of window filter
+  // Life policies show up to 60 days (premium planning needed)
+  // Motor same as Health - 30 days
+
+  // getDaysForRenewal: use nextPremiumDue (frequency-based) if available,
+  // otherwise fall back to expiryDate. This correctly handles long-term
+  // Life policies where the premium is due yearly but policy expires in 20+ years.
+  // Hoisted to component scope so both useMemo and JSX can call it.
+  const getDays = (p) => {
+    // Use nextPremiumDue if stored
+    if (p.nextPremiumDue) {
+      const d = new Date(p.nextPremiumDue)
+      if (!isNaN(d.getTime())) return Math.ceil((d - new Date()) / (1000 * 60 * 60 * 24))
+    }
+    // Compute on the fly from startDate + frequency
+    if (p.startDate) {
+      const days = daysUntilPremium(p.startDate, p.frequency)
+      if (days !== null) return days
+    }
+    // Last resort: use expiryDate
+    return daysUntil(p.expiryDate)
+  }
+
   const renewals = useMemo(() => {
     const q = search.toLowerCase()
+
     return policies.filter(p => {
-      const d = daysUntil(p.expiryDate)
-      if (d === null) return false
-      const inWindow  = dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)
+      const d = getDays(p)
+      if (d === null || isNaN(d)) return false
+      // Hide if lapsed more than 90 days ago — beyond actionable range
+      if (d < -90) return false
+      // Show: lapsed within last 30 days (d between -30 and 0)
+      //    OR: upcoming within the selected window (d between 0 and dayWindow)
+      const inWindow = dayWindow === -1
+        ? (d < 0)                    // "Overdue" button — show only lapsed
+        : (d < 0 || d <= dayWindow)  // any window — show lapsed + upcoming
       if (!inWindow) return false
       const matchCat  = categoryTab === 'All' || (CATEGORY_MAP[categoryTab]||[]).includes(p.policyType)
       const matchType = typeTab === 'All' || p.policyType === typeTab
       const matchQ    = !q || p.clientName?.toLowerCase().includes(q) ||
                               p.policyNumber?.toLowerCase().includes(q) ||
                               p.insurer?.toLowerCase().includes(q)
-      return matchCat && matchType && matchQ && p.status === 'Active'
-    }).sort((a,b) => daysUntil(a.expiryDate) - daysUntil(b.expiryDate))
+      // Only hide policies that are already Renewed-Out
+      // Lapsed/Cancelled/Matured policies MUST show so agent can take action
+      const st = (p.status || '').trim()
+      return matchCat && matchType && matchQ && st !== 'Renewed-Out'
+    }).sort((a,b) => (getDays(a)||0) - (getDays(b)||0))
   }, [policies, dayWindow, search, typeTab, categoryTab])
 
   // Count per category for badges
   const categoryCounts = useMemo(() => {
     const base = policies.filter(p => {
-      const d = daysUntil(p.expiryDate)
-      return d !== null && (dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)) && p.status === 'Active'
+      const d = getDays(p)
+      if (d === null || isNaN(d)) return false
+      const st2 = (p.status || '').trim()
+      return (dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)) && st2 !== 'Renewed-Out'
     })
     return {
       All:     base.length,
@@ -495,7 +559,14 @@ export default function RenewalsPage() {
 
   // Get mobile from client record
   const getClientMobile = (policy) => {
-    const client = clientMap[policy.clientId]
+    // Try 1: lookup by clientId (most reliable)
+    let client = clientMap[policy.clientId]
+    // Try 2: if clientId blank/wrong, match by name
+    if (!client?.mobile && policy.clientName) {
+      client = clients.find(c =>
+        c.name.toLowerCase().trim() === (policy.clientName||'').toLowerCase().trim()
+      )
+    }
     return (client?.mobile || policy.mobile || policy.phone || '').replace(/\D/g,'')
   }
 
@@ -503,9 +574,13 @@ export default function RenewalsPage() {
   const openWhatsApp = (policy) => {
     const mobile = getClientMobile(policy)
     if (!mobile) { toast.error('No mobile number for this client — add it in the Clients page'); return }
-    const days = daysUntil(policy.expiryDate)
+    const days = policy.nextPremiumDue ? Math.ceil((new Date(policy.nextPremiumDue) - new Date()) / 86400000) : daysUntil(policy.expiryDate)
     const msg = encodeURIComponent(
-      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy is due for renewal${days !== null && days >= 0 ? ` in *${days} days*` : ' — it has expired'}.\n\n📋 Policy No: ${policy.policyNumber}\n🏢 Insurer: ${policy.insurer}\n📅 Expiry: ${fmtDate(policy.expiryDate)}\n💰 Premium: ₹${Number(policy.premium||0).toLocaleString('en-IN')}\n\nPlease contact us to renew your policy at the earliest.\n\n*Gohil Investments*\n📍 Bhavnagar, Gujarat`
+      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy is due for renewal${days !== null && days >= 0 ? ` in *${days} days*` : ' — it has expired'}.\n\n📋 Policy No: ${policy.policyNumber}\n🏢 Insurer: ${policy.insurer}\n📅 Expiry: ${fmtDate(policy.expiryDate)}\n💰 Premium: ₹${Number(policy.premium||0).toLocaleString('en-IN')}\n\nPlease contact us to renew at the earliest.\n\n*Gohil Investments*
+Wealth Management & Insurance Advisory
+📞 *Harshdipsinh Gohil* — 7698997894
+📞 Pradipsinh Gohil — 9426204547
+📍 Bhavnagar, Gujarat`
     )
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
@@ -539,16 +614,16 @@ export default function RenewalsPage() {
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <button onClick={() => exportToCSV(renewals, POLICY_COLS, 'renewals')} className="btn-secondary text-xs">⬇ CSV</button>
-          <button onClick={() => exportToPDF(renewals, POLICY_COLS, 'Renewal List', 'renewals')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={async() => await exportToPDF(renewals, POLICY_COLS, 'Renewal List', 'renewals')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
 
       {/* Summary badges */}
       <div className="flex gap-3 flex-wrap">
         {[
-          { label:'Overdue',     color:'bg-red-100 text-red-800',      count: renewals.filter(p=>daysUntil(p.expiryDate)<0).length },
-          { label:'Due ≤ 15d',   color:'bg-orange-100 text-orange-800', count: renewals.filter(p=>{const d=daysUntil(p.expiryDate);return d!==null&&d>=0&&d<=15}).length },
-          { label:'Due ≤ 30d',   color:'bg-yellow-100 text-yellow-800', count: renewals.filter(p=>{const d=daysUntil(p.expiryDate);return d!==null&&d>=0&&d<=30}).length },
+          { label:'Overdue',     color:'bg-red-100 text-red-800',      count: renewals.filter(p=>getDays(p)<0).length },
+          { label:'Due ≤ 15d',   color:'bg-orange-100 text-orange-800', count: renewals.filter(p=>{const d=getDays(p);return d!==null&&d>=0&&d<=15}).length },
+          { label:'Due ≤ 30d',   color:'bg-yellow-100 text-yellow-800', count: renewals.filter(p=>{const d=getDays(p);return d!==null&&d>=0&&d<=30}).length },
           { label:'Total Shown', color:'bg-blue-100 text-blue-800',     count: renewals.length },
         ].map(b => (
           <div key={b.label} className={`${b.color} rounded-lg px-4 py-2 text-sm font-semibold`}>
@@ -652,9 +727,10 @@ export default function RenewalsPage() {
               <th className="table-header w-10">
                 <input type="checkbox" checked={allSel} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
               </th>
-              {['#','Client','Phone','Policy No','Type','Insurer','Premium','Expiry','Yr','Status','Actions'].map(h=>(
+              {['#','Client','Phone','Policy No','Type','Insurer','Premium','Next Due','Expiry','Yr','Status'].map(h=>(
                 <th key={h} className="table-header">{h}</th>
               ))}
+              <th className="table-header sticky right-0 z-20 bg-gray-50 dark:bg-gray-900 shadow-[-4px_0_8px_rgba(0,0,0,0.06)]">Actions</th>
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-800">
@@ -662,35 +738,40 @@ export default function RenewalsPage() {
               ? <tr><td colSpan={12} className="text-center py-12 text-gray-400 dark:text-gray-500">🎉 No renewals in this window</td></tr>
               : renewals.map((p,i) => (
                 <tr key={p.id} className={`table-row ${selectedIds.has(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' :
-                  daysUntil(p.expiryDate)<0   ? 'bg-red-50 dark:bg-red-900/10'    :
-                  daysUntil(p.expiryDate)<=15 ? 'bg-orange-50 dark:bg-orange-900/10' :
-                  daysUntil(p.expiryDate)<=30 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''
+                  getDays(p)<0   ? 'bg-red-50 dark:bg-red-900/10'    :
+                  getDays(p)<=15 ? 'bg-orange-50 dark:bg-orange-900/10' :
+                  getDays(p)<=30 ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''
                 }`}>
                   <td className="table-cell">
                     <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
                   </td>
                   <td className="table-cell text-gray-400 dark:text-gray-500">{i+1}</td>
                   <td className="table-cell font-semibold">{p.clientName||'—'}</td>
-                  <td className="table-cell text-xs">{getClientMobile(p) || '—'}</td>
+                  <td className="table-cell text-xs">{getClientMobile(p)
+                      ? getClientMobile(p)
+                      : <span className="text-orange-500 dark:text-orange-400 font-semibold" title="Add mobile in Clients page">⚠️ No mobile</span>}</td>
                   <td className="table-cell font-mono text-xs">{p.policyNumber}</td>
                   <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                   <td className="table-cell">{p.insurer}</td>
                   <td className="table-cell">{fmtCurrency(p.premium)}</td>
-                  <td className="table-cell">{fmtDate(p.expiryDate)}</td>
+                  <td className="table-cell font-semibold text-blue-700 dark:text-blue-400">
+                    {p.nextPremiumDue ? fmtDate(p.nextPremiumDue) : fmtDate(p.expiryDate)}
+                  </td>
+                  <td className="table-cell text-xs text-gray-400 dark:text-gray-500">{fmtDate(p.expiryDate)}</td>
                   <td className="table-cell text-center text-xs text-gray-500 dark:text-gray-400 font-semibold">
                     {p.policyYear ? `Y${p.policyYear}` : 'Y1'}
                   </td>
-                  <td className="table-cell">{statusBadge(daysUntil(p.expiryDate))}</td>
-                  <td className="table-cell">
-                    <div className="flex gap-1 items-center flex-wrap">
+                  <td className="table-cell">{statusBadge(getDays(p))}</td>
+                  <td className="table-cell sticky right-0 bg-white dark:bg-gray-800 shadow-[-4px_0_8px_rgba(0,0,0,0.04)]">
+                    <div className="flex gap-1 items-center flex-nowrap">
                       <button onClick={() => setRenewModal(p)}
-                              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                              className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">
                         🔄 Renew
                       </button>
                       <button onClick={() => onViewCompare(p)}
                               disabled={loadingChain}
                               className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
-                        {loadingChain ? '…' : '📊 Compare'}
+                        {loadingChain ? '…' : '📊'}
                       </button>
                       <button onClick={() => openWhatsApp(p)} className="btn-whatsapp">📱</button>
                     </div>

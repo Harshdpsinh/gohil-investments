@@ -46,37 +46,58 @@ export async function updateClient(id, data) {
 
 /**
  * cascadeUpdateClient(id, data)
- *
- * Updates the client record AND propagates the new name to every
- * linked policy's clientName field in one batch write.
- * This ensures global consistency — editing a client name reflects
- * everywhere: Policies, Renewals, Claims, Proposals tables.
+ * Updates the client record AND propagates name/mobile/email changes
+ * to every linked policy, claim, and task. Uses chunked batches of
+ * 400 to stay well under Firestore's 500-write-per-batch limit.
  */
 export async function cascadeUpdateClient(id, data) {
-  const batch = writeBatch(db)
-
-  // 1. Update the client document itself
-  batch.update(doc(db, CLIENTS, id), { ...data, updatedAt: serverTimestamp() })
-
-  // 2. If name changed, propagate to all linked policies
-  if (data.name) {
-    const pols = await getDocs(query(collection(db, POLICIES), where('clientId', '==', id)))
-    pols.docs.forEach(d => {
-      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
-    })
-    // Propagate to claims
-    const cls = await getDocs(query(collection(db, CLAIMS), where('clientId', '==', id)))
-    cls.docs.forEach(d => {
-      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
-    })
-    // Propagate to tasks
-    const tsk = await getDocs(query(collection(db, TASKS), where('clientId', '==', id)))
-    tsk.docs.forEach(d => {
-      batch.update(d.ref, { clientName: data.name, updatedAt: serverTimestamp() })
-    })
+  // Helper: commit a list of {ref, upd} pairs in 400-write batches
+  async function commitInChunks(pairs) {
+    for (let i = 0; i < pairs.length; i += 400) {
+      const b = writeBatch(db)
+      pairs.slice(i, i + 400).forEach(({ ref, upd }) => b.update(ref, upd))
+      await b.commit()
+    }
   }
 
-  return batch.commit()
+  // 1. Update the client document itself (its own single-write batch)
+  const clientBatch = writeBatch(db)
+  clientBatch.update(doc(db, CLIENTS, id), { ...data, updatedAt: serverTimestamp() })
+  await clientBatch.commit()
+
+  // 2. Propagate changes to all linked records
+  const hasName   = !!data.name
+  const hasMobile = data.mobile !== undefined
+  const hasEmail  = data.email  !== undefined
+
+  if (hasName || hasMobile || hasEmail) {
+    const [pols, cls, tsk] = await Promise.all([
+      getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
+      getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
+      getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
+    ])
+
+    const polPairs = pols.docs.map(d => {
+      const upd = { updatedAt: serverTimestamp() }
+      if (hasName)   upd.clientName   = data.name
+      if (hasMobile) upd.clientMobile = data.mobile
+      if (hasEmail)  upd.clientEmail  = data.email
+      return { ref: d.ref, upd }
+    })
+    const clsPairs = cls.docs.map(d => {
+      const upd = { updatedAt: serverTimestamp() }
+      if (hasName)   upd.clientName   = data.name
+      if (hasMobile) upd.clientMobile = data.mobile
+      return { ref: d.ref, upd }
+    })
+    const tskPairs = tsk.docs.map(d => {
+      const upd = { updatedAt: serverTimestamp() }
+      if (hasName) upd.clientName = data.name
+      return { ref: d.ref, upd }
+    })
+
+    await commitInChunks([...polPairs, ...clsPairs, ...tskPairs])
+  }
 }
 
 export async function deleteClient(id) {
@@ -89,40 +110,151 @@ export async function deleteClient(id) {
 
 /**
  * bulkDeleteClients(ids[])
- *
- * Deletes multiple clients and all their linked policies in one
- * batched operation. Firestore batches support max 500 ops —
- * this function chunks automatically for large selections.
+ * Deletes multiple clients and all linked policies in chunked batches.
  */
 export async function bulkDeleteClients(ids) {
-  // Gather all policy refs for these clients
   const allPolicyRefs = []
   for (const id of ids) {
     const pols = await getDocs(query(collection(db, POLICIES), where('clientId', '==', id)))
     pols.docs.forEach(d => allPolicyRefs.push(d.ref))
   }
-
-  // Chunk into batches of 400 (safe under 500 limit)
   const allRefs = [
     ...ids.map(id => doc(db, CLIENTS, id)),
     ...allPolicyRefs,
   ]
   const chunks = []
-  for (let i = 0; i < allRefs.length; i += 400) {
-    chunks.push(allRefs.slice(i, i + 400))
-  }
+  for (let i = 0; i < allRefs.length; i += 400) chunks.push(allRefs.slice(i, i + 400))
   for (const chunk of chunks) {
     const batch = writeBatch(db)
     chunk.forEach(ref => batch.delete(ref))
     await batch.commit()
   }
 }
+
+// ── CLIMER — CLIENT MERGER MODULE ─────────────────────────────
+/**
+ * mergeClients(duplicateId, masterId)
+ *
+ * Single merge: reassigns ALL data from duplicate → master then
+ * deletes the duplicate. Handles:
+ *   - Policies (reassign clientId + clientName)
+ *   - Claims   (reassign clientId + clientName)
+ *   - Tasks    (reassign clientId + clientName)
+ *   - Documents (copy subcollection docs to master, delete from dup)
+ *
+ * Returns { policiesMoved, claimsMoved, tasksMoved, docsMoved }
+ */
+export async function mergeClients(duplicateId, masterId) {
+  if (!duplicateId || !masterId) throw new Error('Both duplicate and master IDs required')
+  if (duplicateId === masterId) throw new Error('Cannot merge a client into itself')
+
+  const master = await getClient(masterId)
+  if (!master) throw new Error('Master client not found')
+  const dup = await getClient(duplicateId)
+  if (!dup) throw new Error('Duplicate client not found')
+
+  // Collect all records linked to duplicate
+  const [dupPolicies, dupClaims, dupTasks, dupDocs] = await Promise.all([
+    getDocs(query(collection(db, POLICIES), where('clientId', '==', duplicateId))),
+    getDocs(query(collection(db, CLAIMS),   where('clientId', '==', duplicateId))),
+    getDocs(query(collection(db, TASKS),    where('clientId', '==', duplicateId))),
+    getDocs(collection(db, CLIENTS, duplicateId, DOCS_META)),
+  ])
+
+  const ops = []
+
+  // Reassign policies to master
+  dupPolicies.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:     masterId,
+      clientName:   master.name,
+      clientMobile: master.mobile || dup.mobile || '',
+      clientEmail:  master.email  || dup.email  || '',
+      updatedAt:    serverTimestamp(),
+    }})
+  })
+
+  // Reassign claims to master
+  dupClaims.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:   masterId,
+      clientName: master.name,
+      updatedAt:  serverTimestamp(),
+    }})
+  })
+
+  // Reassign tasks to master
+  dupTasks.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:   masterId,
+      clientName: master.name,
+      updatedAt:  serverTimestamp(),
+    }})
+  })
+
+  // Execute reassignment in chunks of 400
+  const chunks = []
+  for (let i = 0; i < ops.length; i += 400) chunks.push(ops.slice(i, i + 400))
+  for (const chunk of chunks) {
+    const batch = writeBatch(db)
+    chunk.forEach(({ ref, data }) => batch.update(ref, data))
+    await batch.commit()
+  }
+
+  // Move documents subcollection: copy to master then delete from dup
+  let docsMoved = 0
+  for (const docSnap of dupDocs.docs) {
+    const docData = docSnap.data()
+    await addDoc(collection(db, CLIENTS, masterId, DOCS_META), {
+      ...docData,
+      movedFromClient: duplicateId,
+      movedAt: serverTimestamp(),
+    })
+    await deleteDoc(doc(db, CLIENTS, duplicateId, DOCS_META, docSnap.id))
+    docsMoved++
+  }
+
+  // Finally delete the duplicate client record
+  await deleteDoc(doc(db, CLIENTS, duplicateId))
+
+  return {
+    policiesMoved: dupPolicies.size,
+    claimsMoved:   dupClaims.size,
+    tasksMoved:    dupTasks.size,
+    docsMoved,
+  }
+}
+
+/**
+ * bulkMergeClients(duplicateIds[], masterId)
+ *
+ * Bulk merge: merges multiple duplicate clients into one master.
+ * Calls mergeClients() sequentially for each duplicate.
+ * Returns array of per-duplicate results.
+ */
+export async function bulkMergeClients(duplicateIds, masterId) {
+  if (!masterId) throw new Error('Master client ID required')
+  if (!duplicateIds?.length) throw new Error('No duplicate IDs provided')
+  const filtered = duplicateIds.filter(id => id !== masterId)
+  if (!filtered.length) throw new Error('No valid duplicates to merge')
+
+  const results = []
+  for (const dupId of filtered) {
+    try {
+      const result = await mergeClients(dupId, masterId)
+      results.push({ duplicateId: dupId, success: true, ...result })
+    } catch (err) {
+      results.push({ duplicateId: dupId, success: false, error: err.message })
+    }
+  }
+  return results
+}
+
 export function subscribeClients(callback) {
   return onSnapshot(query(clientsRef(), orderBy('createdAt','desc')),
     s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))
 }
 
-// Proposal upsert helper
 export async function findClientByMobileOrName(mobile, name) {
   const allS = await getDocs(clientsRef())
   const clients = allS.docs.map(d => ({ id:d.id, ...d.data() }))
@@ -141,14 +273,36 @@ export async function findClientByMobileOrName(mobile, name) {
 // ── POLICIES ──────────────────────────────────────────────────
 export const policiesRef = () => collection(db, POLICIES)
 
+// ── Premium due date helper ───────────────────────────────────
+function computeNextPremiumDueStr(startDate, frequency) {
+  if (!startDate) return null
+  let start
+  if (startDate?.seconds) start = new Date(startDate.seconds * 1000)
+  else { try { start = new Date(startDate) } catch { return null } }
+  if (!start || isNaN(start.getTime())) return null
+
+  const freq = (frequency||'Yearly').toLowerCase()
+  let days = 365
+  if (freq.includes('month'))  days = 30
+  else if (freq.includes('quarter') || freq.includes('3 month')) days = 90
+  else if (freq.includes('half') || freq.includes('6 month')) days = 180
+
+  const today = new Date()
+  let next = new Date(start)
+  while (next <= today) next = new Date(next.getTime() + days * 86400000)
+  return next.toISOString().split('T')[0]
+}
+
 export async function addPolicy(data) {
+  const nextPremiumDue = computeNextPremiumDueStr(data.startDate, data.frequency)
   return addDoc(policiesRef(), {
     ...data,
     parentPolicyId: data.parentPolicyId || null,
     policyYear:     data.policyYear     || 1,
+    nextPremiumDue: nextPremiumDue || null,
     renewedAt:      null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
+    createdAt:      serverTimestamp(),
+    updatedAt:      serverTimestamp()
   })
 }
 export async function getPolicy(id) {
@@ -160,14 +314,17 @@ export async function getAllPolicies() {
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
 }
 export async function updatePolicy(id, data) {
-  return updateDoc(doc(db,POLICIES,id), { ...data, updatedAt: serverTimestamp() })
+  const update = { ...data, updatedAt: serverTimestamp() }
+  if (data.startDate || data.frequency) {
+    const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
+    const start = data.startDate || existing.startDate
+    const freq  = data.frequency || existing.frequency
+    update.nextPremiumDue = computeNextPremiumDueStr(start, freq) || null
+  }
+  return updateDoc(doc(db,POLICIES,id), update)
 }
 export async function deletePolicy(id) { return deleteDoc(doc(db,POLICIES,id)) }
 
-/**
- * bulkDeletePolicies(ids[])
- * Deletes multiple policies in chunked batches.
- */
 export async function bulkDeletePolicies(ids) {
   const chunks = []
   for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
@@ -178,10 +335,32 @@ export async function bulkDeletePolicies(ids) {
   }
 }
 
-/**
- * checkDuplicatePolicyNumber(policyNumber)
- * Returns true if a policy with this number already exists.
- */
+export async function checkDuplicate(data) {
+  const { policyNumber, clientName, premium, insurer, registrationNo } = data
+
+  if (policyNumber?.trim()) {
+    const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
+    if (!s.empty) return { isDup: true, reason: `Policy number "${policyNumber}" already exists`, existing: { id: s.docs[0].id, ...s.docs[0].data() } }
+  }
+  if (registrationNo?.trim()) {
+    const s = await getDocs(query(policiesRef(), where('registrationNo', '==', registrationNo.trim()), limit(1)))
+    if (!s.empty) return { isDup: true, reason: `Registration number "${registrationNo}" already exists`, existing: { id: s.docs[0].id, ...s.docs[0].data() } }
+  }
+  if (clientName?.trim() && premium && insurer?.trim()) {
+    const s = await getDocs(query(policiesRef(),
+      where('clientName', '==', clientName.trim()),
+      where('premium',    '==', premium),
+      where('insurer',    '==', insurer.trim()),
+      limit(3)
+    ))
+    if (!s.empty) {
+      const match = s.docs[0]
+      return { isDup: true, reason: `Same client "${clientName}" + premium ₹${premium} + insurer "${insurer}" already on record (${match.data().policyNumber})`, existing: { id: match.id, ...match.data() } }
+    }
+  }
+  return { isDup: false, reason: '', existing: null }
+}
+
 export async function checkDuplicatePolicyNumber(policyNumber) {
   if (!policyNumber?.trim()) return false
   const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
@@ -198,35 +377,24 @@ export async function savePolicyPdfUrl(policyId, url, name) {
 }
 
 // ── RENEWAL VERSIONING ────────────────────────────────────────
-/**
- * saveRenewal(oldPolicyId, newPolicyData)
- *
- * Atomically:
- *   1. Marks old policy as status='Renewed-Out' + renewedAt=now
- *   2. Creates new policy with parentPolicyId=oldPolicyId, policyYear=old+1
- *
- * Returns the new policy's document reference.
- */
 export async function saveRenewal(oldPolicyId, newData) {
-  // Fetch old policy to get policyYear
   const old = await getPolicy(oldPolicyId)
   if (!old) throw new Error('Original policy not found')
 
   const batch = writeBatch(db)
-
-  // 1. Archive the old policy
   batch.update(doc(db, POLICIES, oldPolicyId), {
     status:    'Renewed-Out',
     renewedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   })
 
-  // 2. New policy document ref
   const newRef = doc(collection(db, POLICIES))
+  const newNextPremiumDue = computeNextPremiumDueStr(newData.startDate, newData.frequency)
   batch.set(newRef, {
     ...newData,
     parentPolicyId: oldPolicyId,
     policyYear:     (old.policyYear || 1) + 1,
+    nextPremiumDue: newNextPremiumDue || null,
     status:         'Active',
     renewedAt:      null,
     createdAt:      serverTimestamp(),
@@ -237,18 +405,10 @@ export async function saveRenewal(oldPolicyId, newData) {
   return newRef
 }
 
-/**
- * getPolicyChain(policyId)
- *
- * Returns { current, previous } for side-by-side comparison view.
- * previous is null if this is the first-year policy.
- */
 export async function getPolicyChain(policyId) {
   const current = await getPolicy(policyId)
   if (!current) return { current: null, previous: null }
-  const previous = current.parentPolicyId
-    ? await getPolicy(current.parentPolicyId)
-    : null
+  const previous = current.parentPolicyId ? await getPolicy(current.parentPolicyId) : null
   return { current, previous }
 }
 
@@ -279,25 +439,13 @@ export async function deleteDocMeta(clientId, docId) {
 }
 
 // ── CLAIMS ────────────────────────────────────────────────────
-// Claim statuses (pipeline order)
 export const CLAIM_STATUSES = [
-  'Intimated',
-  'Documents Submitted',
-  'Under Review',
-  'Approved',
-  'Settled',
-  'Rejected',
+  'Intimated', 'Documents Submitted', 'Under Review',
+  'Approved', 'Settled', 'Rejected',
 ]
-
 export const claimsRef = () => collection(db, CLAIMS)
-
 export async function addClaim(data) {
-  return addDoc(claimsRef(), {
-    ...data,
-    status:    data.status || 'Intimated',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  })
+  return addDoc(claimsRef(), { ...data, status: data.status || 'Intimated', createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
 }
 export async function updateClaim(id, data) {
   return updateDoc(doc(db,CLAIMS,id), { ...data, updatedAt: serverTimestamp() })
@@ -315,16 +463,9 @@ export async function getAllClaims() {
 // ── TASKS ─────────────────────────────────────────────────────
 export const TASK_PRIORITIES = ['High','Medium','Low']
 export const TASK_TYPES      = ['Call','Email','Meeting','Follow-up','Document Collection','Other']
-
 export const tasksRef = () => collection(db, TASKS)
-
 export async function addTask(data) {
-  return addDoc(tasksRef(), {
-    ...data,
-    done:      false,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  })
+  return addDoc(tasksRef(), { ...data, done: false, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
 }
 export async function updateTask(id, data) {
   return updateDoc(doc(db,TASKS,id), { ...data, updatedAt: serverTimestamp() })

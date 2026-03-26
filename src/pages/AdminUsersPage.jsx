@@ -56,13 +56,13 @@ export default function AdminUsersPage() {
   )
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">👥 User Management</h1>
-          <p className="text-sm text-gray-500">Create and manage staff login accounts</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">👥 User Management</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Create and manage staff login accounts</p>
         </div>
         <button className="btn-primary" onClick={() => setShowForm(p => !p)}>
           {showForm ? '✕ Cancel' : '+ Add Staff Account'}

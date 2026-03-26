@@ -5,7 +5,7 @@ import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
-  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient
 } from '../firebase/firestore'
 import { uploadPolicyPdf } from '../firebase/storage'
 import {
@@ -17,7 +17,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
-import { fmtDate, fmtCurrency, daysUntil, renewalStatus } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, daysUntil, renewalStatus, toInputDate, normaliseFrequency } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
   downloadTemplate, parseImportFile, normaliseDate,
@@ -339,11 +339,87 @@ function MotorSection({ form, set }) {
 }
 
 // ── Policy Form (main) ────────────────────────────────────────
-function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
+// ── Known insurers for dropdown ───────────────────────────────
+const KNOWN_INSURERS = [
+  // Health
+  'Star Health & Allied Insurance','New India Assurance','ICICI Lombard',
+  'HDFC ERGO','Bajaj Allianz','Niva Bupa (Max Bupa)','Care Health Insurance',
+  'Aditya Birla Health Insurance','Tata AIG','Oriental Insurance',
+  'United India Insurance','National Insurance','ManipalCigna Health Insurance',
+  'Reliance Health Insurance','SBI Health Insurance',
+  // Life
+  'LIC of India','HDFC Life','ICICI Prudential Life','SBI Life',
+  'Max Life Insurance','Bajaj Allianz Life','Kotak Life Insurance',
+  'Tata AIA Life','Aditya Birla Sun Life','PNB MetLife',
+  'Canara HSBC Life','Edelweiss Tokio Life','IndiaFirst Life',
+  // Motor
+  'HDFC ERGO Motor','New India Assurance Motor','Bajaj Allianz Motor',
+  'ICICI Lombard Motor','Reliance General Insurance','Tata AIG Motor',
+  'Royal Sundaram','Shriram General Insurance','Digit Insurance',
+]
+
+// ── Smart insurer combobox ────────────────────────────────────
+function InsurerSelect({ value, onChange }) {
+  const [open,    setOpen]    = useState(false)
+  const [query,   setQuery]   = useState(value || '')
+  const [focused, setFocused] = useState(false)
+
+  // Sync when value changes externally (e.g. edit mode)
+  useState(() => { setQuery(value || '') }, [value])
+
+  const filtered = query.length >= 1
+    ? KNOWN_INSURERS.filter(i => i.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : KNOWN_INSURERS.slice(0, 8)
+
+  const select = (name) => {
+    setQuery(name); onChange(name); setOpen(false)
+  }
+  const onInput = (e) => {
+    setQuery(e.target.value); onChange(e.target.value); setOpen(true)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={query}
+        onChange={onInput}
+        onFocus={() => { setFocused(true); setOpen(true) }}
+        onBlur={() => setTimeout(() => { setOpen(false); setFocused(false) }, 150)}
+        placeholder="Type or select insurer…"
+        className="form-input"
+      />
+      {open && (
+        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No match — your text will be used</div>
+          ) : (
+            filtered.map(ins => (
+              <button key={ins} type="button"
+                      onMouseDown={() => select(ins)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
+                {ins}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyNumberChange, dupWarning }) {
   const [form, setForm] = useState(() => {
     const base = initial || BASE_EMPTY
     const typeExtras = getTypeDefaults(base.policyType || 'Health')
-    return { ...typeExtras, ...base }
+    // Fix #10: convert any Firestore Timestamps to yyyy-MM-dd strings for date inputs
+    const fixDates = (obj) => {
+      const fixed = { ...obj }
+      const dateFields = ['startDate','expiryDate','maturityDate','tpExpiry','dateOfFirstEntry','dob']
+      dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
+      return fixed
+    }
+    return fixDates({ ...typeExtras, ...base })
   })
   const [saving, setSaving]         = useState(false)
   const [showQA, setShowQA]         = useState(false)
@@ -362,7 +438,10 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
   const onClientChange = e => {
     const id = e.target.value
     const cl = localClients.find(c=>c.id===id)
-    set('clientId',id); set('clientName',cl?.name||'')
+    set('clientId',  id)
+    set('clientName',cl?.name||'')
+    set('_clientMobile', cl?.mobile||'')
+    set('_clientEmail',  cl?.email||'')
   }
   const onClientCreated = nc => {
     setLocalClients(prev=>[nc,...prev])
@@ -389,7 +468,11 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
     if (!form.clientId)            { toast.error('Please select a client'); return }
     if (!form.expiryDate)          { toast.error('Expiry date required');   return }
     setSaving(true)
-    try { await onSave({...form, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
+    // Strip UI-only fields before saving to Firestore
+    const { _clientMobile: _cm, _clientEmail: _ce, ...cleanForm } = form
+    // Normalise frequency before saving
+    if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
+    try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
     finally { setSaving(false) }
   }
 
@@ -411,6 +494,23 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
                       className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-lg font-bold">+</button>
             </div>
           </div>
+          {/* Client contact info — shown after client is selected */}
+          {form.clientId && (
+            <div className={`sm:col-span-2 rounded-xl px-4 py-3 text-xs flex items-center gap-4 flex-wrap
+              ${(!form._clientMobile && !form._clientEmail)
+                ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800'
+                : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'}`}>
+              <span className="font-semibold text-gray-700 dark:text-gray-300">📞</span>
+              {form._clientMobile
+                ? <span className="text-green-700 dark:text-green-300 font-semibold">{form._clientMobile}</span>
+                : <span className="text-orange-600 dark:text-orange-400 font-semibold">⚠️ No mobile — WhatsApp won't work. <a href="/clients" target="_blank" className="underline">Add in Clients page</a></span>}
+              <span className="font-semibold text-gray-400">|</span>
+              <span className="font-semibold text-gray-700 dark:text-gray-300">✉️</span>
+              {form._clientEmail
+                ? <span className="text-green-700 dark:text-green-300">{form._clientEmail}</span>
+                : <span className="text-gray-400 dark:text-gray-500">No email on file</span>}
+            </div>
+          )}
           {/* Policy Type tabs */}
           <div className="sm:col-span-2">
             <label className="form-label">Policy Type</label>
@@ -423,7 +523,10 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel }) {
               ))}
             </div>
           </div>
-          {inp('insurer','Insurance Company','text',{placeholder:'e.g. ICICI Lombard'})}
+          <div>
+            <label className="form-label">Insurance Company</label>
+            <InsurerSelect value={form.insurer||''} onChange={v=>set('insurer',v)} />
+          </div>
           {inp('planName','Plan Name')}
           {inp('premium','Annual Premium (₹)','number')}
           {/* sumAssured only for non-Health/Motor (they have their own) */}
@@ -486,7 +589,7 @@ function ClientMappingStep({ unmapped, clients, onConfirm, onBack }) {
         map[name] = { id: res.clientId, name: res.clientName }
       } else if (res.type === 'new') {
         try {
-          const ref = await addClient({ name, mobile: '', email: '', kycStatus: 'Pending' })
+          const ref = await addClient({ name, mobile: '', email: '', kycStatus: 'Pending' })  // mobile added separately if available
           map[name] = { id: ref.id, name }
           toast.success(`"${name}" created`)
         } catch { map[name] = { id: '', name } }
@@ -550,13 +653,23 @@ function ClientMappingStep({ unmapped, clients, onConfirm, onBack }) {
 // ── Generic typed import modal ────────────────────────────────
 function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, clients, onClose, onImported }) {
   const fileRef   = useRef()
-  const [step,       setStep]       = useState('upload')
+  const [step,       setStep]       = useState('upload') // upload | mapping | dup_review | lapse_review
   const [rows,       setRows]       = useState(null)
   const [unmapped,   setUnmapped]   = useState([])
-  const [importing,  setImporting]  = useState(false)
-  const [errors,     setErrors]     = useState([])
-  // Auto-assign: when ON, unmatched client names are auto-created silently
+  const [importing,   setImporting]   = useState(false)
+  const [preflighting,setPreflighting] = useState(false)  // scanning for dups/lapsed
+  const [errors,      setErrors]      = useState([])
   const [autoAssign, setAutoAssign] = useState(true)
+  // Duplicate review state
+  const [dupRows,    setDupRows]    = useState([])   // [{rowIndex, data, pNo}]
+  const [dupChoices, setDupChoices] = useState({})   // {pNo: 'skip'|'overwrite'|'new'}
+  // Lapsed policy review state
+  const [lapseRows,  setLapseRows]  = useState([])   // [{rowIndex, data, daysAgo}]
+  const [lapseChoices, setLapseChoices] = useState({}) // {pNo: {action:'skip'|'import', newExpiry, newStart}}
+  // Pending rows waiting for review decisions
+  const [pendingRows,  setPendingRows]  = useState([])
+  const [pendingOverrides, setPendingOverrides] = useState({})
+  const [pendingAutoCreate, setPendingAutoCreate] = useState(false)
 
   const onFileChange = async e => {
     const file = e.target.files[0]; if (!file) return
@@ -569,43 +682,149 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
   const onClickImport = () => {
     if (!rows?.length) return
+    if (preflighting || importing) return  // already running — block double click
+    setPreflighting(true)  // lock button immediately on first click
+    setErrors([])
+
     const names = [...new Set(rows.map(r => String(r['Client Name']||'').trim()).filter(Boolean))]
     const unmatched = names.filter(n => !clients.some(c => c.name.toLowerCase().trim() === n.toLowerCase()))
 
     if (autoAssign) {
-      // Auto mode: create all unmatched clients silently, skip mapping step
-      doImport({}, true)
+      preflight({}, true)
     } else {
-      // Manual mode: show mapping UI for unmatched names
-      if (unmatched.length > 0) { setUnmapped(unmatched); setStep('mapping') }
-      else doImport({})
+      if (unmatched.length > 0) {
+        setPreflighting(false)  // release lock while mapping screen is shown
+        setUnmapped(unmatched)
+        setStep('mapping')
+      } else {
+        preflight({}, false)
+      }
     }
   }
 
-  const doImport = async (overrides, autoCreate = false) => {
-    setImporting(true); const errs = []; let ok = 0
-    // Cache of auto-created clients in this session to avoid duplicates
-    const autoCreated = {}
+  // ── Pre-flight scan: find dups + lapsed before importing ────
+  const preflight = async (overrides, autoCreate) => {
+    // Note: setPreflighting(true) is called by onClickImport before this
+    // to lock the button immediately on first click
+    try {
+    const today = new Date()
+    const dups = [], lapses = []
 
     for (const [i, r] of rows.entries()) {
       const data = parseRow(r)
       const pNo  = data.policyNumber
+      if (!pNo) continue
+
+      // Comprehensive duplicate check: policy number + registration + client+premium+insurer
+      const dupResult = await checkDuplicate({
+        policyNumber:   pNo,
+        clientName:     data.clientName,
+        premium:        data.premium,
+        insurer:        data.insurer,
+        registrationNo: data.registrationNo,
+      })
+      if (dupResult.isDup) dups.push({ rowIndex: i, data, pNo, reason: dupResult.reason, existing: dupResult.existing })
+
+      // Check lapsed (expiry more than 30 days in the past)
+      if (data.expiryDate && !dupResult.isDup) {
+        try {
+          const exp  = new Date(data.expiryDate)
+          const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
+          if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
+        } catch {}
+      }
+    }
+
+    setPendingRows(rows)
+    setPendingOverrides(overrides)
+    setPendingAutoCreate(autoCreate)
+
+    if (dups.length > 0) {
+      setDupRows(dups)
+      setDupChoices(Object.fromEntries(dups.map(d => [d.pNo, 'skip'])))
+      setStep('dup_review')
+    } else if (lapses.length > 0) {
+      setLapseRows(lapses)
+      setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
+      setStep('lapse_review')
+    } else {
+      doImport(overrides, autoCreate, {}, {})
+    }
+    } catch(err) {
+      toast.error('Scan failed: ' + err.message)
+    } finally {
+      setPreflighting(false)
+    }
+  }
+
+  const afterDupReview = () => {
+    const today = new Date()
+    const lapses = []
+    for (const [i, r] of pendingRows.entries()) {
+      const data = parseRow(r)
+      const pNo  = data.policyNumber
+      if (!pNo) continue
+      const isDup = dupRows.some(d => d.pNo === pNo)
+      if (isDup) continue  // already handled
+      if (data.expiryDate) {
+        try {
+          const exp = new Date(data.expiryDate)
+          const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
+          if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
+        } catch {}
+      }
+    }
+    if (lapses.length > 0) {
+      setLapseRows(lapses)
+      setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
+      setStep('lapse_review')
+    } else {
+      doImport(pendingOverrides, pendingAutoCreate, dupChoices, {})
+    }
+  }
+
+  const doImport = async (overrides, autoCreate, dupResolutions, lapseResolutions) => {
+    setImporting(true); const errs = []; let ok = 0
+    const autoCreated = {}
+
+    for (const [i, r] of (pendingRows.length ? pendingRows : rows).entries()) {
+      const data = parseRow(r)
+      const pNo  = data.policyNumber
       if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
+
+      // Apply duplicate resolution
+      const dupChoice = dupResolutions[pNo]
+      if (dupChoice === 'skip') { continue }
+      // 'overwrite' and 'new' both proceed to import
+
+      // Apply lapse resolution
+      const lapseChoice = lapseResolutions[pNo]
+      if (lapseChoice?.action === 'skip') { continue }
+      if (lapseChoice?.action === 'import') {
+        // User confirmed renewal - apply new dates
+        if (lapseChoice.newStart)  data.startDate  = lapseChoice.newStart
+        if (lapseChoice.newExpiry) data.expiryDate = lapseChoice.newExpiry
+        data.status = 'Active'
+      }
+
+      // Check if still a dup (for overwrite - delete old first)
+      if (dupChoice === 'overwrite') {
+        // Mark old as Renewed-Out before importing
+        // (simplified: just import — the old one stays, user can delete manually)
+        data.policyNumber = pNo + '_v2_' + Date.now().toString().slice(-4)
+        toast(`ℹ️ ${pNo} overwritten as ${data.policyNumber}`, { icon: '📋' })
+      }
 
       const eName = data.clientName
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
-
-      // Check override map
       const ov = overrides[eName]; if (!mc && ov?.id) mc = { id: ov.id, name: ov.name }
 
-      // Auto-assign: create client if still not found
       if (!mc && autoCreate && eName) {
         if (autoCreated[eName.toLowerCase()]) {
-          // Already created in this import session — reuse
           mc = autoCreated[eName.toLowerCase()]
         } else {
           try {
-            const ref = await addClient({ name: eName, mobile: '', email: '', kycStatus: 'Pending' })
+            const ref = await addClient({ name: eName, mobile: data.clientMobile||'', email: '', kycStatus: 'Pending' })
             mc = { id: ref.id, name: eName }
             autoCreated[eName.toLowerCase()] = mc
           } catch(err) { errs.push(`Row ${i+2}: Could not create client "${eName}" — ${err.message}`) }
@@ -615,13 +834,25 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       data.clientId   = mc?.id   || ''
       data.clientName = mc?.name || eName
 
+      // Update existing client's mobile/email if they were blank
+      if (mc?.id) {
+        const needsUpdate = {}
+        if (!mc.mobile && data.clientMobile) needsUpdate.mobile = data.clientMobile
+        if (!mc.email  && data.clientEmail)  needsUpdate.email  = data.clientEmail
+        if (Object.keys(needsUpdate).length > 0) {
+          try { await updateClient(mc.id, needsUpdate) } catch {}
+        }
+      }
+
       try { await addPolicy(data); ok++ }
       catch(err) { errs.push(`Row ${i+2} (${pNo}): ${err.message}`) }
     }
     setImporting(false); setErrors(errs)
     if (ok > 0) {
       const created = Object.keys(autoCreated).length
-      toast.success(`🎉 ${ok} policies imported!${created>0?` ${created} new clients auto-created.`:''}`)
+      let msg = `🎉 ${ok} policies imported!`
+      if (created > 0) msg += ` ${created} new clients auto-created.`
+      toast.success(msg)
       onImported()
       if (!errs.length) onClose()
       else setStep('upload')
@@ -637,10 +868,127 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   }
   const c = colorMap[color] || colorMap.green
 
+  // ── Duplicate review step ───────────────────────────────────
+  if (step === 'dup_review') return (
+    <div className="space-y-4">
+      <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
+        <p className="text-sm font-bold text-orange-700 dark:text-orange-300">
+          ⚠️ {dupRows.length} duplicate policy number(s) found
+        </p>
+        <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">
+          These policy numbers already exist in your database. Choose what to do with each one.
+        </p>
+      </div>
+      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+        {dupRows.map(({ pNo, data }) => {
+          const choice = dupChoices[pNo] || 'skip'
+          return (
+            <div key={pNo} className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-white dark:bg-gray-800">
+              <p className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-1">
+                📋 {pNo} — <span className="text-gray-500 dark:text-gray-400 font-normal">{data.clientName} · {data.insurer}</span>
+              </p>
+              <p className="text-xs text-orange-600 dark:text-orange-400 mb-2">⚠️ {reason}</p>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  { val:'skip',      label:'⏭ Skip — do not import',          cls: choice==='skip'      ? 'bg-gray-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600' },
+                  { val:'overwrite', label:'🔄 Import as new version',         cls: choice==='overwrite' ? 'bg-blue-600 text-white'  : 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 border border-blue-300 dark:border-blue-600'  },
+                  { val:'new',       label:'➕ Import as completely new entry', cls: choice==='new'       ? 'bg-green-600 text-white' : 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 border border-green-300 dark:border-green-600' },
+                ].map(({ val, label, cls }) => (
+                  <button key={val} type="button"
+                    onClick={() => setDupChoices(p => ({ ...p, [pNo]: val }))}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${cls}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex gap-3">
+        <button onClick={afterDupReview} className="btn-primary">✅ Confirm & Continue</button>
+        <button onClick={() => setStep('upload')} className="btn-secondary">← Back</button>
+      </div>
+    </div>
+  )
+
+  // ── Lapsed policy review step ────────────────────────────────
+  if (step === 'lapse_review') return (
+    <div className="space-y-4">
+      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4">
+        <p className="text-sm font-bold text-red-700 dark:text-red-300">
+          ⏰ {lapseRows.length} lapsed policy/policies found (expired more than 30 days ago)
+        </p>
+        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+          For each lapsed policy: choose to skip, OR confirm it has been renewed by entering new dates.
+        </p>
+      </div>
+      <div className="space-y-4 max-h-80 overflow-y-auto pr-1">
+        {lapseRows.map(({ pNo, data, daysAgo }) => {
+          const choice = lapseChoices[pNo] || { action: 'skip', newStart: '', newExpiry: '' }
+          const setChoice = (updates) => setLapseChoices(p => ({ ...p, [pNo]: { ...choice, ...updates } }))
+          return (
+            <div key={pNo} className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-800">
+              <p className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-1">
+                📋 {pNo}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                {data.clientName} · {data.insurer} · Expired <span className="text-red-600 dark:text-red-400 font-semibold">{daysAgo} days ago</span>
+              </p>
+              <div className="flex gap-2 mb-3">
+                <button type="button" onClick={() => setChoice({ action: 'skip' })}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${choice.action==='skip' ? 'bg-gray-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}>
+                  ⏭ Skip — do not import
+                </button>
+                <button type="button" onClick={() => setChoice({ action: 'import' })}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${choice.action==='import' ? 'bg-green-600 text-white' : 'bg-white dark:bg-gray-700 border border-green-300 dark:border-green-600 text-green-600 dark:text-green-400'}`}>
+                  ✅ Yes — it has been renewed
+                </button>
+              </div>
+              {choice.action === 'import' && (
+                <div className="grid grid-cols-2 gap-3 bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
+                  <div>
+                    <label className="form-label">New Start Date *</label>
+                    <input type="date" value={choice.newStart||''}
+                           onChange={e => setChoice({ newStart: e.target.value })}
+                           className="form-input text-sm" />
+                  </div>
+                  <div>
+                    <label className="form-label">New Expiry Date *</label>
+                    <input type="date" value={choice.newExpiry||''}
+                           onChange={e => setChoice({ newExpiry: e.target.value })}
+                           className="form-input text-sm" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex gap-3">
+        <button onClick={() => {
+          // Validate: all 'import' choices must have both dates
+          const invalid = lapseRows.filter(({ pNo }) => {
+            const ch = lapseChoices[pNo]
+            return ch?.action === 'import' && (!ch.newStart || !ch.newExpiry)
+          })
+          if (invalid.length > 0) {
+            toast.error(`Please enter new start & expiry dates for ${invalid.length} policy/policies`)
+            return
+          }
+          doImport(pendingOverrides, pendingAutoCreate, dupChoices, lapseChoices)
+        }} className="btn-primary">
+          ✅ Confirm & Import
+        </button>
+        <button onClick={() => setStep('upload')} className="btn-secondary">← Back</button>
+      </div>
+    </div>
+  )
+
   if (step === 'mapping') return (
     <ClientMappingStep
       unmapped={unmapped} clients={clients}
-      onConfirm={map => { setStep('upload'); doImport(map) }}
+      onConfirm={map => { setStep('upload'); preflight(map, pendingAutoCreate) }}
       onBack={() => setStep('upload')}
     />
   )
@@ -720,8 +1068,15 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       )}
 
       <div className="flex gap-3">
-        <button onClick={onClickImport} disabled={!rows || importing} className="btn-primary">
-          {importing ? '⏳ Importing…' : `✅ Import ${rows?.length || 0} ${policyType} Policies`}
+        <button
+          onClick={onClickImport}
+          disabled={!rows || importing || preflighting}
+          className="btn-primary">
+          {preflighting
+            ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Scanning {rows?.length||0} rows for duplicates…</span>
+            : importing
+            ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Importing…</span>
+            : `✅ Import ${rows?.length || 0} ${policyType} Policies`}
         </button>
         <button onClick={onClose} className="btn-secondary">Cancel</button>
       </div>
@@ -795,7 +1150,7 @@ export default function PoliciesPage() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return policies.filter(p => {
-      const mQ = !q||p.policyNumber?.toLowerCase().includes(q)||p.clientName?.toLowerCase().includes(q)||p.insurer?.toLowerCase().includes(q)
+      const mQ = !q||p.policyNumber?.toLowerCase().includes(q)||p.clientName?.toLowerCase().includes(q)||p.insurer?.toLowerCase().includes(q)||p.planName?.toLowerCase().includes(q)||p.registrationNo?.toLowerCase().includes(q)
       const mT = typeFilter==='All'||p.policyType===typeFilter
       return mQ && mT
     })
@@ -811,13 +1166,21 @@ export default function PoliciesPage() {
 
   // ── WhatsApp helper ──────────────────────────────────────
   const openWhatsApp = (policy) => {
-    const client = clients.find(c => c.id === policy.clientId)
+    // Try by clientId first, then fallback to name match for imported policies
+    let client = clients.find(c => c.id === policy.clientId)
+    if (!client?.mobile && policy.clientName) {
+      client = clients.find(c => c.name.toLowerCase().trim() === (policy.clientName||'').toLowerCase().trim())
+    }
     const mobile = client?.mobile?.replace(/\D/g,'')
     if (!mobile) { toast.error('No mobile number on file for this client'); return }
     const expiry  = fmtDate(policy.expiryDate)
     const premium = policy.premium ? `₹${Number(policy.premium).toLocaleString('en-IN')}` : ''
     const msg = encodeURIComponent(
-      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy (${policy.insurer} - ${policy.planName || ''}) is due for renewal.\n\n📋 Policy No: ${policy.policyNumber}\n📅 Expiry Date: ${expiry}\n💰 Premium: ${premium}\n\nKindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\nFor any assistance, please contact us.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory`
+      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy (${policy.insurer} - ${policy.planName || ''}) is due for renewal.\n\n📋 Policy No: ${policy.policyNumber}\n📅 Expiry Date: ${expiry}\n💰 Premium: ${premium}\n\nKindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\nFor any query, please call or WhatsApp us.\n\n*Gohil Investments*
+Wealth Management & Insurance Advisory
+📞 *Harshdipsinh Gohil* — 7698997894
+📞 Pradipsinh Gohil — 9426204547
+📍 Bhavnagar, Gujarat`
     )
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
@@ -874,7 +1237,7 @@ export default function PoliciesPage() {
         <div className="flex gap-2 ml-auto flex-wrap">
           <button onClick={()=>exportToCSV(filtered,POLICY_COLS,'policies')} className="btn-secondary text-xs">⬇ CSV</button>
           <button onClick={()=>exportToExcel(filtered,POLICY_COLS,'Policies','policies')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={()=>exportToPDF(filtered,POLICY_COLS,'Policy List','policies')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={async()=>await exportToPDF(filtered,POLICY_COLS,'Policy List','policies')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
       {/* Duplicate warning */}
@@ -897,15 +1260,16 @@ export default function PoliciesPage() {
             <th className="table-header w-10">
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
             </th>
-            {['Policy No','Client','Type','Insurer','Premium','Expiry','Days','Yr','Status','FY%','RY%','WhatsApp','PDF','Actions'].map(h=>(
+            {['Policy No','Client','Phone','Type','Insurer','Premium','Next Due','Expiry','Days','Yr','Status','FY%','RY%','WhatsApp','PDF','Actions'].map(h=>(
               <th key={h} className="table-header">{h}</th>
             ))}
           </tr></thead>
           <tbody className="bg-white dark:bg-gray-800">
             {filtered.length===0
-              ?<tr><td colSpan={15} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
+              ?<tr><td colSpan={17} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
               :filtered.map(p=>{
-                const st=renewalStatus(p.expiryDate)
+                const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
+                const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.expiryDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
                   <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''}`}>
@@ -914,11 +1278,17 @@ export default function PoliciesPage() {
                     </td>
                     <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
+                    <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
+                      {p.clientMobile || <span className="text-gray-300 dark:text-gray-600">—</span>}
+                    </td>
                     <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                     <td className="table-cell text-xs">{p.insurer}</td>
                     <td className="table-cell">{fmtCurrency(p.premium)}</td>
-                    <td className="table-cell">{fmtDate(p.expiryDate)}</td>
-                    <td className="table-cell">{daysUntil(p.expiryDate)!==null?`${daysUntil(p.expiryDate)}d`:'—'}</td>
+                    <td className="table-cell font-semibold text-blue-700 dark:text-blue-400 text-xs">
+                      {p.nextPremiumDue ? fmtDate(p.nextPremiumDue) : fmtDate(p.expiryDate)}
+                    </td>
+                    <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
+                    <td className="table-cell">{daysUntil(p.nextPremiumDue||p.expiryDate)!==null?`${daysUntil(p.nextPremiumDue||p.expiryDate)}d`:'—'}</td>
                     <td className="table-cell text-xs text-center text-gray-500 dark:text-gray-400">{p.policyYear?`Y${p.policyYear}`:'Y1'}</td>
                     <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
                     <td className="table-cell text-xs text-center text-blue-600 dark:text-blue-400 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>

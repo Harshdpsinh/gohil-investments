@@ -7,9 +7,11 @@ service cloud.firestore {
       allow read, write: if isAuth();
       match /documents/{docId} { allow read, write: if isAuth(); }
     }
-    match /policies/{policyId}   { allow read, write: if isAuth(); }
-    match /proposals/{proposalId}{ allow read, write: if isAuth(); }
-    match /users/{userId}        { allow read, write: if isAuth(); }
-    match /{document=**}         { allow read, write: if false; }
+    match /policies/{policyId}    { allow read, write: if isAuth(); }
+    match /proposals/{proposalId} { allow read, write: if isAuth(); }
+    match /claims/{claimId}       { allow read, write: if isAuth(); }
+    match /tasks/{taskId}         { allow read, write: if isAuth(); }
+    match /users/{userId}         { allow read, write: if isAuth(); }
+    match /{document=**}          { allow read, write: if false; }
   }
 }

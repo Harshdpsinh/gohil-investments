@@ -38,7 +38,7 @@ export default function Sidebar({ mobile, onClose }) {
           <span className="text-2xl">🏦</span>
           <div>
             <p className="font-bold text-gray-900 dark:text-white text-sm leading-tight">Gohil Investments</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500">Portfolio Manager v4</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500">Portfolio Manager v5</p>
           </div>
         </div>
       </div>

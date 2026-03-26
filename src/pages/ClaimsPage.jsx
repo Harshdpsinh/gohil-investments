@@ -265,11 +265,19 @@ export default function ClaimsPage() {
 
   // WhatsApp for claim update
   const openWhatsApp = (claim) => {
-    const client = clients.find(c => c.id === claim.clientId)
+    // Try clientId first, then name fallback for imported claims
+    let client = clients.find(c => c.id === claim.clientId)
+    if (!client?.mobile && claim.clientName) {
+      client = clients.find(c => c.name.toLowerCase().trim() === (claim.clientName||'').toLowerCase().trim())
+    }
     const mobile = client?.mobile?.replace(/\D/g,'')
-    if (!mobile) { toast.error('No mobile number for this client'); return }
+    if (!mobile) { toast.error('No mobile for ' + (claim.clientName||'this client') + ' — add it in Clients page'); return }
     const msg = encodeURIComponent(
-      `Dear ${claim.clientName},\n\nUpdate on your insurance claim:\n\n📋 Claim No: ${claim.claimNumber || 'N/A'}\n🏢 Insurer: ${claim.insurer}\n📊 Status: *${claim.status}*\n${claim.approvedAmount ? `💰 Approved Amount: ₹${Number(claim.approvedAmount).toLocaleString('en-IN')}` : ''}\n\nFor any queries, please contact us.\n\n*Gohil Investments*`
+      `Dear ${claim.clientName},\n\nUpdate on your insurance claim:\n\n📋 Claim No: ${claim.claimNumber || 'N/A'}\n🏢 Insurer: ${claim.insurer}\n📊 Status: *${claim.status}*\n${claim.approvedAmount ? `💰 Approved Amount: ₹${Number(claim.approvedAmount).toLocaleString('en-IN')}` : ''}\n\nFor any queries, please contact us.\n\n*Gohil Investments*
+Wealth Management & Insurance Advisory
+📞 *Harshdipsinh Gohil* — 7698997894
+📞 Pradipsinh Gohil — 9426204547
+📍 Bhavnagar, Gujarat`
     )
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
@@ -331,7 +339,7 @@ export default function ClaimsPage() {
         <div className="flex gap-2 ml-auto flex-wrap">
           <button onClick={()=>exportToCSV(filtered,CLAIM_COLS,'claims')} className="btn-secondary text-xs">⬇ CSV</button>
           <button onClick={()=>exportToExcel(filtered,CLAIM_COLS,'Claims','claims')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={()=>exportToPDF(filtered,CLAIM_COLS,'Claims Register','claims')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={async()=>await exportToPDF(filtered,CLAIM_COLS,'Claims Register','claims')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
 

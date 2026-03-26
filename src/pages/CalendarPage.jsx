@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { parseISO, isValid, format, startOfMonth, endOfMonth,
          eachDayOfInterval, getDay, isSameDay, isSameMonth,
          addMonths, subMonths } from 'date-fns'
-import { fmtCurrency } from '../utils/dateUtils'
+import { fmtCurrency, daysUntilPremium } from '../utils/dateUtils'
 
 const TYPE_COLORS = {
   Health: 'bg-blue-500',
@@ -45,8 +45,21 @@ export default function CalendarPage() {
   const policyMap = useMemo(() => {
     const map = {}
     policies.forEach(p => {
+      // Hide already-renewed policies from calendar
+      if ((p.status||'').trim() === 'Renewed-Out') return
       if (typeFilter !== 'All' && p.policyType !== typeFilter) return
-      const d = parseDate(p.expiryDate)
+      // Use nextPremiumDue for calendar date (handles long-term Life policies)
+      let d = null
+      if (p.nextPremiumDue) {
+        d = new Date(p.nextPremiumDue)
+        if (isNaN(d.getTime())) d = null
+      }
+      if (!d && p.startDate) {
+        // Compute on the fly
+        const daysLeft = daysUntilPremium(p.startDate, p.frequency)
+        if (daysLeft !== null) d = new Date(new Date().getTime() + daysLeft * 86400000)
+      }
+      if (!d) d = parseDate(p.expiryDate)
       if (!d || !isSameMonth(d, current)) return
       const key = format(d, 'yyyy-MM-dd')
       if (!map[key]) map[key] = []
@@ -58,8 +71,8 @@ export default function CalendarPage() {
   // Policies expiring this month
   const monthPolicies = useMemo(() =>
     Object.values(policyMap).flat().sort((a,b) => {
-      const da = parseDate(a.expiryDate), db = parseDate(b.expiryDate)
-      return (da||0) - (db||0)
+      const getD = p => p.nextPremiumDue ? new Date(p.nextPremiumDue) : parseDate(p.expiryDate)
+      return (getD(a)||0) - (getD(b)||0)
     }),
     [policyMap]
   )

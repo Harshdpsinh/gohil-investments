@@ -64,16 +64,17 @@ export default function ClientProfilePage() {
   }, [id])
 
   const clientPolicies = policies.filter(p => p.clientId === id)
-  const activePolicies = clientPolicies.filter(p => p.status === 'Active')
+  const isActv = p => !['Renewed-Out','Cancelled','Matured'].includes((p.status||'').trim())
+  const activePolicies = clientPolicies.filter(p => isActv(p))
   const gaps           = computeCoverageGaps(clientPolicies)
   const totalPremium   = activePolicies.reduce((s,p) => s + (parseFloat(p.premium)||0), 0)
   const totalCoverage  = activePolicies.reduce((s,p) => s + (parseFloat(p.sumInsured||p.sumAssured||p.idv)||0), 0)
 
   // WhatsApp quick action
   const openWhatsApp = () => {
-    const mobile = client?.mobile?.replace(/\D/g,'')
-    if (!mobile) { toast.error('No mobile number'); return }
-    const msg = encodeURIComponent(`Dear ${client.name},\n\nGreetings from *Gohil Investments*!\n\nThis is a courtesy call regarding your insurance portfolio. Please feel free to reach out for any queries.\n\nThank you for your continued trust.\n\n*Gohil Investments*\nBhavnagar, Gujarat`)
+    const mobile = (client?.mobile||'').replace(/\D/g,'')
+    if (!mobile) { toast.error('No mobile number — add it in Clients page'); return }
+    const msg = encodeURIComponent(`Dear ${client.name},\n\nGreetings from *Gohil Investments*!\n\nThis is a courtesy call regarding your insurance portfolio. Please feel free to reach out for any queries.\n\nThank you for your continued trust.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`)
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
 

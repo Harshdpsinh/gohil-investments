@@ -1,37 +1,47 @@
 // src/pages/DashboardPage.jsx
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
-import { fmtCurrency, daysUntil, fmtDate } from '../utils/dateUtils'
+import { fmtCurrency, daysUntil, fmtDate, parseAnyDate, daysUntilPremium } from '../utils/dateUtils'
 import { useNavigate } from 'react-router-dom'
 import { subscribeTasks, subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement,
-  Title, Tooltip, Legend, LineElement, PointElement
+  Title, Tooltip, Legend, LineElement, PointElement, Filler
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
-import { format, addDays, parseISO, differenceInDays, isValid, subMonths, startOfMonth } from 'date-fns'
+import { format, differenceInDays, subMonths, startOfMonth } from 'date-fns'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, LineElement, PointElement)
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, LineElement, PointElement, Filler)
 
 const today = () => new Date()
-
-function parseDate(val) {
-  if (!val) return null
-  if (val?.seconds) return new Date(val.seconds * 1000)
-  try { const d = parseISO(val); return isValid(d) ? d : null } catch { return null }
-}
+const isActivePol = p => !['Renewed-Out','Cancelled','Matured'].includes((p.status||'').trim())
 
 function isBirthdayThisWeek(dobStr) {
   if (!dobStr) return false
   try {
-    const dob  = parseISO(dobStr)
+    const dob = parseAnyDate(dobStr)
+    if (!dob) return false
     const now  = today()
     const bday = new Date(now.getFullYear(), dob.getMonth(), dob.getDate())
     const diff = differenceInDays(bday, now)
     return diff >= 0 && diff <= 7
   } catch { return false }
+}
+
+// Module-level — available everywhere in this file including useMemo and JSX
+function getPremDays(p) {
+  if (!p) return null
+  if (p.nextPremiumDue) {
+    const d = new Date(p.nextPremiumDue)
+    if (!isNaN(d.getTime())) return Math.ceil((d - new Date()) / 86400000)
+  }
+  if (p.startDate) {
+    const days = daysUntilPremium(p.startDate, p.frequency)
+    if (days !== null) return days
+  }
+  return daysUntil(p.expiryDate)
 }
 
 function StatCard({ icon, label, value, sub, color, onClick, badge }) {
@@ -79,7 +89,21 @@ export default function DashboardPage() {
   const navigate  = useNavigate()
   const [tasks,   setTasks]   = useState([])
   const [claims,  setClaims]  = useState([])
-  const [perfTab, setPerfTab] = useState('commission')  // 'commission' | 'policies' | 'clients'
+  const [perfTab, setPerfTab] = useState('commission')
+
+  const openWA = useCallback((policy) => {
+    let client = clients.find(c => c.id === policy.clientId)
+    if (!client?.mobile && policy.clientName) {
+      client = clients.find(c => c.name.toLowerCase().trim() === (policy.clientName||'').toLowerCase().trim())
+    }
+    const mobile = (client?.mobile||'').replace(/\D/g,'')
+    if (!mobile) return
+    const d = getPremDays(policy)
+    const msg = encodeURIComponent(
+      `Dear ${policy.clientName},\n\nYour *${policy.policyType}* policy (${policy.policyNumber}) with *${policy.insurer}* premium is due${d !== null && d >= 0 ? ` in *${d} days*` : ' — please renew urgently'}.\n\nPlease contact us for renewal.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`
+    )
+    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+  }, [clients])
 
   useEffect(() => {
     const u1 = subscribeTasks(setTasks)
@@ -88,24 +112,21 @@ export default function DashboardPage() {
   }, [])
 
   const stats = useMemo(() => {
-    const active     = policies.filter(p => p.status === 'Active')
-    const expiring30 = active.filter(p => { const d=daysUntil(p.expiryDate); return d!==null && d>=0 && d<=30 })
-    const expired    = policies.filter(p => { const d=daysUntil(p.expiryDate); return d!==null && d<0 && p.status==='Active' })
-    const totalPrem  = active.reduce((s,p) => s+(parseFloat(p.premium)||0), 0)
+    const active     = policies.filter(p => isActivePol(p))
+    const expiring30 = active.filter(p => { const d = getPremDays(p); return d !== null && d >= 0 && d <= 30 })
+    const expired    = active.filter(p => { const d = getPremDays(p); return d !== null && d < 0 })
+    const totalPrem  = active.reduce((s,p) => s + (parseFloat(p.premium)||0), 0)
     const totalComm  = active.reduce((s,p) => s + Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100), 0)
     const birthdays  = clients.filter(c => isBirthdayThisWeek(c.dob))
     const openClaims = claims.filter(c => !['Settled','Rejected'].includes(c.status))
     const openTasks  = tasks.filter(t => !t.done)
 
-    // Type breakdown
     const byType = {}
     active.forEach(p => { byType[p.policyType] = (byType[p.policyType]||0)+1 })
 
-    // Insurer breakdown
     const byInsurer = {}
     active.forEach(p => { if(p.insurer) byInsurer[p.insurer] = (byInsurer[p.insurer]||0)+1 })
 
-    // Monthly new policies (last 6 months)
     const months = Array.from({length:6},(_,i) => {
       const d = subMonths(today(), 5-i)
       return { label: format(d,'MMM yy'), start: startOfMonth(d) }
@@ -113,16 +134,15 @@ export default function DashboardPage() {
     const monthly = months.map(m => ({
       label: m.label,
       count: policies.filter(p => {
-        const d = parseDate(p.createdAt)
+        const d = parseAnyDate(p.createdAt)
         return d && format(d,'MMM yy') === m.label
       }).length,
       comm: policies.filter(p => {
-        const d = parseDate(p.createdAt)
+        const d = parseAnyDate(p.createdAt)
         return d && format(d,'MMM yy') === m.label
       }).reduce((s,p) => s + Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100), 0)
     }))
 
-    // Coverage gaps count
     const clientsWithGaps = clients.filter(c => {
       const cp = policies.filter(p => p.clientId === c.id)
       return computeCoverageGaps(cp).length > 0
@@ -136,10 +156,10 @@ export default function DashboardPage() {
     }
   }, [policies, clients, tasks, claims])
 
-  // Upcoming renewals (next 7 days)
   const urgent = useMemo(() =>
-    policies.filter(p => { const d=daysUntil(p.expiryDate); return d!==null && d>=0 && d<=7 && p.status==='Active' })
-            .sort((a,b) => daysUntil(a.expiryDate)-daysUntil(b.expiryDate)),
+    policies
+      .filter(p => { const d = getPremDays(p); return d !== null && d >= 0 && d <= 7 && isActivePol(p) })
+      .sort((a,b) => (getPremDays(a)||0) - (getPremDays(b)||0)),
     [policies]
   )
 
@@ -154,13 +174,11 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">{format(today(),'EEEE, d MMMM yyyy')}</p>
       </div>
 
-      {/* KPI Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard icon="👥" label="Clients"         value={stats.clients}     color="blue"   onClick={()=>navigate('/clients')} />
         <StatCard icon="📋" label="Active Policies" value={stats.active}      color="green"  onClick={()=>navigate('/policies')} />
@@ -170,7 +188,6 @@ export default function DashboardPage() {
         <StatCard icon="🔍" label="Open Claims"     value={stats.openClaims.length} color="orange" onClick={()=>navigate('/claims')} badge={stats.openClaims.length} />
       </div>
 
-      {/* Alerts row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {stats.birthdays.length > 0 && (
           <div className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-4 cursor-pointer" onClick={()=>navigate('/clients')}>
@@ -201,58 +218,36 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Policy type donut */}
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">🏷️ Policies by Type</p>
           <div style={{height:180}}>
             <Doughnut
-              data={{
-                labels: Object.keys(stats.byType),
-                datasets: [{ data: Object.values(stats.byType), backgroundColor: typeColors, borderWidth: 2 }]
-              }}
+              data={{ labels: Object.keys(stats.byType), datasets: [{ data: Object.values(stats.byType), backgroundColor: typeColors, borderWidth: 2 }] }}
               options={DOUGHNUT_OPTS}
             />
           </div>
         </div>
-
-        {/* Monthly new policies */}
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">📅 New Policies (6 months)</p>
           <div style={{height:180}}>
             <Bar
-              data={{
-                labels: stats.monthly.map(m=>m.label),
-                datasets: [{ label:'Policies', data: stats.monthly.map(m=>m.count), backgroundColor:'#3b82f6', borderRadius:4 }]
-              }}
+              data={{ labels: stats.monthly.map(m=>m.label), datasets: [{ label:'Policies', data: stats.monthly.map(m=>m.count), backgroundColor:'#3b82f6', borderRadius:4 }] }}
               options={CHART_OPTS}
             />
           </div>
         </div>
-
-        {/* Monthly commission trend */}
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">💰 Commission Trend (6 months)</p>
           <div style={{height:180}}>
             <Line
-              data={{
-                labels: stats.monthly.map(m=>m.label),
-                datasets: [{
-                  label:'Commission ₹',
-                  data: stats.monthly.map(m=>m.comm),
-                  borderColor:'#a855f7',
-                  backgroundColor:'rgba(168,85,247,0.1)',
-                  tension: 0.4, fill: true, pointRadius: 4
-                }]
-              }}
+              data={{ labels: stats.monthly.map(m=>m.label), datasets: [{ label:'Commission ₹', data: stats.monthly.map(m=>m.comm), borderColor:'#a855f7', backgroundColor:'rgba(168,85,247,0.1)', tension: 0.4, fill: true, pointRadius: 4 }] }}
               options={{ ...CHART_OPTS, scales: { ...CHART_OPTS.scales, y: { ...CHART_OPTS.scales.y, ticks: { callback: v => `₹${(v/1000).toFixed(0)}K` } } } }}
             />
           </div>
         </div>
       </div>
 
-      {/* Performance section */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-gray-800 dark:text-white">📊 Agent Performance</h2>
@@ -267,10 +262,10 @@ export default function DashboardPage() {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {perfTab === 'commission' && [
-            { label:'Total FY Commission',  val: fmtCurrency(policies.reduce((s,p)=>s+Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100),0)) },
-            { label:'Total RY Commission',  val: fmtCurrency(policies.reduce((s,p)=>s+Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.ryCommission)||0))/100),0)) },
-            { label:'Total Premium Under Mgmt', val: fmtCurrency(policies.filter(p=>p.status==='Active').reduce((s,p)=>s+(parseFloat(p.premium)||0),0)) },
-            { label:'Avg Commission/Policy', val: fmtCurrency(policies.length ? Math.round(stats.totalComm/Math.max(policies.length,1)) : 0) },
+            { label:'Total FY Commission',      val: fmtCurrency(policies.reduce((s,p)=>s+Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100),0)) },
+            { label:'Total RY Commission',      val: fmtCurrency(policies.reduce((s,p)=>s+Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.ryCommission)||0))/100),0)) },
+            { label:'Total Premium Under Mgmt', val: fmtCurrency(policies.filter(p=>isActivePol(p)).reduce((s,p)=>s+(parseFloat(p.premium)||0),0)) },
+            { label:'Avg Commission/Policy',    val: fmtCurrency(policies.length ? Math.round(stats.totalComm/Math.max(policies.length,1)) : 0) },
           ].map(({label,val})=>(
             <div key={label} className="bg-purple-50 dark:bg-purple-900/20 rounded-xl p-4 text-center">
               <p className="text-xl font-bold text-purple-700 dark:text-purple-300">{val}</p>
@@ -278,10 +273,10 @@ export default function DashboardPage() {
             </div>
           ))}
           {perfTab === 'policies' && [
-            { label:'Total Policies', val: policies.length },
-            { label:'Active', val: stats.active },
-            { label:'Health Policies', val: policies.filter(p=>p.policyType==='Health').length },
-            { label:'Life Policies', val: policies.filter(p=>p.policyType==='Life').length },
+            { label:'Total Policies',   val: policies.length },
+            { label:'Active',           val: stats.active },
+            { label:'Health Policies',  val: policies.filter(p=>p.policyType==='Health').length },
+            { label:'Life Policies',    val: policies.filter(p=>p.policyType==='Life').length },
           ].map(({label,val})=>(
             <div key={label} className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 text-center">
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{val}</p>
@@ -289,10 +284,10 @@ export default function DashboardPage() {
             </div>
           ))}
           {perfTab === 'clients' && [
-            { label:'Total Clients', val: clients.length },
-            { label:'KYC Complete', val: clients.filter(c=>c.kycStatus==='Complete').length },
-            { label:'Coverage Gaps', val: stats.clientsWithGaps },
-            { label:'Avg Policies/Client', val: clients.length ? (policies.filter(p=>p.status==='Active').length/clients.length).toFixed(1) : '0' },
+            { label:'Total Clients',        val: clients.length },
+            { label:'KYC Complete',         val: clients.filter(c=>c.kycStatus==='Complete').length },
+            { label:'Coverage Gaps',        val: stats.clientsWithGaps },
+            { label:'Avg Policies/Client',  val: clients.length ? (policies.filter(p=>isActivePol(p)).length/clients.length).toFixed(1) : '0' },
           ].map(({label,val})=>(
             <div key={label} className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center">
               <p className="text-xl font-bold text-green-700 dark:text-green-300">{val}</p>
@@ -302,7 +297,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Urgent renewals */}
       {urgent.length > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
@@ -311,18 +305,19 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-2">
             {urgent.slice(0,8).map(p => {
-              const d = daysUntil(p.expiryDate)
+              const d = getPremDays(p)
               return (
                 <div key={p.id} className="flex items-center justify-between bg-red-50 dark:bg-red-900/20 rounded-lg px-3 py-2">
                   <div>
                     <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{p.clientName}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">{p.policyNumber} · {p.insurer}</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end gap-1">
                     <p className={`text-sm font-bold ${d===0?'text-red-600':d<=3?'text-orange-600':'text-yellow-600'}`}>
                       {d === 0 ? 'Today!' : `${d}d`}
                     </p>
                     <p className="text-xs text-gray-400 dark:text-gray-500">{fmtCurrency(p.premium)}</p>
+                    <button onClick={()=>openWA(p)} className="text-xs px-2 py-0.5 bg-green-500 text-white rounded hover:bg-green-600">📱 WA</button>
                   </div>
                 </div>
               )
@@ -331,7 +326,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Claims pipeline summary */}
       {claims.length > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">

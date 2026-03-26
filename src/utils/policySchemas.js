@@ -155,13 +155,16 @@ export function isLIC(insurer) {
 export const KYC_LOCKED_FIELDS = ['clientName','dob','gender','pan','aadhar']
 
 // ── Coverage gap rules ────────────────────────────────────────
+// isActive: treat blank/null status same as Active (handles imported policies)
+const isActive = p => !['Renewed-Out','Cancelled','Matured'].includes((p.status||'').trim())
+
 export const COVERAGE_GAP_RULES = [
   {
     id: 'no-health',
     label: '🏥 No Health Cover',
     color: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
     check: (policies) => !policies.some(p =>
-      p.policyType === 'Health' && p.status === 'Active'
+      p.policyType === 'Health' && isActive(p)
     ),
   },
   {
@@ -169,7 +172,7 @@ export const COVERAGE_GAP_RULES = [
     label: '🛡️ No Life Cover',
     color: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
     check: (policies) => !policies.some(p =>
-      p.policyType === 'Life' && p.status === 'Active'
+      p.policyType === 'Life' && isActive(p)
     ),
   },
   {
@@ -177,7 +180,7 @@ export const COVERAGE_GAP_RULES = [
     label: '📋 No Term Plan',
     color: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
     check: (policies) => !policies.some(p =>
-      p.policyType === 'Life' && p.policySubType === 'Term' && p.status === 'Active'
+      p.policyType === 'Life' && p.policySubType === 'Term' && isActive(p)
     ),
   },
   {
@@ -185,7 +188,7 @@ export const COVERAGE_GAP_RULES = [
     label: '🚗 No Motor Cover',
     color: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
     check: (policies) => !policies.some(p =>
-      p.policyType === 'Motor' && p.status === 'Active'
+      p.policyType === 'Motor' && isActive(p)
     ),
   },
   {
@@ -193,7 +196,7 @@ export const COVERAGE_GAP_RULES = [
     label: '❤️ No Critical Illness',
     color: 'bg-pink-100 text-pink-700 dark:bg-pink-900 dark:text-pink-300',
     check: (policies) => !policies.some(p =>
-      (p.criticalIllness || p.policyType === 'Life' && p.policySubType?.includes('Critical')) && p.status === 'Active'
+      (p.criticalIllness || p.policyType === 'Life' && p.policySubType?.includes('Critical')) && isActive(p)
     ),
   },
 ]

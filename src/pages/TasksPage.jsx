@@ -8,14 +8,14 @@ import {
 } from '../firebase/firestore'
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { fmtDate } from '../utils/dateUtils'
+import { fmtDate, parseAnyDate } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
-import { differenceInDays, parseISO } from 'date-fns'
+import { differenceInDays } from 'date-fns'
 
 const PRIORITY_COLORS = {
-  High:   'bg-red-100 text-red-700 border-red-200',
-  Medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-  Low:    'bg-green-100 text-green-700 border-green-200',
+  High:   'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+  Medium: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-200 border-yellow-200 dark:border-yellow-800',
+  Low:    'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
 }
 const PRIORITY_ICONS = { High:'🔴', Medium:'🟡', Low:'🟢' }
 const TYPE_ICONS = {
@@ -25,7 +25,9 @@ const TYPE_ICONS = {
 
 function taskUrgency(dueDate) {
   if (!dueDate) return 'gray'
-  const d = differenceInDays(parseISO(dueDate), new Date())
+  const d_parsed = parseAnyDate(dueDate)
+  if (!d_parsed) return 'gray'
+  const d = differenceInDays(d_parsed, new Date())
   if (d < 0)  return 'overdue'
   if (d === 0) return 'today'
   if (d <= 3)  return 'soon'
@@ -33,11 +35,11 @@ function taskUrgency(dueDate) {
 }
 
 const URGENCY_STYLES = {
-  overdue:  'border-l-4 border-red-500 bg-red-50',
-  today:    'border-l-4 border-orange-500 bg-orange-50',
-  soon:     'border-l-4 border-yellow-400 bg-yellow-50',
-  upcoming: 'border-l-4 border-blue-300',
-  gray:     'border-l-4 border-gray-200',
+  overdue:  'border-l-4 border-red-500 bg-red-50 dark:bg-red-900/20',
+  today:    'border-l-4 border-orange-500 bg-orange-50 dark:bg-orange-900/20',
+  soon:     'border-l-4 border-yellow-400 bg-yellow-50 dark:bg-yellow-900/20',
+  upcoming: 'border-l-4 border-blue-300 dark:border-blue-700',
+  gray:     'border-l-4 border-gray-200 dark:border-gray-700',
 }
 
 const EMPTY_TASK = {
@@ -121,20 +123,20 @@ function TaskForm({ initial, clients, policies, onSave, onCancel }) {
 }
 
 // ── Task Card ─────────────────────────────────────────────────
-function TaskCard({ task, onToggle, onEdit, onDelete }) {
+function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp }) {
   const urgency  = taskUrgency(task.dueDate)
   const daysLeft = task.dueDate
-    ? differenceInDays(parseISO(task.dueDate), new Date())
+    ? (() => { const dp = parseAnyDate(task.dueDate); return dp ? differenceInDays(dp, new Date()) : null })()
     : null
 
   return (
-    <div className={`rounded-xl p-4 border border-gray-100 shadow-sm transition-opacity ${URGENCY_STYLES[urgency]} ${task.done ? 'opacity-50' : ''}`}>
+    <div className={`rounded-xl p-4 border border-gray-100 dark:border-gray-700 shadow-sm dark:bg-gray-800 transition-opacity ${URGENCY_STYLES[urgency]} ${task.done ? 'opacity-50' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           <input type="checkbox" checked={!!task.done} onChange={()=>onToggle(task)}
                  className="w-5 h-5 mt-0.5 cursor-pointer flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className={`font-semibold text-gray-900 text-sm ${task.done?'line-through text-gray-400':''}`}>
+            <p className={`font-semibold text-gray-900 dark:text-white text-sm ${task.done?'line-through text-gray-400':''}`}>
               {TYPE_ICONS[task.type]||'📌'} {task.title}
             </p>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -142,10 +144,10 @@ function TaskCard({ task, onToggle, onEdit, onDelete }) {
                 {PRIORITY_ICONS[task.priority||'Medium']} {task.priority||'Medium'}
               </span>
               <span className="text-xs text-gray-500">{task.type}</span>
-              {task.clientName && <span className="text-xs text-blue-600 font-medium">👤 {task.clientName}</span>}
-              {task.policyNumber && <span className="text-xs text-gray-400">📋 {task.policyNumber}</span>}
+              {task.clientName && <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">👤 {task.clientName}</span>}
+              {task.policyNumber && <span className="text-xs text-gray-400 dark:text-gray-500">📋 {task.policyNumber}</span>}
             </div>
-            {task.notes && <p className="text-xs text-gray-500 mt-1 truncate">{task.notes}</p>}
+            {task.notes && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate">{task.notes}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -163,8 +165,9 @@ function TaskCard({ task, onToggle, onEdit, onDelete }) {
             </p>
           </div>
           <div className="flex flex-col gap-1">
-            <button onClick={()=>onEdit(task)}   className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Edit</button>
-            <button onClick={()=>onDelete(task)}  className="px-2 py-1 text-xs bg-red-50  text-red-700  rounded hover:bg-red-100">Del</button>
+            <button onClick={()=>onEdit(task)}    className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+            {task.clientId && onWhatsApp && <button onClick={()=>onWhatsApp(task)} className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">📱</button>}
+            <button onClick={()=>onDelete(task)}  className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
           </div>
         </div>
       </div>
@@ -221,19 +224,37 @@ export default function TasksPage() {
   const onEdit   = async form => { await updateTask(selected.id, form); toast.success('Task updated!'); setModal(null) }
   const onDelete = async ()   => { await deleteTask(selected.id);       toast.success('Task deleted') }
 
+  const openWhatsApp = (task) => {
+    let client = clients.find(c => c.id === task.clientId)
+    if (!client?.mobile && task.clientName) {
+      client = clients.find(c => c.name.toLowerCase().trim() === (task.clientName||'').toLowerCase().trim())
+    }
+    const mobile = (client?.mobile||'').replace(/\D/g,'')
+    if (!mobile) { toast.error('No mobile for ' + (task.clientName||'client') + ' — add it in Clients page'); return }
+    const typeIcon = task.type === 'Call' ? '📞' : task.type === 'Meeting' ? '🤝' : '📋'
+    const msg = encodeURIComponent(
+      `Dear ${task.clientName},\n\n${typeIcon} This is a reminder regarding: *${task.title}*\n\nPlease feel free to contact us at your earliest convenience.\n\n*Gohil Investments*
+Wealth Management & Insurance Advisory
+📞 *Harshdipsinh Gohil* — 7698997894
+📞 Pradipsinh Gohil — 9426204547
+📍 Bhavnagar, Gujarat`
+    )
+    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+  }
+
   if (loading) return (
-    <div className="p-8 text-gray-400 flex items-center gap-2">
+    <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
       <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
       Loading tasks…
     </div>
   )
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-5">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tasks & Follow-ups</h1>
-          <p className="text-sm text-gray-500">{stats.pending} pending · {stats.overdue} overdue</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tasks & Follow-ups</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{stats.pending} pending · {stats.overdue} overdue</p>
         </div>
         <button onClick={()=>{setSelected(null);setModal('add')}} className="btn-primary">+ New Task</button>
       </div>
@@ -241,10 +262,10 @@ export default function TasksPage() {
       {/* Summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label:'Pending',  value:stats.pending, color:'bg-blue-50 text-blue-700',   onClick:()=>setFilter('Pending') },
-          { label:'Due Today',value:stats.today,   color:'bg-orange-50 text-orange-700',onClick:()=>setFilter('Today')  },
-          { label:'Overdue',  value:stats.overdue, color:'bg-red-50 text-red-700',     onClick:()=>setFilter('Overdue') },
-          { label:'Completed',value:stats.done,    color:'bg-green-50 text-green-700', onClick:()=>setFilter('Done')    },
+          { label:'Pending',  value:stats.pending, color:'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',   onClick:()=>setFilter('Pending') },
+          { label:'Due Today',value:stats.today,   color:'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',onClick:()=>setFilter('Today')  },
+          { label:'Overdue',  value:stats.overdue, color:'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300',     onClick:()=>setFilter('Overdue') },
+          { label:'Completed',value:stats.done,    color:'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300', onClick:()=>setFilter('Done')    },
         ].map(s=>(
           <div key={s.label} onClick={s.onClick}
                className={`rounded-xl p-3 cursor-pointer ${s.color} hover:opacity-80 transition-opacity`}>
@@ -262,7 +283,7 @@ export default function TasksPage() {
           {['All','Pending','Today','Overdue','Done'].map(f=>(
             <button key={f} onClick={()=>setFilter(f)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                filter===f?'bg-blue-600 text-white':'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                filter===f?'bg-blue-600 text-white':'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}>{f}</button>
           ))}
         </div>
@@ -270,7 +291,7 @@ export default function TasksPage() {
           {['All',...TASK_PRIORITIES].map(p=>(
             <button key={p} onClick={()=>setPriorityF(p)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                priorityF===p?'bg-purple-600 text-white':'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                priorityF===p?'bg-purple-600 text-white':'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
               }`}>{PRIORITY_ICONS[p]||''} {p}</button>
           ))}
         </div>
@@ -279,7 +300,7 @@ export default function TasksPage() {
       {/* Task cards */}
       <div className="space-y-2">
         {filtered.length === 0
-          ? <div className="text-center py-12 text-gray-400">
+          ? <div className="text-center py-12 text-gray-400 dark:text-gray-500">
               <p className="text-3xl mb-2">✅</p>
               <p>No tasks here. {filter==='Pending'&&'All caught up!'}</p>
             </div>
@@ -288,6 +309,7 @@ export default function TasksPage() {
               onToggle={onToggle}
               onEdit={t=>{ setSelected(t); setModal('edit') }}
               onDelete={t=>{ setSelected(t); setDelOpen(true) }}
+              onWhatsApp={openWhatsApp}
             />
           ))
         }
