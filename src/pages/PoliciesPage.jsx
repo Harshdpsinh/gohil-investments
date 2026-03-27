@@ -1311,7 +1311,13 @@ Wealth Management & Insurance Advisory
                     <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
                     <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
-                      {p.clientMobile || <span className="text-gray-300 dark:text-gray-600">—</span>}
+                      {(() => {
+                        const mobile = p.clientMobile
+                          || clients.find(c => c.id === p.clientId)?.mobile
+                          || clients.find(c => c.name?.toLowerCase().trim() === (p.clientName||'').toLowerCase().trim())?.mobile
+                          || ''
+                        return mobile || <span className="text-gray-300 dark:text-gray-600">—</span>
+                      })()}
                     </td>
                     <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                     <td className="table-cell text-xs">{p.insurer}</td>
