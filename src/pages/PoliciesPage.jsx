@@ -137,7 +137,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded }) {
       <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">📎 Policy Document (PDF)</p>
       {existingUrl && (
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-          <a href={existingUrl} target="_blank" rel="noopener noreferrer"
+          <a href={fixPdfUrl(existingUrl)} target="_blank" rel="noopener noreferrer"
              className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">📄 {existingName||'View PDF'}</a>
           <span className="text-xs text-green-600 font-semibold">✅ Stored</span>
         </div>
@@ -358,7 +358,11 @@ const KNOWN_INSURERS = [
   'Royal Sundaram','Shriram General Insurance','Digit Insurance',
 ]
 
-// ── Smart insurer combobox ────────────────────────────────────
+// ── Fix Cloudinary PDF URL (uploaded via /image/upload/ but needs /raw/upload/) ──
+function fixPdfUrl(url) {
+  if (!url) return url
+  return url.replace('/image/upload/', '/raw/upload/')
+}
 function InsurerSelect({ value, onChange }) {
   const [open,    setOpen]    = useState(false)
   const [query,   setQuery]   = useState(value || '')
@@ -419,7 +423,15 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
       dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
       return fixed
     }
-    return fixDates({ ...typeExtras, ...base })
+    // Pre-populate client mobile/email from clients list (fixes warning in edit mode)
+    let _clientMobile = ''
+    let _clientEmail  = ''
+    if (base.clientId) {
+      const cl = initClients.find(c => c.id === base.clientId)
+      _clientMobile = cl?.mobile || ''
+      _clientEmail  = cl?.email  || ''
+    }
+    return fixDates({ ...typeExtras, ...base, _clientMobile, _clientEmail })
   })
   const [saving, setSaving]         = useState(false)
   const [showQA, setShowQA]         = useState(false)
@@ -467,13 +479,19 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     if (!form.policyNumber.trim()) { toast.error('Policy Number required'); return }
     if (!form.clientId)            { toast.error('Please select a client'); return }
     if (!form.expiryDate)          { toast.error('Expiry date required');   return }
+    if (!form._clientMobile?.trim()) { toast.error('Phone number is required for WhatsApp'); return }
     setSaving(true)
     // Strip UI-only fields before saving to Firestore
-    const { _clientMobile: _cm, _clientEmail: _ce, ...cleanForm } = form
+    const { _clientMobile, _clientEmail, ...cleanForm } = form
     // Normalise frequency before saving
     if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
-    try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
-    finally { setSaving(false) }
+    try {
+      // Save mobile/email back to client record so it's always up to date
+      const clientUpdate = { mobile: _clientMobile.trim() }
+      if (_clientEmail?.trim()) clientUpdate.email = _clientEmail.trim()
+      await updateClient(form.clientId, clientUpdate)
+      await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName})
+    } finally { setSaving(false) }
   }
 
   return (
@@ -494,22 +512,36 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
                       className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-lg font-bold">+</button>
             </div>
           </div>
-          {/* Client contact info — shown after client is selected */}
+          {/* Client contact fields — editable, synced back to client record on save */}
           {form.clientId && (
-            <div className={`sm:col-span-2 rounded-xl px-4 py-3 text-xs flex items-center gap-4 flex-wrap
-              ${(!form._clientMobile && !form._clientEmail)
-                ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800'
-                : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'}`}>
-              <span className="font-semibold text-gray-700 dark:text-gray-300">📞</span>
-              {form._clientMobile
-                ? <span className="text-green-700 dark:text-green-300 font-semibold">{form._clientMobile}</span>
-                : <span className="text-orange-600 dark:text-orange-400 font-semibold">⚠️ No mobile — WhatsApp won't work. <a href="/clients" target="_blank" className="underline">Add in Clients page</a></span>}
-              <span className="font-semibold text-gray-400">|</span>
-              <span className="font-semibold text-gray-700 dark:text-gray-300">✉️</span>
-              {form._clientEmail
-                ? <span className="text-green-700 dark:text-green-300">{form._clientEmail}</span>
-                : <span className="text-gray-400 dark:text-gray-500">No email on file</span>}
-            </div>
+            <>
+              <div>
+                <label className="form-label">
+                  📞 Phone Number <span className="text-red-500">*</span>
+                  <span className="text-xs text-gray-400 font-normal ml-1">(saved to client record)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={form._clientMobile||''}
+                  onChange={e => set('_clientMobile', e.target.value)}
+                  className="form-input"
+                  placeholder="10-digit mobile number"
+                />
+              </div>
+              <div>
+                <label className="form-label">
+                  ✉️ Email
+                  <span className="text-xs text-gray-400 font-normal ml-1">(optional — saved to client record)</span>
+                </label>
+                <input
+                  type="email"
+                  value={form._clientEmail||''}
+                  onChange={e => set('_clientEmail', e.target.value)}
+                  className="form-input"
+                  placeholder="client@email.com"
+                />
+              </div>
+            </>
           )}
           {/* Policy Type tabs */}
           <div className="sm:col-span-2">
@@ -1298,7 +1330,7 @@ Wealth Management & Insurance Advisory
                     </td>
                     <td className="table-cell text-center">
                       {p.policyPdfUrl
-                        ?<a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
+                        ?<a href={fixPdfUrl(p.policyPdfUrl)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
                         :<span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell">
