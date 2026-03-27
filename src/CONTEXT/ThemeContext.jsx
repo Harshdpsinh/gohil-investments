@@ -1,21 +1,16 @@
-// src/context/ThemeContext.jsx
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useState } from "react";
 
-const ThemeContext = createContext({ dark: false, toggle: () => {} })
+const ThemeContext = createContext();
 
-export function ThemeProvider({ children }) {
-  const [dark, setDark] = useState(() => localStorage.getItem('gohil_theme') === 'dark')
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
-    localStorage.setItem('gohil_theme', dark ? 'dark' : 'light')
-  }, [dark])
-
+export const ThemeProvider = ({ children }) => {
+  const [theme, setTheme] = useState("light");
+  const toggleTheme = () => setTheme(t => t === "light" ? "dark" : "light");
   return (
-    <ThemeContext.Provider value={{ dark, toggle: () => setDark(d => !d) }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
-  )
-}
+  );
+};
 
-export const useTheme = () => useContext(ThemeContext)
+export const useTheme = () => useContext(ThemeContext);
+export default ThemeContext;
