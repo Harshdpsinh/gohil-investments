@@ -11,7 +11,7 @@ import {
   Title, Tooltip, Legend, LineElement, PointElement, Filler
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
-import { format, differenceInDays, subMonths, startOfMonth } from 'date-fns'
+import { format, differenceInDays, subMonths } from 'date-fns'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, LineElement, PointElement, Filler)
 
@@ -129,19 +129,20 @@ export default function DashboardPage() {
 
     const months = Array.from({length:6},(_,i) => {
       const d = subMonths(today(), 5-i)
-      return { label: format(d,'MMM yy'), start: startOfMonth(d) }
+      return { label: format(d,'MMM yy'), count: 0, comm: 0 }
     })
-    const monthly = months.map(m => ({
-      label: m.label,
-      count: policies.filter(p => {
-        const d = parseAnyDate(p.createdAt)
-        return d && format(d,'MMM yy') === m.label
-      }).length,
-      comm: policies.filter(p => {
-        const d = parseAnyDate(p.createdAt)
-        return d && format(d,'MMM yy') === m.label
-      }).reduce((s,p) => s + Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100), 0)
-    }))
+    // Single pass — accumulate count + commission per month label
+    const monthIndex = Object.fromEntries(months.map((m,i) => [m.label, i]))
+    policies.forEach(p => {
+      const d = parseAnyDate(p.createdAt)
+      if (!d) return
+      const lbl = format(d, 'MMM yy')
+      const idx = monthIndex[lbl]
+      if (idx === undefined) return
+      months[idx].count++
+      months[idx].comm += Math.round(((parseFloat(p.premium)||0)*(parseFloat(p.fyCommission)||0))/100)
+    })
+    const monthly = months
 
     const clientsWithGaps = clients.filter(c => {
       const cp = policies.filter(p => p.clientId === c.id)

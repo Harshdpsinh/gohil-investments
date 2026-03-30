@@ -124,7 +124,8 @@ function TaskForm({ initial, clients, policies, onSave, onCancel }) {
 
 // ── Task Card ─────────────────────────────────────────────────
 function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp }) {
-  const urgency  = taskUrgency(task.dueDate)
+  // urgency is precomputed in the filtered useMemo — no double parse here
+  const urgency  = task._urgency || taskUrgency(task.dueDate)
   const daysLeft = task.dueDate
     ? (() => { const dp = parseAnyDate(task.dueDate); return dp ? differenceInDays(dp, new Date()) : null })()
     : null
@@ -195,18 +196,19 @@ export default function TasksPage() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    return tasks.filter(t => {
-      const mQ = !q || t.title?.toLowerCase().includes(q) || t.clientName?.toLowerCase().includes(q)
-      const urg = taskUrgency(t.dueDate)
-      const mF =
-        filter==='All'     ? true :
-        filter==='Pending' ? !t.done :
-        filter==='Done'    ? !!t.done :
-        filter==='Overdue' ? (!t.done && urg==='overdue') :
-        filter==='Today'   ? (!t.done && urg==='today') : true
-      const mP = priorityF==='All' || t.priority===priorityF
-      return mQ && mF && mP
-    })
+    return tasks
+      .map(t => ({ ...t, _urgency: taskUrgency(t.dueDate) }))  // precompute once per task
+      .filter(t => {
+        const mQ = !q || t.title?.toLowerCase().includes(q) || t.clientName?.toLowerCase().includes(q)
+        const mF =
+          filter==='All'     ? true :
+          filter==='Pending' ? !t.done :
+          filter==='Done'    ? !!t.done :
+          filter==='Overdue' ? (!t.done && t._urgency==='overdue') :
+          filter==='Today'   ? (!t.done && t._urgency==='today') : true
+        const mP = priorityF==='All' || t.priority===priorityF
+        return mQ && mF && mP
+      })
   }, [tasks, search, filter, priorityF])
 
   const stats = useMemo(() => ({

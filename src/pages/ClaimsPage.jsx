@@ -1,5 +1,5 @@
 // src/pages/ClaimsPage.jsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import {
@@ -10,7 +10,6 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar     from '../components/ui/SearchBar'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
-import { useEffect } from 'react'
 import toast from 'react-hot-toast'
 
 const CLAIM_TYPES  = ['Cashless','Reimbursement','Death','Maturity','Motor Accident','Motor Theft','Other']
@@ -53,26 +52,32 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
   const setDoc = (k, v) => setForm(p => ({ ...p, docs: { ...p.docs, [k]: v } }))
 
-  // Filter policies for selected client
+  // Only match by clientId — avoids false positives when clientName is blank
   const clientPolicies = useMemo(() =>
-    policies.filter(p => p.clientId === form.clientId || p.clientName === form.clientName),
-    [policies, form.clientId, form.clientName]
+    form.clientId ? policies.filter(p => p.clientId === form.clientId) : [],
+    [policies, form.clientId]
   )
 
   const onClientChange = (clientId) => {
     const c = clients.find(x => x.id === clientId)
-    set('clientId', clientId)
-    set('clientName', c?.name || '')
-    set('policyId', '')
-    set('policyNumber', '')
-    set('insurer', '')
+    setForm(p => ({
+      ...p,
+      clientId,
+      clientName:   c?.name || '',
+      policyId:     '',
+      policyNumber: '',
+      insurer:      '',
+    }))
   }
 
   const onPolicyChange = (policyId) => {
     const p = policies.find(x => x.id === policyId)
-    set('policyId', policyId)
-    set('policyNumber', p?.policyNumber || '')
-    set('insurer', p?.insurer || '')
+    setForm(prev => ({
+      ...prev,
+      policyId,
+      policyNumber: p?.policyNumber || '',
+      insurer:      p?.insurer      || '',
+    }))
   }
 
   const inp = (k, label, type='text', extra={}) => (
@@ -164,10 +169,17 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
 
 // ── Pipeline view ─────────────────────────────────────────────
 function PipelineView({ claims, onEdit, onStatusChange }) {
+  // Precompute once — avoids 6 separate filter passes per render
+  const grouped = useMemo(() => {
+    const map = {}
+    CLAIM_STATUSES.forEach(s => { map[s] = [] })
+    claims.forEach(c => { if (map[c.status]) map[c.status].push(c) })
+    return map
+  }, [claims])
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       {CLAIM_STATUSES.map(status => {
-        const cols = claims.filter(c => c.status === status)
+        const cols = grouped[status] || []
         return (
           <div key={status} className="bg-gray-50 dark:bg-gray-800/60 rounded-xl p-3 min-h-[200px]">
             <div className="flex items-center justify-between mb-3">
@@ -257,7 +269,11 @@ export default function ClaimsPage() {
 
   const onAdd    = async form => { await addClaim(form);                toast.success('Claim added!');   setModal(null) }
   const onEdit   = async form => { await updateClaim(selected.id,form); toast.success('Claim updated!'); setModal(null) }
-  const onDelete = async ()   => { await deleteClaim(selected.id);      toast.success('Claim deleted') }
+  const onDelete = async () => {
+    await deleteClaim(selected.id)
+    toast.success('Claim deleted')
+    setDelOpen(false)
+  }
   const onStatusChange = async (id, status) => {
     await updateClaim(id, { status })
     toast.success(`Status → ${status}`)

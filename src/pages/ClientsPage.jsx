@@ -27,14 +27,17 @@ const EMPTY = {
 const KYC_OPTIONS = ['Pending','In Progress','Complete']
 const GENDERS     = ['Male','Female','Other']
 
-// Fix: use parseAnyDate for Timestamp-safe birthday calculation
 function birthdayDays(dob) {
   if (!dob) return null
   try {
     const d = parseAnyDate(dob)
     if (!d) return null
     const now  = new Date()
-    const bday = new Date(now.getFullYear(), d.getMonth(), d.getDate())
+    let bday = new Date(now.getFullYear(), d.getMonth(), d.getDate())
+    // If this year's birthday already passed, check next year
+    if (differenceInDays(bday, now) < 0) {
+      bday = new Date(now.getFullYear() + 1, d.getMonth(), d.getDate())
+    }
     const diff = differenceInDays(bday, now)
     return diff >= 0 && diff <= 30 ? diff : null
   } catch { return null }
@@ -136,12 +139,28 @@ function DocumentManager({ clientId }) {
   }
 
   const onDelete = async docItem => {
-    if (!confirm(`Delete "${docItem.name}"?`)) return
-    try {
-      await deleteClientDocument(clientId, docItem.id)
-      toast.success('File deleted')
-      setDocs(p => p.filter(d => d.id !== docItem.id))
-    } catch(err) { toast.error(err.message) }
+    // Use toast confirmation instead of blocking window.confirm
+    toast((t) => (
+      <span className="flex items-center gap-3 text-sm">
+        Delete <strong>{docItem.name}</strong>?
+        <button
+          onClick={async () => {
+            toast.dismiss(t.id)
+            try {
+              await deleteClientDocument(clientId, docItem.id)
+              toast.success('File deleted')
+              setDocs(p => p.filter(d => d.id !== docItem.id))
+            } catch(err) { toast.error(err.message) }
+          }}
+          className="px-2 py-1 bg-red-600 text-white text-xs rounded font-semibold">
+          Delete
+        </button>
+        <button onClick={() => toast.dismiss(t.id)}
+                className="px-2 py-1 bg-gray-200 text-gray-700 text-xs rounded font-semibold">
+          Cancel
+        </button>
+      </span>
+    ), { duration: 6000 })
   }
 
   if (loading) return <p className="text-gray-400 dark:text-gray-500 text-sm">Loading documents…</p>

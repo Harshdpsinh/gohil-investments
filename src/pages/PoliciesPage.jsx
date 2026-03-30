@@ -137,7 +137,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded }) {
       <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">📎 Policy Document (PDF)</p>
       {existingUrl && (
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-          <a href={fixPdfUrl(existingUrl)} target="_blank" rel="noopener noreferrer"
+          <a href={existingUrl} target="_blank" rel="noopener noreferrer"
              className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">📄 {existingName||'View PDF'}</a>
           <span className="text-xs text-green-600 font-semibold">✅ Stored</span>
         </div>
@@ -339,37 +339,16 @@ function MotorSection({ form, set }) {
 }
 
 // ── Policy Form (main) ────────────────────────────────────────
-// ── Known insurers for dropdown ───────────────────────────────
-const KNOWN_INSURERS = [
-  // Health
-  'Star Health & Allied Insurance','New India Assurance','ICICI Lombard',
-  'HDFC ERGO','Bajaj Allianz','Niva Bupa (Max Bupa)','Care Health Insurance',
-  'Aditya Birla Health Insurance','Tata AIG','Oriental Insurance',
-  'United India Insurance','National Insurance','ManipalCigna Health Insurance',
-  'Reliance Health Insurance','SBI Health Insurance',
-  // Life
-  'LIC of India','HDFC Life','ICICI Prudential Life','SBI Life',
-  'Max Life Insurance','Bajaj Allianz Life','Kotak Life Insurance',
-  'Tata AIA Life','Aditya Birla Sun Life','PNB MetLife',
-  'Canara HSBC Life','Edelweiss Tokio Life','IndiaFirst Life',
-  // Motor
-  'HDFC ERGO Motor','New India Assurance Motor','Bajaj Allianz Motor',
-  'ICICI Lombard Motor','Reliance General Insurance','Tata AIG Motor',
-  'Royal Sundaram','Shriram General Insurance','Digit Insurance',
-]
+import { KNOWN_INSURERS } from '../utils/constants'
 
-// ── Fix Cloudinary PDF URL (uploaded via /image/upload/ but needs /raw/upload/) ──
-function fixPdfUrl(url) {
-  if (!url) return url
-  return url.replace('/image/upload/', '/raw/upload/')
-}
+// ── Smart insurer combobox ────────────────────────────────────
 function InsurerSelect({ value, onChange }) {
   const [open,    setOpen]    = useState(false)
   const [query,   setQuery]   = useState(value || '')
   const [focused, setFocused] = useState(false)
 
-  // Sync when value changes externally (e.g. edit mode)
-  useState(() => { setQuery(value || '') }, [value])
+  // Sync query when value changes externally (e.g. switching to edit mode)
+  useEffect(() => { setQuery(value || '') }, [value])
 
   const filtered = query.length >= 1
     ? KNOWN_INSURERS.filter(i => i.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
@@ -423,15 +402,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
       dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
       return fixed
     }
-    // Pre-populate client mobile/email from clients list (fixes warning in edit mode)
-    let _clientMobile = ''
-    let _clientEmail  = ''
-    if (base.clientId) {
-      const cl = initClients.find(c => c.id === base.clientId)
-      _clientMobile = cl?.mobile || ''
-      _clientEmail  = cl?.email  || ''
-    }
-    return fixDates({ ...typeExtras, ...base, _clientMobile, _clientEmail })
+    return fixDates({ ...typeExtras, ...base })
   })
   const [saving, setSaving]         = useState(false)
   const [showQA, setShowQA]         = useState(false)
@@ -479,19 +450,13 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     if (!form.policyNumber.trim()) { toast.error('Policy Number required'); return }
     if (!form.clientId)            { toast.error('Please select a client'); return }
     if (!form.expiryDate)          { toast.error('Expiry date required');   return }
-    if (!form._clientMobile?.trim()) { toast.error('Phone number is required for WhatsApp'); return }
     setSaving(true)
     // Strip UI-only fields before saving to Firestore
-    const { _clientMobile, _clientEmail, ...cleanForm } = form
+    const { _clientMobile: _cm, _clientEmail: _ce, ...cleanForm } = form
     // Normalise frequency before saving
     if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
-    try {
-      // Save mobile/email back to client record so it's always up to date
-      const clientUpdate = { mobile: _clientMobile.trim() }
-      if (_clientEmail?.trim()) clientUpdate.email = _clientEmail.trim()
-      await updateClient(form.clientId, clientUpdate)
-      await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName})
-    } finally { setSaving(false) }
+    try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
+    finally { setSaving(false) }
   }
 
   return (
@@ -512,36 +477,22 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
                       className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-lg font-bold">+</button>
             </div>
           </div>
-          {/* Client contact fields — editable, synced back to client record on save */}
+          {/* Client contact info — shown after client is selected */}
           {form.clientId && (
-            <>
-              <div>
-                <label className="form-label">
-                  📞 Phone Number <span className="text-red-500">*</span>
-                  <span className="text-xs text-gray-400 font-normal ml-1">(saved to client record)</span>
-                </label>
-                <input
-                  type="tel"
-                  value={form._clientMobile||''}
-                  onChange={e => set('_clientMobile', e.target.value)}
-                  className="form-input"
-                  placeholder="10-digit mobile number"
-                />
-              </div>
-              <div>
-                <label className="form-label">
-                  ✉️ Email
-                  <span className="text-xs text-gray-400 font-normal ml-1">(optional — saved to client record)</span>
-                </label>
-                <input
-                  type="email"
-                  value={form._clientEmail||''}
-                  onChange={e => set('_clientEmail', e.target.value)}
-                  className="form-input"
-                  placeholder="client@email.com"
-                />
-              </div>
-            </>
+            <div className={`sm:col-span-2 rounded-xl px-4 py-3 text-xs flex items-center gap-4 flex-wrap
+              ${(!form._clientMobile && !form._clientEmail)
+                ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800'
+                : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'}`}>
+              <span className="font-semibold text-gray-700 dark:text-gray-300">📞</span>
+              {form._clientMobile
+                ? <span className="text-green-700 dark:text-green-300 font-semibold">{form._clientMobile}</span>
+                : <span className="text-orange-600 dark:text-orange-400 font-semibold">⚠️ No mobile — WhatsApp won't work. <a href="/clients" target="_blank" className="underline">Add in Clients page</a></span>}
+              <span className="font-semibold text-gray-400">|</span>
+              <span className="font-semibold text-gray-700 dark:text-gray-300">✉️</span>
+              {form._clientEmail
+                ? <span className="text-green-700 dark:text-green-300">{form._clientEmail}</span>
+                : <span className="text-gray-400 dark:text-gray-500">No email on file</span>}
+            </div>
           )}
           {/* Policy Type tabs */}
           <div className="sm:col-span-2">
@@ -912,7 +863,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         </p>
       </div>
       <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-        {dupRows.map(({ pNo, data }) => {
+        {dupRows.map(({ pNo, data, reason }) => {
           const choice = dupChoices[pNo] || 'skip'
           return (
             <div key={pNo} className="border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-white dark:bg-gray-800">
@@ -1311,13 +1262,7 @@ Wealth Management & Insurance Advisory
                     <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
                     <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
-                      {(() => {
-                        const mobile = p.clientMobile
-                          || clients.find(c => c.id === p.clientId)?.mobile
-                          || clients.find(c => c.name?.toLowerCase().trim() === (p.clientName||'').toLowerCase().trim())?.mobile
-                          || ''
-                        return mobile || <span className="text-gray-300 dark:text-gray-600">—</span>
-                      })()}
+                      {p.clientMobile || <span className="text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                     <td className="table-cell text-xs">{p.insurer}</td>
@@ -1336,7 +1281,7 @@ Wealth Management & Insurance Advisory
                     </td>
                     <td className="table-cell text-center">
                       {p.policyPdfUrl
-                        ?<a href={fixPdfUrl(p.policyPdfUrl)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
+                        ?<a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
                         :<span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell">

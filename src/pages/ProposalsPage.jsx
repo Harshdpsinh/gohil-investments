@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useClients }       from '../hooks/useClients'
 import {
-  addProposal, getAllProposals, deleteProposal,
+  addProposal, subscribeProposals, deleteProposal,
   addClient, updateClient, findClientByMobileOrName
 } from '../firebase/firestore'
 import { generateProposalPDF } from '../utils/proposalPDF'
@@ -11,22 +11,13 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { fmtDateTime } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
 
-// ── Known insurers (shared with PoliciesPage) ─────────────────
-const KNOWN_INSURERS_LIST = [
-  'Star Health & Allied Insurance','New India Assurance','ICICI Lombard',
-  'HDFC ERGO','Bajaj Allianz','Niva Bupa (Max Bupa)','Care Health Insurance',
-  'Aditya Birla Health Insurance','Tata AIG','Oriental Insurance',
-  'United India Insurance','National Insurance','LIC of India',
-  'HDFC Life','ICICI Prudential Life','SBI Life','Max Life Insurance',
-  'Bajaj Allianz Life','Kotak Life Insurance','Tata AIA Life',
-  'HDFC ERGO Motor','Bajaj Allianz Motor','Digit Insurance',
-]
+import { KNOWN_INSURERS } from '../utils/constants'
 function InsurerCombo({ value, onChange }) {
   const [open, setOpen] = useState(false)
   const [q, setQ]       = useState(value || '')
   const filtered = q.length >= 1
-    ? KNOWN_INSURERS_LIST.filter(i => i.toLowerCase().includes(q.toLowerCase())).slice(0,8)
-    : KNOWN_INSURERS_LIST.slice(0,8)
+    ? KNOWN_INSURERS.filter(i => i.toLowerCase().includes(q.toLowerCase())).slice(0,8)
+    : KNOWN_INSURERS.slice(0,8)
   const pick = name => { setQ(name); onChange(name); setOpen(false) }
   return (
     <div className="relative">
@@ -192,8 +183,11 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
       }
 
       // Save the proposal with the resolved clientId
+      // Set terminal status BEFORE calling onSave — onSave closes the modal
+      // which unmounts this component, making any setState after it a no-op / warning
+      const finalStatus = form.clientId ? 'linked' : (existing ? 'linked' : 'created')
+      setUpsertStatus(finalStatus)
       await onSave({ ...form, clientId, clientName })
-      setUpsertStatus(clientId && !form.clientId ? 'created' : 'linked')
 
     } catch (err) {
       toast.error(err.message)
@@ -348,24 +342,25 @@ export default function ProposalsPage() {
   const [selected, setSelected]   = useState(null)
   const [delOpen,  setDelOpen]    = useState(false)
 
-  const load = async () => {
+  // Realtime subscription — consistent with every other page in the app
+  useEffect(() => {
     setLoading(true)
-    const data = await getAllProposals()
-    setProposals(data)
-    setLoading(false)
-  }
-  useEffect(() => { load() }, [])
+    const unsub = subscribeProposals(data => {
+      setProposals(data)
+      setLoading(false)
+    })
+    return () => unsub()
+  }, [])
 
   const onAdd = async form => {
     await addProposal(form)
     toast.success('Proposal saved!')
     setModal(null)
-    load()
   }
   const onDelete = async () => {
     await deleteProposal(selected.id)
     toast.success('Proposal deleted')
-    load()
+    setDelOpen(false)
   }
 
   return (
