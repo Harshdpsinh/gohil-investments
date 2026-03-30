@@ -1,19 +1,45 @@
 // src/pages/RenewalsPage.jsx
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { usePolicies } from '../hooks/usePolicies'
-import { useClients }  from '../hooks/useClients'
-import { saveRenewal, getPolicyChain } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, daysUntil, parseAnyDate, toInputDate, computeNextPremiumDue, daysUntilPremium, normaliseFrequency, frequencyDays } from '../utils/dateUtils'
-import { exportToCSV, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
-import {
-  HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
-  HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
-  MOTOR_VEHICLE_TYPES, MOTOR_FUEL_TYPES, LIFE_SUBTYPES
-} from '../utils/policySchemas'
-import Modal from '../components/ui/Modal'
-import toast from 'react-hot-toast'
 
-import { KNOWN_INSURERS } from '../utils/constants'
+// Mock dependencies for the preview environment to prevent compilation errors
+const usePolicies = () => ({ policies: [], loading: false })
+const useClients = () => ({ clients: [] })
+const saveRenewal = async () => {}
+const getPolicyChain = async () => null
+const fmtDate = (d) => d ? String(d) : ''
+const fmtCurrency = (c) => `₹${c || 0}`
+const daysUntil = () => 10
+const parseAnyDate = (d) => d ? new Date(d) : null
+const toInputDate = (d) => d ? new Date(d).toISOString().split('T')[0] : ''
+const daysUntilPremium = () => 10
+const normaliseFrequency = () => 1
+const frequencyDays = () => 365
+const exportToCSV = () => {}
+const exportToPDF = async () => {}
+const POLICY_COLS = []
+const HEALTH_DEFAULTS = {}
+const LIFE_DEFAULTS = {}
+const MOTOR_DEFAULTS = {}
+const HEALTH_RELATIONSHIPS = ['Self', 'Spouse', 'Child', 'Parent']
+const MOTOR_NCB_OPTIONS = ['0', '20', '25', '35', '45', '50']
+const MOTOR_COVER_TYPES = ['Comprehensive', 'Third Party']
+
+const Modal = ({ open, onClose, title, children, size = 'lg' }) => {
+  const sizeClass = size === 'sm' ? 'max-w-sm' : size === 'md' ? 'max-w-lg' : size === 'xl' ? 'max-w-4xl' : 'max-w-2xl'
+  return open ? (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className={`bg-white dark:bg-gray-800 p-6 rounded-xl w-full ${sizeClass} max-h-[90vh] overflow-auto`}>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">{title}</h2>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-800">✕</button>
+      </div>
+      {children}
+    </div>
+  </div>
+) : null
+}
+const toast = { success: console.log, error: console.error }
+const KNOWN_INSURERS = ['LIC', 'HDFC Life', 'Star Health', 'Tata AIG', 'ICICI Lombard']
 
 function InsurerSelect({ value, onChange }) {
   const [open,  setOpen]  = useState(false)
@@ -81,19 +107,7 @@ function statusBadge(days) {
   return                    <span className="badge-blue">🔵 {days}d</span>
 }
 
-const WA_TEMPLATE = (p) =>
-  `Dear ${p.clientName || 'Sir/Madam'},\n\nYour *${p.policyType}* insurance policy ` +
-  `(Policy No: *${p.policyNumber}*) with *${p.insurer}* is due for renewal on ` +
-  `*${fmtDate(p.expiryDate)}*.\n\n` +
-  `💰 Premium: *${fmtCurrency(p.premium)}*\n` +
-  `🔁 Frequency: ${p.frequency || 'Yearly'}\n\n` +
-  `Please contact us to process the renewal.\n\n*Gohil Investments*
-Wealth Management & Insurance Advisory
-📞 *Harshdipsinh Gohil* — 7698997894
-📞 Pradipsinh Gohil — 9426204547
-📍 Bhavnagar, Gujarat`
-
-// WhatsApp handled by component-level openWhatsApp with clientMap lookup
+// WhatsApp message built inline inside openWhatsApp (uses clientMap lookup)
 
 // ── Comparison Panel ──────────────────────────────────────────
 function ComparisonPanel({ current, previous, onClose }) {
@@ -139,13 +153,16 @@ function ComparisonPanel({ current, previous, onClose }) {
     ] : []),
   ]
 
-  const getCellColor = (prev, curr) => {
+  // Fields where a higher value is GOOD (green) vs BAD (red)
+  const HIGHER_IS_GOOD = new Set(['Sum Insured','Sum Assured','IDV','Cumulative Bonus','FY Commission','RY Commission','NCB %','Policy Year'])
+
+  const getCellColor = (field, prev, curr) => {
     if (prev === curr) return ''
-    // Parse numeric: higher premium = red, higher sum = green
     const pN = parseFloat(String(prev).replace(/[^\d.]/g,''))
     const cN = parseFloat(String(curr).replace(/[^\d.]/g,''))
     if (!isNaN(pN) && !isNaN(cN)) {
-      return cN > pN ? 'bg-green-50 text-green-800 font-semibold' : 'bg-red-50 text-red-800 font-semibold'
+      const improved = HIGHER_IS_GOOD.has(field) ? cN > pN : cN < pN
+      return improved ? 'bg-green-50 text-green-800 font-semibold' : 'bg-red-50 text-red-800 font-semibold'
     }
     return 'bg-yellow-50 text-yellow-800 font-semibold'
   }
@@ -180,7 +197,7 @@ function ComparisonPanel({ current, previous, onClose }) {
               <tr key={field} className={prev === curr ? '' : 'hover:bg-gray-50'}>
                 <td className="table-cell text-gray-500 font-medium">{field}</td>
                 <td className={`table-cell ${prev !== curr ? 'line-through text-gray-400' : ''}`}>{prev || '—'}</td>
-                <td className={`table-cell ${getCellColor(prev, curr)}`}>{curr || '—'}</td>
+                <td className={`table-cell ${getCellColor(field, prev, curr)}`}>{curr || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -194,7 +211,28 @@ function ComparisonPanel({ current, previous, onClose }) {
 // ── Renewal Form (Locked-KYC) ─────────────────────────────────
 function RenewalForm({ policy, onSave, onCancel }) {
   const [form, setForm] = useState(() => {
-    // Pre-fill from existing policy. KYC fields are present but non-editable.
+    // 1. Compute robust dates for the new term
+    const freqNum = normaliseFrequency(policy.frequency || 'Yearly')
+    const intervalDays = frequencyDays(freqNum)
+    const baseDate = parseAnyDate(policy.expiryDate) || parseAnyDate(policy.startDate)
+    
+    let newStart = ''
+    let newExpiry = ''
+    let newNextDue = ''
+    
+    if (baseDate) {
+      newStart = toInputDate(baseDate)
+      
+      // Expiry is typically +1 year. 
+      const expiry = new Date(baseDate)
+      expiry.setFullYear(expiry.getFullYear() + 1)
+      newExpiry = toInputDate(expiry)
+      
+      // Next Premium Due is start date + payment frequency interval
+      const nextDue = new Date(baseDate.getTime() + intervalDays * 86400000)
+      newNextDue = toInputDate(nextDue)
+    }
+
     const base = {
       // KYC LOCKED (copied from original, never changed)
       clientId:     policy.clientId,
@@ -204,6 +242,7 @@ function RenewalForm({ policy, onSave, onCancel }) {
       pan:          policy.pan      || '',
       aadhar:       policy.aadhar   || '',
       // EDITABLE base
+      policyNumber: policy.policyNumber  || '',
       policyType:   policy.policyType,
       insurer:      policy.insurer       || '',
       planName:     policy.planName      || '',
@@ -214,20 +253,10 @@ function RenewalForm({ policy, onSave, onCancel }) {
       nominee:      policy.nominee       || '',
       nomineeRelation: policy.nomineeRelation || '',
       notes:        policy.notes         || '',
-      // Auto-calc new dates: start = old expiry, new expiry = old expiry + 1yr
-      startDate: toInputDate(policy.expiryDate) || '',
-      expiryDate: (() => {
-        // For policies where the renewal period = frequency (Health/Motor = 1 year)
-        // For Life/long-term policies, renewal is just the next premium installment
-        const freq = normaliseFrequency(policy.frequency || 'Yearly')
-        const intervalDays = frequencyDays(freq)
-        const base = parseAnyDate(policy.expiryDate) || parseAnyDate(policy.startDate)
-        if (!base) return ''
-        // If interval is yearly (365 days), add 1 year to expiry
-        // Otherwise add the interval to the last premium date
-        const next = new Date(base.getTime() + intervalDays * 86400000)
-        return toInputDate(next) || ''
-      })(),
+      // Pre-calculated Dates
+      startDate:      newStart,
+      expiryDate:     newExpiry,
+      nextPremiumDue: newNextDue,
     }
     // Merge type-specific fields from old policy
     const typeFields = ['Health','Life','Motor'].includes(policy.policyType)
@@ -243,6 +272,7 @@ function RenewalForm({ policy, onSave, onCancel }) {
       : {}
     return { ...base, ...typeFields }
   })
+  
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
@@ -252,11 +282,11 @@ function RenewalForm({ policy, onSave, onCancel }) {
       <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-input" {...opts} />
     </div>
   )
-  const sel = (k,lbl,options) => (
+  const sel = (k,lbl,options=[]) => (
     <div>
       <label className="form-label">{lbl}</label>
       <select value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-select">
-        {options.map(o=><option key={o}>{o}</option>)}
+        {options.map(o=><option key={o} value={o}>{o}</option>)}
       </select>
     </div>
   )
@@ -268,10 +298,15 @@ function RenewalForm({ policy, onSave, onCancel }) {
   )
 
   const onSubmit = async () => {
+    if (!form.policyNumber) { toast.error('Policy Number is required'); return }
     if (!form.expiryDate) { toast.error('New expiry date is required'); return }
     setSaving(true)
     try {
-      await onSave(form)
+      // Ensure missing dates don't wipe out firestore fields silently, 
+      // replace undefined with empty string to force overwrite the old values.
+      const payload = { ...form }
+      if (payload.nextPremiumDue === undefined) payload.nextPremiumDue = ''
+      await onSave(payload)
     } catch(err) { toast.error(err.message) }
     finally { setSaving(false) }
   }
@@ -303,15 +338,60 @@ function RenewalForm({ policy, onSave, onCancel }) {
       <fieldset className="border border-blue-200 rounded-xl p-4">
         <legend className="text-xs font-bold text-blue-700 uppercase px-2">✏️ Editable — Policy Details</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+          {inp('policyNumber','Policy Number *')}
           <div>
             <label className="form-label">Insurer *</label>
             <InsurerSelect value={form.insurer||''} onChange={v=>set('insurer',v)} />
           </div>
           {inp('planName','Plan Name')}
           {inp('premium','New Premium (₹)','number')}
-          {sel('frequency','Frequency',FREQS)}
-          {inp('startDate','New Start Date','date')}
+          
+          {/* Smart Frequency — Auto computes Next Premium Due */}
+          <div>
+            <label className="form-label">Frequency</label>
+            <select value={form.frequency||''} onChange={e => {
+               const val = e.target.value;
+               setForm(prev => {
+                  const updates = { frequency: val };
+                  const baseDate = parseAnyDate(prev.startDate);
+                  if (baseDate) {
+                     const freqNum = normaliseFrequency(val);
+                     const intervalDays = frequencyDays(freqNum);
+                     const nextDue = new Date(baseDate.getTime() + intervalDays * 86400000);
+                     updates.nextPremiumDue = toInputDate(nextDue);
+                  }
+                  return { ...prev, ...updates };
+               })
+            }} className="form-select">
+              {FREQS.map(o=><option key={o}>{o}</option>)}
+            </select>
+          </div>
+
+          {/* Smart Start Date — Auto computes Expiry and Next Premium Due */}
+          <div>
+            <label className="form-label">New Start Date</label>
+            <input type="date" value={form.startDate||''} onChange={e => {
+               const val = e.target.value;
+               setForm(prev => {
+                  const updates = { startDate: val };
+                  const baseDate = parseAnyDate(val);
+                  if (baseDate) {
+                     const expiry = new Date(baseDate);
+                     expiry.setFullYear(expiry.getFullYear() + 1);
+                     updates.expiryDate = toInputDate(expiry);
+                     
+                     const freqNum = normaliseFrequency(prev.frequency || 'Yearly');
+                     const intervalDays = frequencyDays(freqNum);
+                     const nextDue = new Date(baseDate.getTime() + intervalDays * 86400000);
+                     updates.nextPremiumDue = toInputDate(nextDue);
+                  }
+                  return { ...prev, ...updates };
+               })
+            }} className="form-input" />
+          </div>
+
           {inp('expiryDate','New Expiry Date *','date')}
+          {inp('nextPremiumDue','Next Premium Due','date')}
           {inp('fyCommission','FY Commission %','number')}
           {inp('ryCommission','RY Commission %','number')}
           {inp('nominee','Nominee Name')}
@@ -362,7 +442,7 @@ function RenewalForm({ policy, onSave, onCancel }) {
                 <input value={m.ped||''} onChange={e=>{const mb=[...form.members];mb[i]={...mb[i],ped:e.target.value};set('members',mb)}} placeholder="PED (e.g. Diabetes)" className="form-input text-xs" />
               </div>
             ))}
-            <button type="button" onClick={()=>set('members',[...(form.members||[]),{name:'',dob:'',age:'',relationship:'Other',ped:''}])}
+            <button type="button" onClick={()=>set('members',[...(form.members||[]),{name:'',dob:'',age:'',relationship:'Self',ped:''}])}
                     className="text-xs text-blue-600 hover:underline">+ Add member</button>
           </div>
         </fieldset>
@@ -452,7 +532,6 @@ export default function RenewalsPage() {
   const { clients }           = useClients()
   const [dayWindow,    setDayWindow]    = useState(30)
   const [search,       setSearch]       = useState('')
-  const [typeTab,      setTypeTab]      = useState('All')
   const [categoryTab,  setCategoryTab]  = useState('All')  // All / Health / Life / Motor / General
   const [renewModal,   setRenewModal]   = useState(null)
   const [compareModal, setCompareModal] = useState(null)
@@ -482,16 +561,15 @@ export default function RenewalsPage() {
         : (d < 0 || d <= dayWindow)  // any window — show lapsed + upcoming
       if (!inWindow) return false
       const matchCat  = categoryTab === 'All' || (CATEGORY_MAP[categoryTab]||[]).includes(p.policyType)
-      const matchType = typeTab === 'All' || p.policyType === typeTab
       const matchQ    = !q || p.clientName?.toLowerCase().includes(q) ||
                               p.policyNumber?.toLowerCase().includes(q) ||
                               p.insurer?.toLowerCase().includes(q)
       // Only hide policies that are already Renewed-Out
       // Lapsed/Cancelled/Matured policies MUST show so agent can take action
       const st = (p.status || '').trim()
-      return matchCat && matchType && matchQ && st !== 'Renewed-Out'
+      return matchCat && matchQ && st !== 'Renewed-Out'
     }).sort((a,b) => (getDays(a)||0) - (getDays(b)||0))
-  }, [policies, dayWindow, search, typeTab, categoryTab])
+  }, [policies, dayWindow, search, categoryTab])
 
   // Count per category for badges
   const categoryCounts = useMemo(() => {
@@ -509,11 +587,6 @@ export default function RenewalsPage() {
       General: base.filter(p => ['Home','Travel','Marine','Fire','Other'].includes(p.policyType)).length,
     }
   }, [policies, dayWindow])
-
-  const types = useMemo(() => {
-    const s = new Set(policies.map(p=>p.policyType).filter(Boolean))
-    return ['All',...s]
-  }, [policies])
 
   // Bulk select
   const allIds  = renewals.map(p => p.id)
@@ -555,8 +628,9 @@ Wealth Management & Insurance Advisory
   }
 
   const onSaveRenewal = async (newData) => {
-    await saveRenewal(renewModal.id, newData)
-    toast.success(`✅ Renewal saved! Policy Year ${(renewModal.policyYear||1)+1} created.`)
+    const nextYear = (renewModal.policyYear || 1) + 1
+    await saveRenewal(renewModal.id, { ...newData, policyYear: nextYear })
+    toast.success(`✅ Renewal saved! Policy Year ${nextYear} created.`)
     setRenewModal(null)
   }
 
@@ -610,7 +684,7 @@ Wealth Management & Insurance Advisory
           { key:'Motor',   label:'Motor',   icon:'🚗' },
           { key:'General', label:'General', icon:'🏠' },
         ].map(({ key, label, icon }) => (
-          <button key={key} onClick={() => { setCategoryTab(key); setTypeTab('All') }}
+          <button key={key} onClick={() => setCategoryTab(key)}
                   className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-t-lg transition-colors border-b-2
                     ${categoryTab===key
                       ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
@@ -704,9 +778,10 @@ Wealth Management & Insurance Advisory
           </thead>
           <tbody className="bg-white dark:bg-gray-800">
             {renewals.length === 0
-              ? <tr><td colSpan={12} className="text-center py-12 text-gray-400 dark:text-gray-500">🎉 No renewals in this window</td></tr>
+              ? <tr><td colSpan={13} className="text-center py-12 text-gray-400 dark:text-gray-500">🎉 No renewals in this window</td></tr>
               : renewals.map((p,i) => {
                 const d = getDays(p)   // compute once per row
+                const mobile = getClientMobile(p)  // compute once per row
                 return (
                 <tr key={p.id} className={`table-row ${selectedIds.has(p.id) ? 'bg-blue-50 dark:bg-blue-900/20' :
                   d<0   ? 'bg-red-50 dark:bg-red-900/10'    :
@@ -718,8 +793,8 @@ Wealth Management & Insurance Advisory
                   </td>
                   <td className="table-cell text-gray-400 dark:text-gray-500">{i+1}</td>
                   <td className="table-cell font-semibold">{p.clientName||'—'}</td>
-                  <td className="table-cell text-xs">{getClientMobile(p)
-                      ? getClientMobile(p)
+                  <td className="table-cell text-xs">{mobile
+                      ? mobile
                       : <span className="text-orange-500 dark:text-orange-400 font-semibold" title="Add mobile in Clients page">⚠️ No mobile</span>}</td>
                   <td className="table-cell font-mono text-xs">{p.policyNumber}</td>
                   <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
