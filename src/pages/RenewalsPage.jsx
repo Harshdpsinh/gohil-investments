@@ -2,7 +2,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { usePolicies } from '../hooks/usePolicies'
 import { useClients }  from '../hooks/useClients'
-import { saveRenewal, getPolicyChain } from '../firebase/firestore'
+import { saveRenewal, getPolicyChain, updatePolicy } from '../firebase/firestore'
 import { fmtDate, fmtCurrency, daysUntil, parseAnyDate, toInputDate, computeNextPremiumDue, daysUntilPremium, normaliseFrequency, frequencyDays } from '../utils/dateUtils'
 import { exportToCSV, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
 import {
@@ -217,6 +217,8 @@ function RenewalForm({ policy, onSave, onCancel }) {
   const [form, setForm] = useState(() => {
     // Pre-fill from existing policy. KYC fields are present but non-editable.
     const base = {
+      // NEW POLICY NUMBER — must be entered fresh
+      policyNumber: '',
       // KYC LOCKED (copied from original, never changed)
       clientId:     policy.clientId,
       clientName:   policy.clientName,
@@ -289,6 +291,7 @@ function RenewalForm({ policy, onSave, onCancel }) {
   )
 
   const onSubmit = async () => {
+    if (!form.policyNumber?.trim()) { toast.error('New Policy Number is required'); return }
     if (!form.expiryDate) { toast.error('New expiry date is required'); return }
     setSaving(true)
     try {
@@ -324,7 +327,24 @@ function RenewalForm({ policy, onSave, onCancel }) {
       <fieldset className="border border-blue-200 rounded-xl p-4">
         <legend className="text-xs font-bold text-blue-700 uppercase px-2">✏️ Editable — Policy Details</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-          <div>
+          {/* NEW POLICY NUMBER — mandatory */}
+          <div className="sm:col-span-2">
+            <label className="form-label">
+              New Policy Number <span className="text-red-500">*</span>
+              <span className="text-xs text-gray-400 font-normal ml-1">(enter the new policy number from insurer)</span>
+            </label>
+            <input
+              type="text"
+              value={form.policyNumber||''}
+              onChange={e => set('policyNumber', e.target.value)}
+              className="form-input border-blue-400 ring-1 ring-blue-300"
+              placeholder="e.g. ICL-2025-001 (cannot be same as old number)"
+              required
+            />
+            <p className="text-xs text-blue-600 mt-1">
+              Old policy number: <span className="font-mono font-semibold text-gray-600">{policy.policyNumber}</span> — this will be marked as Renewed-Out
+            </p>
+          </div>
             <label className="form-label">Insurer *</label>
             <InsurerSelect value={form.insurer||''} onChange={v=>set('insurer',v)} />
           </div>
@@ -450,6 +470,9 @@ export default function RenewalsPage() {
   const { policies, loading } = usePolicies()
   const { clients }           = useClients()
   const [dayWindow,    setDayWindow]    = useState(30)
+  const [dateFrom,     setDateFrom]     = useState('')   // custom date range
+  const [dateTo,       setDateTo]       = useState('')
+  const [useDateRange, setUseDateRange] = useState(false)
   const [search,       setSearch]       = useState('')
   const [typeTab,      setTypeTab]      = useState('All')
   const [categoryTab,  setCategoryTab]  = useState('All')  // All / Health / Life / Motor / General
@@ -504,25 +527,37 @@ export default function RenewalsPage() {
     return policies.filter(p => {
       const d = getDays(p)
       if (d === null || isNaN(d)) return false
-      // Hide if lapsed more than 90 days ago — beyond actionable range
       if (d < -90) return false
-      // Show: lapsed within last 30 days (d between -30 and 0)
-      //    OR: upcoming within the selected window (d between 0 and dayWindow)
-      const inWindow = dayWindow === -1
-        ? (d < 0)                    // "Overdue" button — show only lapsed
-        : (d < 0 || d <= dayWindow)  // any window — show lapsed + upcoming
+
+      // Date range filter (overrides day window when active)
+      let inWindow = false
+      if (useDateRange && dateFrom && dateTo) {
+        const dueDate = p.nextPremiumDue ? new Date(p.nextPremiumDue) : (p.expiryDate ? new Date(p.expiryDate) : null)
+        if (!dueDate) return false
+        const from = new Date(dateFrom)
+        const to   = new Date(dateTo)
+        to.setHours(23, 59, 59)
+        inWindow = dueDate >= from && dueDate <= to
+      } else {
+        inWindow = dayWindow === -1
+          ? (d < 0)
+          : (d < 0 || d <= dayWindow)
+      }
       if (!inWindow) return false
+
       const matchCat  = categoryTab === 'All' || (CATEGORY_MAP[categoryTab]||[]).includes(p.policyType)
       const matchType = typeTab === 'All' || p.policyType === typeTab
       const matchQ    = !q || p.clientName?.toLowerCase().includes(q) ||
                               p.policyNumber?.toLowerCase().includes(q) ||
                               p.insurer?.toLowerCase().includes(q)
-      // Only hide policies that are already Renewed-Out
-      // Lapsed/Cancelled/Matured policies MUST show so agent can take action
+      // Hide: Renewed-Out (by us), Renewed-Elsewhere, Not-Renewing
       const st = (p.status || '').trim()
-      return matchCat && matchType && matchQ && st !== 'Renewed-Out'
+      return matchCat && matchType && matchQ &&
+             st !== 'Renewed-Out' &&
+             st !== 'Renewed-Elsewhere' &&
+             st !== 'Not-Renewing'
     }).sort((a,b) => (getDays(a)||0) - (getDays(b)||0))
-  }, [policies, dayWindow, search, typeTab, categoryTab])
+  }, [policies, dayWindow, dateFrom, dateTo, useDateRange, search, typeTab, categoryTab])
 
   // Count per category for badges
   const categoryCounts = useMemo(() => {
@@ -530,7 +565,10 @@ export default function RenewalsPage() {
       const d = getDays(p)
       if (d === null || isNaN(d)) return false
       const st2 = (p.status || '').trim()
-      return (dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)) && st2 !== 'Renewed-Out'
+      return (dayWindow === -1 ? d < 0 : (d < 0 || d <= dayWindow)) &&
+             st2 !== 'Renewed-Out' &&
+             st2 !== 'Renewed-Elsewhere' &&
+             st2 !== 'Not-Renewing'
     })
     return {
       All:     base.length,
@@ -585,9 +623,39 @@ Wealth Management & Insurance Advisory
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
 
+  // Mark policy as renewed by another agent/insurer — removes from renewals
+  const onRenewedElsewhere = async (policy) => {
+    try {
+      await updatePolicy(policy.id, {
+        status: 'Renewed-Elsewhere',
+        renewedElsewhereAt: new Date().toISOString(),
+      })
+      toast.success(`"${policy.policyNumber}" marked as Renewed Elsewhere — removed from renewals.`)
+    } catch(err) { toast.error(err.message) }
+  }
+
+  // Mark policy as not renewing this cycle — removes from renewals list
+  const onNotRenewing = async (policy) => {
+    try {
+      await updatePolicy(policy.id, {
+        status: 'Not-Renewing',
+        notRenewingAt: new Date().toISOString(),
+      })
+      toast.success(`"${policy.policyNumber}" marked as Not Renewing — won't appear in renewals.`)
+    } catch(err) { toast.error(err.message) }
+  }
+
   const onSaveRenewal = async (newData) => {
+    // 1. Create new policy document for the renewal year
     await saveRenewal(renewModal.id, newData)
-    toast.success(`✅ Renewal saved! Policy Year ${(renewModal.policyYear||1)+1} created.`)
+    // 2. Mark OLD policy as Renewed-Out — this removes it from renewals tab
+    //    and updates it everywhere (Policies page, Dashboard, Calendar, etc.)
+    await updatePolicy(renewModal.id, {
+      status: 'Renewed-Out',
+      renewedAt: new Date().toISOString(),
+      renewedToPolicyNumber: newData.policyNumber,
+    })
+    toast.success(`✅ Renewal saved! "${renewModal.policyNumber}" marked as Renewed-Out. New policy "${newData.policyNumber}" created for Year ${(renewModal.policyYear||1)+1}.`)
     setRenewModal(null)
   }
 
@@ -656,17 +724,82 @@ Wealth Management & Insurance Advisory
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center">
-        <div className="flex gap-1 flex-wrap">
-          {WINDOW_OPTIONS.map(w => (
-            <button key={w.days} onClick={() => setDayWindow(w.days)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                dayWindow===w.days ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
-              }`}>{w.label}</button>
-          ))}
+      <div className="space-y-3">
+        {/* Toggle: Day Window vs Date Range */}
+        <div className="flex gap-2 items-center flex-wrap">
+          <button
+            onClick={() => setUseDateRange(false)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${!useDateRange ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}>
+            📅 Day Window
+          </button>
+          <button
+            onClick={() => setUseDateRange(true)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${useDateRange ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}>
+            🗓️ Date Range
+          </button>
+          <input type="search" placeholder="Search client, policy, insurer…" value={search}
+                 onChange={e=>setSearch(e.target.value)} className="form-input w-60 ml-auto" />
         </div>
-        <input type="search" placeholder="Search client, policy, insurer…" value={search}
-               onChange={e=>setSearch(e.target.value)} className="form-input w-60" />
+
+        {/* Day window buttons */}
+        {!useDateRange && (
+          <div className="flex gap-1 flex-wrap">
+            {WINDOW_OPTIONS.map(w => (
+              <button key={w.days} onClick={() => setDayWindow(w.days)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                  dayWindow===w.days ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}>{w.label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Date range picker */}
+        {useDateRange && (
+          <div className="flex gap-3 items-center flex-wrap bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl px-4 py-3">
+            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Show renewals from</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                   className="form-input w-40 text-sm" />
+            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">to</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                   className="form-input w-40 text-sm" />
+            <button onClick={() => {
+              const today = new Date()
+              const in30  = new Date(today); in30.setDate(today.getDate() + 30)
+              setDateFrom(today.toISOString().split('T')[0])
+              setDateTo(in30.toISOString().split('T')[0])
+            }} className="text-xs text-blue-600 dark:text-blue-400 underline hover:no-underline">
+              Next 30 days
+            </button>
+            <button onClick={() => {
+              const today = new Date()
+              const in60  = new Date(today); in60.setDate(today.getDate() + 60)
+              setDateFrom(today.toISOString().split('T')[0])
+              setDateTo(in60.toISOString().split('T')[0])
+            }} className="text-xs text-blue-600 dark:text-blue-400 underline hover:no-underline">
+              Next 60 days
+            </button>
+            <button onClick={() => {
+              // Current month
+              const today = new Date()
+              const start = new Date(today.getFullYear(), today.getMonth(), 1)
+              const end   = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+              setDateFrom(start.toISOString().split('T')[0])
+              setDateTo(end.toISOString().split('T')[0])
+            }} className="text-xs text-blue-600 dark:text-blue-400 underline hover:no-underline">
+              This month
+            </button>
+            <button onClick={() => {
+              // Next month
+              const today = new Date()
+              const start = new Date(today.getFullYear(), today.getMonth() + 1, 1)
+              const end   = new Date(today.getFullYear(), today.getMonth() + 2, 0)
+              setDateFrom(start.toISOString().split('T')[0])
+              setDateTo(end.toISOString().split('T')[0])
+            }} className="text-xs text-blue-600 dark:text-blue-400 underline hover:no-underline">
+              Next month
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Bulk WhatsApp bar */}
@@ -774,6 +907,32 @@ Wealth Management & Insurance Advisory
                         {loadingChain ? '…' : '📊'}
                       </button>
                       <button onClick={() => openWhatsApp(p)} className="btn-whatsapp">📱</button>
+                      {/* More actions dropdown */}
+                      <div className="relative group">
+                        <button className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded hover:bg-gray-200 dark:hover:bg-gray-600 font-bold">
+                          ⋯
+                        </button>
+                        <div className="absolute right-0 top-6 z-50 hidden group-hover:flex flex-col bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl min-w-[180px] overflow-hidden">
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Mark "${p.policyNumber}" as Renewed Elsewhere?\n\nThis means the client renewed with another agent/company. It will be removed from this renewals list.`))
+                                onRenewedElsewhere(p)
+                            }}
+                            className="px-3 py-2.5 text-xs text-left text-orange-700 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 font-semibold border-b border-gray-100 dark:border-gray-700">
+                            🔀 Renewed Elsewhere
+                            <p className="text-xs font-normal text-gray-400 mt-0.5">Client renewed with another agent</p>
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Mark "${p.policyNumber}" as Not Renewing?\n\nThis policy won't appear in the renewals list. You can undo this from the Policies page by editing the status.`))
+                                onNotRenewing(p)
+                            }}
+                            className="px-3 py-2.5 text-xs text-left text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 font-semibold">
+                            🚫 Not Renewing
+                            <p className="text-xs font-normal text-gray-400 mt-0.5">Remove from renewals permanently</p>
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </td>
                 </tr>
