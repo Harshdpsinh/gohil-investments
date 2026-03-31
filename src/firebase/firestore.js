@@ -18,6 +18,8 @@ const TASKS     = 'tasks'
 export async function getUserRole(uid) {
   try { const s = await getDoc(doc(db,USERS,uid)); return s.exists() ? s.data() : null } catch { return null }
 }
+
+
 export async function setUserRole(uid, data) {
   return setDoc(doc(db,USERS,uid), { ...data, updatedAt: serverTimestamp() }, { merge: true })
 }
@@ -511,4 +513,9 @@ export function subscribeTasks(callback) {
 export async function getAllTasks() {
   const s = await getDocs(query(tasksRef(), orderBy('dueDate','asc')))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
+}
+// Subscribe to Proposals (real-time)
+export function subscribeProposals(callback) {
+  return onSnapshot(query(proposalsRef(), orderBy('createdAt', 'desc')),
+    s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))))
 }
