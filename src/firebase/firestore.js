@@ -377,30 +377,63 @@ export async function savePolicyPdfUrl(policyId, url, name) {
 }
 
 // ── RENEWAL VERSIONING ────────────────────────────────────────
+/**
+ * saveRenewal(oldPolicyId, newData)
+ *
+ * Atomically closes the old policy term and creates the renewed one.
+ *
+ * newData must include:
+ *   - newPolicyNumber  {string}  — the policy number for the new term
+ *                                  (may be same as old or different if insurer issued a new one)
+ *   - startDate        {string}  — new term start date (YYYY-MM-DD)
+ *   - expiryDate       {string}  — new term expiry date (YYYY-MM-DD)
+ *   - frequency        {string}  — payment frequency
+ *   - ...all other policy fields to carry forward
+ */
 export async function saveRenewal(oldPolicyId, newData) {
   const old = await getPolicy(oldPolicyId)
   if (!old) throw new Error('Original policy not found')
 
   const batch = writeBatch(db)
+
+  // ── STEP A: Close the old policy record ───────────────────────────────────
+  // FIX Bug #1 + #2: Sets status to 'Renewed-Out' so the real-time listener
+  // removes it from the renewals filter, and records the new policy number
+  // for the forward-link on the old document.
   batch.update(doc(db, POLICIES, oldPolicyId), {
-    status:    'Renewed-Out',
-    renewedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    status:                'Renewed-Out',                                           // FIX Bug #1: triggers useMemo filter
+    is_renewed:            true,                                                    // FIX Bug #2: explicit lifecycle flag
+    renewedAt:             serverTimestamp(),
+    renewedToPolicyNumber: (newData.newPolicyNumber || newData.policyNumber || '').trim(), // FIX Bug #2: forward-link
+    updatedAt:             serverTimestamp(),
   })
 
-  const newRef = doc(collection(db, POLICIES))
+  // ── STEP B: Compute nextPremiumDue for the new term ───────────────────────
+  // FIX Bug #3: nextPremiumDue is the field getDays() falls back to, and what
+  // the renewal filter reads next year. Must be computed from the NEW startDate.
   const newNextPremiumDue = computeNextPremiumDueStr(newData.startDate, newData.frequency)
+
+  // ── STEP C: Strip the UI-only field before writing to Firestore ───────────
+  // FIX Bug #3: 'newPolicyNumber' is a form field name only. The DB field is
+  // 'policyNumber'. We extract it here and map it explicitly below.
+  const { newPolicyNumber, ...restData } = newData
+
+  // ── STEP D: Create the new policy document ────────────────────────────────
+  const newRef = doc(collection(db, POLICIES))
   batch.set(newRef, {
-    ...newData,
-    parentPolicyId: oldPolicyId,
-    policyYear:     (old.policyYear || 1) + 1,
-    nextPremiumDue: newNextPremiumDue || null,
+    ...restData,
+    policyNumber:   (newPolicyNumber || restData.policyNumber || '').trim(), // FIX Bug #3: user-entered new number
+    parentPolicyId: oldPolicyId,                                             // FIX Bug #2: back-link to history chain
+    policyYear:     (old.policyYear || 1) + 1,                              // FIX Bug #3: Y1→Y2→Y3 increment
+    nextPremiumDue: newNextPremiumDue || null,                               // FIX Bug #3: drives next year's renewal filter
     status:         'Active',
+    is_renewed:     false,
     renewedAt:      null,
     createdAt:      serverTimestamp(),
     updatedAt:      serverTimestamp(),
   })
 
+  // Commit atomically — if either write fails, both are rolled back. No orphans.
   await batch.commit()
   return newRef
 }
