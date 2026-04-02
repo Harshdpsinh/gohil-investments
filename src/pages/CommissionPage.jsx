@@ -1,5 +1,7 @@
 // src/pages/CommissionPage.jsx
-import { useState, useMemo } from 'react'
+// ✅ FIXED: CM1 (debounce on CommCell save), CM2 (safe date parse in filter),
+//           CM3 (NaN% guard in type breakdown bars)
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
 import { useAuth }       from '../hooks/useAuth'
@@ -8,11 +10,10 @@ import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
 import toast from 'react-hot-toast'
-import { format, parseISO, isValid } from 'date-fns'
+import { isValid } from 'date-fns'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-// Commission columns for export
 const COMM_COLS = [
   { header:'Policy No',     accessor: r => r.policyNumber },
   { header:'Client',        accessor: r => r.clientName   },
@@ -34,17 +35,34 @@ function commAmt(premium, pct) {
   return Math.round((p * c) / 100)
 }
 
-// ── Inline edit commission % ──────────────────────────────────
+// ✅ FIX CM1: CommCell with debounced auto-save + explicit save button
 function CommCell({ policyId, field, value }) {
   const [editing, setEditing] = useState(false)
   const [val,     setVal]     = useState(value || '')
-  const save = async () => {
-    try { await updatePolicy(policyId, { [field]: val }); toast.success('Updated!') }
-    catch(err) { toast.error(err.message) }
-    setEditing(false)
+  const [saving,  setSaving]  = useState(false)
+  const debounceRef = useRef(null)
+
+  const save = useCallback(async (newVal) => {
+    if (saving) return
+    setSaving(true)
+    try {
+      await updatePolicy(policyId, { [field]: newVal })
+      toast.success('Updated!')
+    } catch(err) {
+      toast.error(err.message)
+    } finally {
+      setSaving(false)
+      setEditing(false)
+    }
+  }, [policyId, field, saving])
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter')  { clearTimeout(debounceRef.current); save(val) }
+    if (e.key === 'Escape') { setEditing(false); setVal(value || '') }
   }
+
   if (!editing) return (
-    <span onClick={()=>setEditing(true)}
+    <span onClick={() => setEditing(true)}
           className="cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 px-1 rounded text-blue-600 dark:text-blue-400 font-semibold"
           title="Click to edit">
       {value ? `${value}%` : '—'}
@@ -52,11 +70,27 @@ function CommCell({ policyId, field, value }) {
   )
   return (
     <div className="flex items-center gap-1">
-      <input type="number" value={val} onChange={e=>setVal(e.target.value)}
-             className="w-16 px-1 py-0.5 text-xs border border-blue-400 rounded focus:outline-none"
-             autoFocus onKeyDown={e=>{ if(e.key==='Enter')save(); if(e.key==='Escape')setEditing(false) }} />
-      <button onClick={save} className="text-xs text-green-600 hover:text-green-700 font-bold">✓</button>
-      <button onClick={()=>setEditing(false)} className="text-xs text-gray-400 hover:text-gray-500">✕</button>
+      <input
+        type="number"
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        className="w-16 px-1 py-0.5 text-xs border border-blue-400 rounded focus:outline-none"
+        autoFocus
+        onKeyDown={handleKeyDown}
+      />
+      <button
+        onClick={() => save(val)}
+        disabled={saving}
+        className="text-xs text-green-600 hover:text-green-700 font-bold disabled:opacity-50"
+      >
+        {saving ? '…' : '✓'}
+      </button>
+      <button
+        onClick={() => { setEditing(false); setVal(value || '') }}
+        className="text-xs text-gray-400 hover:text-gray-500"
+      >
+        ✕
+      </button>
     </div>
   )
 }
@@ -66,19 +100,18 @@ export default function CommissionPage() {
   const { clients }           = useClients()
   const { isAdmin }           = useAuth()
 
-  // Fix #12: block non-admin direct URL access
   if (!isAdmin) return (
     <div className="p-8 text-center">
       <p className="text-2xl mb-2">🔒</p>
       <p className="text-gray-600 dark:text-gray-400 font-medium">Access restricted to administrators only.</p>
     </div>
   )
+
   const [search,      setSearch]      = useState('')
   const [typeFilter,  setTypeFilter]  = useState('All')
-  const [yearFilter,  setYearFilter]  = useState('All')  // FY1 / FY2+
+  const [yearFilter,  setYearFilter]  = useState('All')
   const [monthFilter, setMonthFilter] = useState('All')
 
-  // Enrich policies with commission amounts
   const enriched = useMemo(() =>
     policies.map(p => ({
       ...p,
@@ -95,18 +128,21 @@ export default function CommissionPage() {
       const mQ  = !q || p.policyNumber?.toLowerCase().includes(q) || p.clientName?.toLowerCase().includes(q) || p.insurer?.toLowerCase().includes(q)
       const mT  = typeFilter === 'All' || p.policyType === typeFilter
       const mY  = yearFilter === 'All' || (yearFilter === 'FY1' ? (p.policyYear||1) === 1 : (p.policyYear||1) > 1)
+
+      // ✅ FIX CM2: safe date parse — don't let malformed dates crash filter
       let mM = true
       if (monthFilter !== 'All' && p.startDate) {
         try {
           const d = parseAnyDate(p.startDate)
           mM = isValid(d) && d.getMonth() === MONTHS.indexOf(monthFilter)
-        } catch { mM = true }
+        } catch {
+          mM = false   // silently exclude rather than crash
+        }
       }
       return mQ && mT && mY && mM
     })
   }, [enriched, search, typeFilter, yearFilter, monthFilter])
 
-  // Summary stats
   const stats = useMemo(() => {
     const total      = filtered.reduce((s,p) => s + p.totalComm, 0)
     const fyTotal    = filtered.reduce((s,p) => s + p.fyAmt, 0)
@@ -121,7 +157,7 @@ export default function CommissionPage() {
         try {
           const d = parseAnyDate(p.startDate)
           if (isValid(d)) byMonth[d.getMonth()] += p.totalComm
-        } catch {}
+        } catch { /* ignore */ }
       }
     })
     const topInsurers = Object.entries(byInsurer)
@@ -129,7 +165,6 @@ export default function CommissionPage() {
     return { total, fyTotal, ryTotal, byType, topInsurers, byMonth }
   }, [filtered])
 
-  // Bar chart helper
   const maxBar = Math.max(...stats.byMonth, 1)
 
   const TYPES = ['Health','Life','Motor','Home','Travel','Other']
@@ -143,7 +178,6 @@ export default function CommissionPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Commission Tracker</h1>
@@ -156,7 +190,6 @@ export default function CommissionPage() {
         </div>
       </div>
 
-      {/* Stats cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
           { label:'Total Commission', val: fmtCurrency(stats.total),   color:'blue',   icon:'💰' },
@@ -175,9 +208,7 @@ export default function CommissionPage() {
         ))}
       </div>
 
-      {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Monthly bar chart */}
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">📅 Commission by Start Month</p>
           <div className="flex items-end gap-1 h-32">
@@ -192,14 +223,14 @@ export default function CommissionPage() {
           </div>
         </div>
 
-        {/* By policy type */}
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">🏷️ Commission by Policy Type</p>
           <div className="space-y-2">
             {Object.entries(stats.byType)
               .sort((a,b) => b[1]-a[1])
               .map(([type, amt]) => {
-                const pct = stats.total > 0 ? (amt / stats.total * 100) : 0
+                // ✅ FIX CM3: guard against division by zero → NaN%
+                const pct = (stats.total > 0 && amt > 0) ? (amt / stats.total * 100) : 0
                 return (
                   <div key={type}>
                     <div className="flex justify-between text-xs mb-1">
@@ -217,7 +248,6 @@ export default function CommissionPage() {
         </div>
       </div>
 
-      {/* Top Insurers */}
       {stats.topInsurers.length > 0 && (
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">🏢 Top 5 Insurers by Commission</p>
@@ -233,7 +263,6 @@ export default function CommissionPage() {
         </div>
       )}
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center flex-wrap">
         <SearchBar value={search} onChange={setSearch} placeholder="Policy, client, insurer…" />
         <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} className="form-select w-auto text-sm">
@@ -251,7 +280,6 @@ export default function CommissionPage() {
         </select>
       </div>
 
-      {/* Table */}
       <div className="table-container">
         <table className="min-w-full">
           <thead><tr>
@@ -284,7 +312,6 @@ export default function CommissionPage() {
               ))
             }
           </tbody>
-          {/* Totals row */}
           {filtered.length > 0 && (
             <tfoot>
               <tr className="bg-blue-50 dark:bg-blue-900/30 border-t-2 border-blue-200 dark:border-blue-700">

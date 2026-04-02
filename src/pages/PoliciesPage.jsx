@@ -342,52 +342,31 @@ function MotorSection({ form, set }) {
 import { KNOWN_INSURERS } from '../utils/constants'
 
 // ── Smart insurer combobox ────────────────────────────────────
-function InsurerSelect({ value, onChange }) {
-  const [open,    setOpen]    = useState(false)
-  const [query,   setQuery]   = useState(value || '')
-  const [focused, setFocused] = useState(false)
+function InsurerSelect({ value, onChange, insurers = [] }) {
+  const [list, setList] = useState([])
 
-  // Sync query when value changes externally (e.g. switching to edit mode)
-  useEffect(() => { setQuery(value || '') }, [value])
-
-  const filtered = query.length >= 1
-    ? KNOWN_INSURERS.filter(i => i.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
-    : KNOWN_INSURERS.slice(0, 8)
-
-  const select = (name) => {
-    setQuery(name); onChange(name); setOpen(false)
-  }
-  const onInput = (e) => {
-    setQuery(e.target.value); onChange(e.target.value); setOpen(true)
-  }
+  useEffect(() => {
+    if (insurers && insurers.length > 0) {
+      setList(insurers)
+    } else {
+      setList([])
+    }
+  }, [insurers])
 
   return (
-    <div className="relative">
-      <input
-        type="text"
-        value={query}
-        onChange={onInput}
-        onFocus={() => { setFocused(true); setOpen(true) }}
-        onBlur={() => setTimeout(() => { setOpen(false); setFocused(false) }, 150)}
-        placeholder="Type or select insurer…"
-        className="form-input"
-      />
-      {open && (
-        <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">No match — your text will be used</div>
-          ) : (
-            filtered.map(ins => (
-              <button key={ins} type="button"
-                      onMouseDown={() => select(ins)}
-                      className="w-full text-left px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
-                {ins}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
+    <select
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="border px-2 py-1 w-full"
+    >
+      <option value="">Select Insurer</option>
+
+      {list.map((ins, i) => (
+        <option key={i} value={ins}>
+          {ins}
+        </option>
+      ))}
+    </select>
   )
 }
 
@@ -1139,6 +1118,52 @@ export default function PoliciesPage() {
     })
   }, [policies, search, typeFilter])
 
+  // ── Duplicate detector ───────────────────────────────────────
+  // Detects duplicates across ALL policies (not just filtered) by:
+  // 1. Same policy number (exact, case-insensitive)
+  // 2. Same clientId + insurer + policyType (same client, same cover)
+  const [showDupsOnly, setShowDupsOnly] = useState(false)
+
+  const duplicatePolicyIds = useMemo(() => {
+    const dupIds = new Set()
+
+    // 1. Group by normalised policy number
+    const byPolicyNo = {}
+    policies.forEach(p => {
+      const key = (p.policyNumber || '').trim().toLowerCase()
+      if (!key) return
+      if (!byPolicyNo[key]) byPolicyNo[key] = []
+      byPolicyNo[key].push(p.id)
+    })
+    Object.values(byPolicyNo).forEach(ids => {
+      if (ids.length > 1) ids.forEach(id => dupIds.add(id))
+    })
+
+    // 2. Group by clientId + insurer + policyType (same client/cover duplicates)
+    const byCover = {}
+    policies.forEach(p => {
+      if (!p.clientId || !p.insurer || !p.policyType) return
+      const key = `${p.clientId}|${(p.insurer||'').toLowerCase()}|${p.policyType}`
+      if (!byCover[key]) byCover[key] = []
+      byCover[key].push(p.id)
+    })
+    Object.values(byCover).forEach(ids => {
+      if (ids.length > 1) ids.forEach(id => dupIds.add(id))
+    })
+
+    return dupIds
+  }, [policies])
+
+  const dupCount = useMemo(
+    () => filtered.filter(p => duplicatePolicyIds.has(p.id)).length,
+    [filtered, duplicatePolicyIds]
+  )
+
+  const displayPolicies = useMemo(
+    () => showDupsOnly ? filtered.filter(p => duplicatePolicyIds.has(p.id)) : filtered,
+    [filtered, showDupsOnly, duplicatePolicyIds]
+  )
+
   // ── Duplicate detector ───────────────────────────────────
   const [dupWarning, setDupWarning] = useState('')
   const checkDup = useCallback(async (policyNumber) => {
@@ -1216,6 +1241,18 @@ Wealth Management & Insurance Advisory
             <button key={t} onClick={()=>setTypeFilter(t)}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${typeFilter===t?'bg-blue-600 text-white':'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>{t}</button>
           ))}
+          {dupCount > 0 && (
+            <button
+              onClick={() => setShowDupsOnly(v => !v)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors border ${
+                showDupsOnly
+                  ? 'bg-orange-500 text-white border-orange-500'
+                  : 'bg-orange-50 dark:bg-orange-900/30 border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-300 hover:bg-orange-100'
+              }`}
+            >
+              🔁 Duplicates ({dupCount})
+            </button>
+          )}
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
           <button onClick={()=>exportToCSV(filtered,POLICY_COLS,'policies')} className="btn-secondary text-xs">⬇ CSV</button>
@@ -1243,19 +1280,20 @@ Wealth Management & Insurance Advisory
             <th className="table-header w-10">
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
             </th>
-            {['Policy No','Client','Phone','Type','Insurer','Premium','Next Due','Expiry','Days','Yr','Status','FY%','RY%','WhatsApp','PDF','Actions'].map(h=>(
+            {['Policy No','Client','Phone','Type','Insurer','Premium','Next Due','Expiry','Days','Yr','Status','FY%','RY%','Dup','WhatsApp','PDF','Actions'].map(h=>(
               <th key={h} className="table-header">{h}</th>
             ))}
           </tr></thead>
           <tbody className="bg-white dark:bg-gray-800">
-            {filtered.length===0
-              ?<tr><td colSpan={17} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
-              :filtered.map(p=>{
+            {displayPolicies.length===0
+              ?<tr><td colSpan={18} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
+              :displayPolicies.map(p=>{
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
+                const isDup = duplicatePolicyIds.has(p.id)
                 const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.expiryDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
-                  <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''}`}>
+                  <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''} ${isDup?'bg-orange-50 dark:bg-orange-900/10':''}`}>
                     <td className="table-cell">
                       <input type="checkbox" checked={selectedIds.has(p.id)} onChange={()=>toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
                     </td>
@@ -1276,6 +1314,12 @@ Wealth Management & Insurance Advisory
                     <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
                     <td className="table-cell text-xs text-center text-blue-600 dark:text-blue-400 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>
                     <td className="table-cell text-xs text-center text-green-600 dark:text-green-400 font-semibold">{p.ryCommission?`${p.ryCommission}%`:'—'}</td>
+                    <td className="table-cell text-center">
+                      {isDup
+                        ? <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded-full" title="Possible duplicate policy">🔁 Dup</span>
+                        : <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
+                      }
+                    </td>
                     <td className="table-cell text-center">
                       <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
                     </td>

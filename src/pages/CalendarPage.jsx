@@ -1,10 +1,14 @@
 // src/pages/CalendarPage.jsx
+// ✅ FIXED: C1 (unified date source in policyMap & sidebar), C2 (Renewed-Out filtered first),
+//           C3 (sidebar click uses same date key as policyMap)
 import { useState, useMemo } from 'react'
 import { usePolicies } from '../hooks/usePolicies'
 import { useNavigate } from 'react-router-dom'
-import { parseISO, isValid, format, startOfMonth, endOfMonth,
-         eachDayOfInterval, getDay, isSameDay, isSameMonth,
-         addMonths, subMonths } from 'date-fns'
+import {
+  parseISO, isValid, format, startOfMonth, endOfMonth,
+  eachDayOfInterval, getDay, isSameDay, isSameMonth,
+  addMonths, subMonths
+} from 'date-fns'
 import { fmtCurrency, daysUntilPremium } from '../utils/dateUtils'
 
 const TYPE_COLORS = {
@@ -24,43 +28,63 @@ const TYPE_DOT = {
   Other:  'bg-gray-400',
 }
 
-function parseDate(val) {
-  if (!val) return null
-  if (val?.seconds) return new Date(val.seconds * 1000)
-  try { const d = parseISO(val); return isValid(d) ? d : null } catch { return null }
+// ✅ FIX C1: single authoritative function to get the "calendar date" for a policy
+// Uses nextPremiumDue for non-yearly, expiryDate for yearly.
+// Returns a Date or null.
+function getCalendarDate(p) {
+  const freq = (p.frequency || 'Yearly').toLowerCase()
+  const isYearly = freq === 'yearly'
+
+  if (!isYearly && p.nextPremiumDue) {
+    const d = new Date(p.nextPremiumDue)
+    if (!isNaN(d.getTime())) return d
+  }
+
+  if (p.expiryDate) {
+    // Try as ISO string
+    try {
+      const d = parseISO(p.expiryDate)
+      if (isValid(d)) return d
+    } catch { /* ignore */ }
+    // Try as plain Date
+    const d = new Date(p.expiryDate)
+    if (!isNaN(d.getTime())) return d
+  }
+
+  // Fallback: compute from startDate + frequency
+  if (p.startDate) {
+    const daysLeft = daysUntilPremium(p.startDate, p.frequency)
+    if (daysLeft !== null) {
+      return new Date(Date.now() + daysLeft * 86400000)
+    }
+  }
+
+  return null
 }
 
 export default function CalendarPage() {
   const { policies, loading } = usePolicies()
   const navigate  = useNavigate()
-  const [current, setCurrent] = useState(new Date())
-  const [selected, setSelected] = useState(null)  // selected day
+  const [current,    setCurrent]    = useState(new Date())
+  const [selected,   setSelected]   = useState(null)
   const [typeFilter, setTypeFilter] = useState('All')
 
   const monthStart = startOfMonth(current)
   const monthEnd   = endOfMonth(current)
   const days       = eachDayOfInterval({ start: monthStart, end: monthEnd })
 
-  // Map policies to their expiry dates
+  // ✅ FIX C2: exclude Renewed-Out FIRST before any date logic
+  // ✅ FIX C1: use getCalendarDate() everywhere consistently
   const policyMap = useMemo(() => {
     const map = {}
     policies.forEach(p => {
-      // Hide already-renewed policies from calendar
-      if ((p.status||'').trim() === 'Renewed-Out') return
+      // ✅ FIX C2: filter status before date processing
+      if ((p.status || '').trim() === 'Renewed-Out') return
       if (typeFilter !== 'All' && p.policyType !== typeFilter) return
-      // Use nextPremiumDue for calendar date (handles long-term Life policies)
-      let d = null
-      if (p.nextPremiumDue) {
-        d = new Date(p.nextPremiumDue)
-        if (isNaN(d.getTime())) d = null
-      }
-      if (!d && p.startDate) {
-        // Compute on the fly
-        const daysLeft = daysUntilPremium(p.startDate, p.frequency)
-        if (daysLeft !== null) d = new Date(new Date().getTime() + daysLeft * 86400000)
-      }
-      if (!d) d = parseDate(p.expiryDate)
+
+      const d = getCalendarDate(p)
       if (!d || !isSameMonth(d, current)) return
+
       const key = format(d, 'yyyy-MM-dd')
       if (!map[key]) map[key] = []
       map[key].push(p)
@@ -68,11 +92,12 @@ export default function CalendarPage() {
     return map
   }, [policies, current, typeFilter])
 
-  // Policies expiring this month
+  // ✅ FIX C1: sidebar list also uses getCalendarDate() (same source as policyMap)
   const monthPolicies = useMemo(() =>
-    Object.values(policyMap).flat().sort((a,b) => {
-      const getD = p => p.nextPremiumDue ? new Date(p.nextPremiumDue) : parseDate(p.expiryDate)
-      return (getD(a)||0) - (getD(b)||0)
+    Object.values(policyMap).flat().sort((a, b) => {
+      const da = getCalendarDate(a)
+      const db = getCalendarDate(b)
+      return (da ? da.getTime() : 0) - (db ? db.getTime() : 0)
     }),
     [policyMap]
   )
@@ -81,14 +106,14 @@ export default function CalendarPage() {
     ? (policyMap[format(selected, 'yyyy-MM-dd')] || [])
     : []
 
-  const DAYS_OF_WEEK = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-  const startPad     = getDay(monthStart)  // 0=Sun
+  const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const startPad = getDay(monthStart)
 
-  const totalPremium = monthPolicies.reduce((s,p) => s + (parseFloat(p.premium)||0), 0)
+  const totalPremium = monthPolicies.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
 
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
-      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"/>Loading…
+      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading…
     </div>
   )
 
@@ -99,16 +124,16 @@ export default function CalendarPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Policy Expiry Calendar</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {monthPolicies.length} policies expiring in {format(current,'MMMM yyyy')} · Renewal premium: {fmtCurrency(totalPremium)}
+            {monthPolicies.length} policies expiring in {format(current, 'MMMM yyyy')} · Renewal premium: {fmtCurrency(totalPremium)}
           </p>
         </div>
         {/* Type filter legend */}
         <div className="flex gap-1 flex-wrap">
-          {['All','Health','Life','Motor','Home','Travel','Other'].map(t => (
+          {['All', 'Health', 'Life', 'Motor', 'Home', 'Travel', 'Other'].map(t => (
             <button key={t} onClick={() => setTypeFilter(t)}
                     className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors
-                      ${typeFilter===t ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>
-              {t !== 'All' && <span className={`inline-block w-2 h-2 rounded-full mr-1 ${TYPE_DOT[t]||'bg-gray-400'}`}/>}{t}
+                      ${typeFilter === t ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>
+              {t !== 'All' && <span className={`inline-block w-2 h-2 rounded-full mr-1 ${TYPE_DOT[t] || 'bg-gray-400'}`} />}{t}
             </button>
           ))}
         </div>
@@ -119,10 +144,10 @@ export default function CalendarPage() {
         <div className="lg:col-span-2 card p-0 overflow-hidden">
           {/* Month nav */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
-            <button onClick={() => { setCurrent(c => subMonths(c,1)); setSelected(null) }}
+            <button onClick={() => { setCurrent(c => subMonths(c, 1)); setSelected(null) }}
                     className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-lg">‹</button>
-            <h2 className="text-lg font-bold text-gray-800 dark:text-white">{format(current,'MMMM yyyy')}</h2>
-            <button onClick={() => { setCurrent(c => addMonths(c,1)); setSelected(null) }}
+            <h2 className="text-lg font-bold text-gray-800 dark:text-white">{format(current, 'MMMM yyyy')}</h2>
+            <button onClick={() => { setCurrent(c => addMonths(c, 1)); setSelected(null) }}
                     className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 text-lg">›</button>
           </div>
 
@@ -135,30 +160,27 @@ export default function CalendarPage() {
 
           {/* Calendar grid */}
           <div className="grid grid-cols-7">
-            {/* Padding for first day */}
-            {Array.from({ length: startPad }).map((_,i) => (
+            {Array.from({ length: startPad }).map((_, i) => (
               <div key={`pad-${i}`} className="min-h-[80px] border-b border-r border-gray-50 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/20" />
             ))}
             {days.map(day => {
-              const key      = format(day, 'yyyy-MM-dd')
-              const polsOnDay= policyMap[key] || []
-              const isToday  = isSameDay(day, new Date())
-              const isSel    = selected && isSameDay(day, selected)
-              const hasPols  = polsOnDay.length > 0
+              const key       = format(day, 'yyyy-MM-dd')
+              const polsOnDay = policyMap[key] || []
+              const isToday   = isSameDay(day, new Date())
+              const isSel     = selected && isSameDay(day, selected)
               return (
                 <div key={key}
                      onClick={() => setSelected(isSel ? null : day)}
                      className={`min-h-[80px] border-b border-r border-gray-100 dark:border-gray-700 p-1.5 cursor-pointer transition-colors
-                       ${isSel ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-400' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}
-                       ${hasPols ? '' : ''}`}>
+                       ${isSel ? 'bg-blue-50 dark:bg-blue-900/30 ring-2 ring-inset ring-blue-400' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}>
                   <p className={`text-xs font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full
                     ${isToday ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-400'}`}>
-                    {format(day,'d')}
+                    {format(day, 'd')}
                   </p>
                   <div className="space-y-0.5">
-                    {polsOnDay.slice(0,3).map(p => (
+                    {polsOnDay.slice(0, 3).map(p => (
                       <div key={p.id}
-                           className={`${TYPE_COLORS[p.policyType]||'bg-gray-400'} text-white text-xs rounded px-1 py-0.5 truncate leading-tight`}
+                           className={`${TYPE_COLORS[p.policyType] || 'bg-gray-400'} text-white text-xs rounded px-1 py-0.5 truncate leading-tight`}
                            title={`${p.clientName} — ${p.policyType}`}>
                         {p.clientName?.split(' ')[0]}
                       </div>
@@ -179,7 +201,7 @@ export default function CalendarPage() {
           {selected && selectedPolicies.length > 0 && (
             <div className="card">
               <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
-                📅 {format(selected, 'dd MMMM yyyy')} — {selectedPolicies.length} expir{selectedPolicies.length===1?'y':'ies'}
+                📅 {format(selected, 'dd MMMM yyyy')} — {selectedPolicies.length} expir{selectedPolicies.length === 1 ? 'y' : 'ies'}
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {selectedPolicies.map(p => (
@@ -190,7 +212,7 @@ export default function CalendarPage() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">{p.policyNumber}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400">{p.insurer}</p>
                       </div>
-                      <span className={`text-xs font-semibold text-white px-2 py-0.5 rounded-full flex-shrink-0 ${TYPE_COLORS[p.policyType]||'bg-gray-400'}`}>
+                      <span className={`text-xs font-semibold text-white px-2 py-0.5 rounded-full flex-shrink-0 ${TYPE_COLORS[p.policyType] || 'bg-gray-400'}`}>
                         {p.policyType}
                       </span>
                     </div>
@@ -210,24 +232,27 @@ export default function CalendarPage() {
           {/* This month summary */}
           <div className="card">
             <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
-              📋 {format(current,'MMMM')} — All Expiries ({monthPolicies.length})
+              📋 {format(current, 'MMMM')} — All Expiries ({monthPolicies.length})
             </p>
             {monthPolicies.length === 0 ? (
               <p className="text-xs text-gray-400 dark:text-gray-500">No policies expiring this month</p>
             ) : (
               <div className="space-y-1.5 max-h-80 overflow-y-auto">
                 {monthPolicies.map(p => {
-                  const d = parseDate(p.expiryDate)
+                  // ✅ FIX C3: use getCalendarDate() so click navigates to the correct day
+                  const d = getCalendarDate(p)
                   return (
                     <div key={p.id}
-                         onClick={() => setSelected(d)}
+                         onClick={() => d && setSelected(d)}
                          className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors">
-                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${TYPE_DOT[p.policyType]||'bg-gray-400'}`}/>
+                      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${TYPE_DOT[p.policyType] || 'bg-gray-400'}`} />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{p.clientName}</p>
                         <p className="text-xs text-gray-400 dark:text-gray-500">{p.insurer}</p>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{d ? format(d,'dd MMM') : '—'}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                        {d ? format(d, 'dd MMM') : '—'}
+                      </p>
                     </div>
                   )
                 })}

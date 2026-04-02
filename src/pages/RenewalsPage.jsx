@@ -1,381 +1,556 @@
 // src/pages/RenewalsPage.jsx
-import { useState, useMemo, useRef } from 'react'           // FIX Bug #1: added useRef
-import { usePolicies } from '../hooks/usePolicies'
-import { saveRenewal } from '../firebase/firestore'          // FIX Bug #2: use saveRenewal (atomic batch) from firestore.js
+// ✅ FIXED: R1 renewal creates new policy, R2 overdue filter, R3 WA date,
+//           R4 status colors, R5 button reset, R6 all tabs, R7 premium col,
+//           R8 PDF autoTable, R9 insurer col, R10 confirm dialog
 
-// ==============================
-// ✅ UTILS (unchanged)
-// ==============================
+import { useState, useMemo, useRef, useCallback } from 'react'
+import { usePolicies }  from '../hooks/usePolicies'
+import { useClients }   from '../hooks/useClients'
+import { useAuth }      from '../hooks/useAuth'
+import {
+  saveRenewal,        // marks old as Renewed-Out AND creates new policy entry
+  addPolicy,          // ✅ FIX R1: needed to create the new/successor policy
+  updatePolicy,
+} from '../firebase/firestore'
+import { fmtDate, fmtCurrency, toInputDate } from '../utils/dateUtils'
+import SearchBar from '../components/ui/SearchBar'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
+import toast from 'react-hot-toast'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
+
+// ─────────────────────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns days until the NEXT premium due date.
+ * For yearly policies → uses expiryDate.
+ * For monthly/quarterly/half-yearly → uses nextPremiumDue (preferred) else expiryDate.
+ */
 function getDays(p) {
-  if (!p?.expiryDate) return null
+  if (!p) return null
+
+  const freq = (p.frequency || 'Yearly').toLowerCase()
+  const isYearly = freq === 'yearly'
+
+  // ✅ FIX R3: correct date source per frequency
+  const dateStr = (!isYearly && p.nextPremiumDue)
+    ? p.nextPremiumDue
+    : p.expiryDate
+
+  if (!dateStr) return null
 
   const today = new Date()
-  const expiry = new Date(p.expiryDate)
+  today.setHours(0, 0, 0, 0)
 
-  return Math.ceil((expiry - today) / (1000 * 60 * 60 * 24))
+  const target = new Date(dateStr)
+  if (isNaN(target.getTime())) return null
+  target.setHours(0, 0, 0, 0)
+
+  return Math.ceil((target - today) / (1000 * 60 * 60 * 24))
 }
 
-function getStatus(days) {
-  if (days === null) return 'Unknown'
-  if (days < 0) return 'Expired'
-  if (days === 0) return 'Due Today'
-  if (days <= 7) return 'Critical'
-  if (days <= 15) return 'Warning'
-  return 'Active'
+/** Returns the relevant due date string for display */
+function getDueDate(p) {
+  if (!p) return null
+  const freq = (p.frequency || 'Yearly').toLowerCase()
+  return (!freq.includes('yearly') && p.nextPremiumDue)
+    ? p.nextPremiumDue
+    : p.expiryDate
 }
 
-function statusBadge(days) {
-  const status = getStatus(days)
+// ✅ FIX R4: status with label + Tailwind color classes
+function getStatusInfo(days) {
+  if (days === null)  return { label: 'Unknown',  cls: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' }
+  if (days < 0)       return { label: 'Overdue',   cls: 'bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300' }
+  if (days === 0)     return { label: 'Due Today', cls: 'bg-red-600 text-white' }
+  if (days <= 7)      return { label: 'Critical',  cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-300' }
+  if (days <= 15)     return { label: 'Warning',   cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/60 dark:text-yellow-200' }
+  return               { label: 'Active',    cls: 'bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300' }
+}
 
-  const styles = {
-    Expired: 'bg-red-100 text-red-600',
-    'Due Today': 'bg-red-100 text-red-600',
-    Critical: 'bg-red-100 text-red-600',
-    Warning: 'bg-yellow-100 text-yellow-600',
-    Active: 'bg-blue-100 text-blue-600',
-    Unknown: 'bg-gray-100 text-gray-600'
+// ─────────────────────────────────────────────────────────────
+// RENEW MODAL — collects new policy details before creating
+// ─────────────────────────────────────────────────────────────
+function RenewModal({ policy, onConfirm, onClose }) {
+  // Pre-fill with smart defaults: start = expiry+1, expiry = +1yr, premium same
+  const oldExpiry = getDueDate(policy) || ''
+  const defaultStart = oldExpiry
+    ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
+    : toInputDate(new Date())
+  const defaultExpiry = defaultStart
+    ? toInputDate(new Date(new Date(defaultStart).getTime() + 365 * 86400000))
+    : ''
+
+  const [form, setForm] = useState({
+    policyNumber:  '',          // new policy number (may change on renewal)
+    premium:       policy.premium || '',
+    startDate:     defaultStart,
+    expiryDate:    defaultExpiry,
+    fyCommission:  policy.fyCommission || '',
+    ryCommission:  policy.ryCommission || '',
+    notes:         '',
+  })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  const handleSubmit = async () => {
+    if (!form.startDate)  { toast.error('Start date required'); return }
+    if (!form.expiryDate) { toast.error('Expiry date required'); return }
+    setSaving(true)
+    try {
+      await onConfirm(form)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <span className={`px-2 py-1 rounded text-xs ${styles[status]}`}>
-      {status}
-    </span>
-  )
-}
-
-// ==============================
-// ✅ DATE GENERATOR (unchanged)
-// ==============================
-function generateRenewalDates(policy, frequency = 'Yearly') {
-  const baseDate = new Date(policy.expiryDate)
-
-  const startDate = new Date(baseDate)
-
-  const expiryDate = new Date(baseDate)
-  expiryDate.setFullYear(expiryDate.getFullYear() + 1)
-
-  let nextPremiumDue = null
-
-  if (frequency !== 'Yearly') {
-    const map = {
-      Monthly: 30,
-      Quarterly: 90,
-      'Half-Yearly': 180
-    }
-
-    nextPremiumDue = new Date(
-      baseDate.getTime() + map[frequency] * 86400000
-    )
-  }
-
-  return {
-    startDate: startDate.toISOString().split('T')[0],
-    expiryDate: expiryDate.toISOString().split('T')[0],
-    nextPremiumDue: nextPremiumDue
-      ? nextPremiumDue.toISOString().split('T')[0]
-      : null
-  }
-}
-
-// ==============================
-// FIX Bug #3: Renewal Modal
-// Collects the new policy number from the user before submitting.
-// This was entirely absent — without it policyNumber was never updated
-// and the new doc was indistinguishable from the old one in the DB.
-// ==============================
-function RenewalModal({ policy, onConfirm, onClose, saving }) {
-  const [newPolicyNumber, setNewPolicyNumber] = useState(policy.policyNumber || '')
-
-  const handleSubmit = () => {
-    if (!newPolicyNumber.trim()) {
-      alert('Please enter the new policy number')
-      return
-    }
-    onConfirm(newPolicyNumber.trim())
-  }
-
-  return (
-    // Backdrop
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-
-        {/* Header */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-gray-900">🔄 Confirm Renewal</h2>
-          <button onClick={onClose} disabled={saving}
-                  className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">🔄 Renew Policy</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
         </div>
 
-        {/* Policy summary */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 text-sm space-y-1">
-          <p><span className="text-gray-500">Client:</span> <span className="font-semibold">{policy.clientName}</span></p>
-          <p><span className="text-gray-500">Old Policy No:</span> <span className="font-mono font-semibold">{policy.policyNumber}</span></p>
-          <p><span className="text-gray-500">Insurer:</span> {policy.insurer}</p>
-          <p><span className="text-gray-500">Old Expiry:</span> {policy.expiryDate}</p>
+        {/* Summary of old policy */}
+        <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3 text-sm">
+          <p className="font-semibold text-blue-800 dark:text-blue-200">{policy.clientName} — {policy.policyNumber}</p>
+          <p className="text-blue-600 dark:text-blue-400 text-xs">{policy.insurer} · {policy.policyType} · Old expiry: {fmtDate(getDueDate(policy))}</p>
         </div>
 
-        {/* FIX Bug #3: New policy number input — the critical missing field */}
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          The old policy will be marked <strong>Renewed-Out</strong>. A new policy entry will be created with the details below.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="form-label">New Policy Number</label>
+            <input value={form.policyNumber} onChange={e => set('policyNumber', e.target.value)}
+                   placeholder="Leave blank to keep same"
+                   className="form-input" />
+          </div>
+          <div>
+            <label className="form-label">Renewed Premium (₹) *</label>
+            <input type="number" value={form.premium} onChange={e => set('premium', e.target.value)}
+                   className="form-input" required />
+          </div>
+          <div>
+            <label className="form-label">New Start Date *</label>
+            <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)}
+                   className="form-input" required />
+          </div>
+          <div>
+            <label className="form-label">New Expiry Date *</label>
+            <input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)}
+                   className="form-input" required />
+          </div>
+          <div>
+            <label className="form-label">FY Commission %</label>
+            <input type="number" value={form.fyCommission} onChange={e => set('fyCommission', e.target.value)}
+                   className="form-input" placeholder="e.g. 15" />
+          </div>
+          <div>
+            <label className="form-label">RY Commission %</label>
+            <input type="number" value={form.ryCommission} onChange={e => set('ryCommission', e.target.value)}
+                   className="form-input" placeholder="e.g. 7.5" />
+          </div>
+        </div>
+
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">
-            New Policy Number *
-            <span className="ml-1 text-xs font-normal text-gray-400">
-              (edit if insurer issued a new number, otherwise keep same)
-            </span>
-          </label>
-          <input
-            type="text"
-            value={newPolicyNumber}
-            onChange={e => setNewPolicyNumber(e.target.value)}
-            disabled={saving}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                       disabled:bg-gray-100 disabled:cursor-not-allowed"
-            placeholder="Enter new policy number from insurer"
-            autoFocus
-          />
+          <label className="form-label">Notes</label>
+          <textarea rows={2} value={form.notes} onChange={e => set('notes', e.target.value)}
+                    className="form-input" placeholder="e.g. Sum insured increased to 10L" />
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-3 pt-1">
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-green-400
-                       disabled:cursor-not-allowed text-white font-semibold
-                       py-2 px-4 rounded-lg text-sm transition-colors"
-          >
-            {saving
-              ? <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent
-                                   rounded-full animate-spin inline-block" />
-                  Processing…
-                </span>
-              : '✅ Confirm Renewal'
-            }
+        <div className="flex gap-3 pt-2">
+          <button onClick={handleSubmit} disabled={saving}
+                  className="btn-primary flex-1">
+            {saving ? '⏳ Processing…' : '✅ Confirm Renewal'}
           </button>
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100
-                       hover:bg-gray-200 rounded-lg disabled:cursor-not-allowed transition-colors"
-          >
-            Cancel
-          </button>
+          <button onClick={onClose} className="btn-secondary">Cancel</button>
         </div>
       </div>
     </div>
   )
 }
 
-// ==============================
-// ✅ MAIN COMPONENT
-// ==============================
+// ─────────────────────────────────────────────────────────────
+// POLICY TYPE TABS — ✅ FIX R6: all types included
+// ─────────────────────────────────────────────────────────────
+const POLICY_TABS = ['ALL', 'Health', 'Life', 'Motor', 'Home', 'Travel', 'Other']
+
+// ─────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────
 export default function RenewalsPage() {
-  const { policies } = usePolicies()
+  const { policies, loading } = usePolicies()
+  const { clients }           = useClients()
+  const { isAdmin }           = useAuth()
 
+  const [search,    setSearch]    = useState('')
   const [dayWindow, setDayWindow] = useState(30)
-  const [search, setSearch]       = useState('')
+  const [dateFrom,  setDateFrom]  = useState('')
+  const [dateTo,    setDateTo]    = useState('')
+  const [policyTab, setPolicyTab] = useState('ALL')
 
-  // FIX Bug #1: Track which policy IDs have been successfully renewed locally
-  // so the row vanishes immediately without waiting for Firestore snapshot sync
-  const [dismissedIds, setDismissedIds] = useState(new Set())
+  // ✅ FIX R10: confirmation state instead of firing immediately
+  const [renewModal,   setRenewModal]   = useState(null)  // holds policy being renewed
+  const [saving,       setSaving]       = useState(false)
+  const submittingRef  = useRef(false)
 
-  // FIX Bug #3: Track which policy the renewal modal is open for
-  const [renewModal, setRenewModal] = useState(null)  // null | policy object
+  // ─── WhatsApp ───────────────────────────────────────────────
+  const openWhatsApp = useCallback((policy) => {
+    let client = clients.find(c => c.id === policy.clientId)
 
-  // FIX Bug #1: saving state for the modal button (also prevents double-click in UI layer)
-  const [saving, setSaving]         = useState(false)
+    if (!client?.mobile && policy.clientName) {
+      client = clients.find(
+        c => c.name?.toLowerCase().trim() === policy.clientName?.toLowerCase().trim()
+      )
+    }
 
-  // FIX Bug #1: ref-based guard — synchronous lock that prevents a second
-  // submission even if the user clicks the button before the first await resolves
-  const submittingRef = useRef(false)
+    const mobile = client?.mobile?.replace(/\D/g, '')
+    if (!mobile) { toast.error('No mobile number found for this client'); return }
 
-  // ==============================
-  // ✅ FILTERED DATA
-  // FIX Bug #1: filter by status !== 'Renewed-Out' instead of isActive === true
-  //   The old `p.isActive === true` would show ZERO results because the DB field
-  //   is `status: 'Active'`, not a boolean `isActive`. This was a silent data bug.
-  // ==============================
-  const renewals = useMemo(() => {
-    const q = search.toLowerCase()
+    // ✅ FIX R3: use correct due date per frequency
+    const dueStr = getDueDate(policy)
+    const days   = getDays(policy)
+
+    const msg = encodeURIComponent(
+      `Dear ${policy.clientName},\n\n` +
+      `Your *${policy.policyType}* policy (${policy.policyNumber}) with *${policy.insurer}* ` +
+      `is due for renewal${dueStr ? ` on *${fmtDate(dueStr)}*` : ''}` +
+      `${days !== null && days >= 0 ? ` (*${days} days remaining*)` : ' — please renew urgently'}.\n\n` +
+      `Premium: *₹${Number(policy.premium || 0).toLocaleString('en-IN')}*\n\n` +
+      `Please contact us to renew.\n\n` +
+      `*Gohil Investments*\nWealth Management & Insurance Advisory\n` +
+      `📞 *Harshdipsinh Gohil* — 7698997894\n` +
+      `📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`
+    )
+
+    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+  }, [clients])
+
+  // ─── Filter logic ────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
 
     return policies
-      .filter(p => (p.status || '').trim() !== 'Renewed-Out') // FIX Bug #1: correct active filter
-
       .filter(p => {
+        // Exclude already-renewed policies
+        if ((p.status || '').trim() === 'Renewed-Out') return false
+
+        const dueStr = getDueDate(p)
+        if (!dueStr) return false
+
+        const dueDate = new Date(dueStr)
+        if (isNaN(dueDate.getTime())) return false
+
+        // Date range filter
+        if (dateFrom && dueDate < new Date(dateFrom)) return false
+        if (dateTo   && dueDate > new Date(dateTo))   return false
+
+        // Day window filter
         const d = getDays(p)
-        if (d === null || isNaN(d)) return false
+        // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
+        if (dayWindow === -1) {
+          if (d === null || d >= 0) return false
+        } else {
+          if (d === null || d < 0 || d > dayWindow) return false
+        }
 
-        const inWindow =
-          dayWindow === -1
-            ? d < 0
-            : d >= 0 && d <= dayWindow
+        // Type tab filter
+        if (policyTab !== 'ALL' && (p.policyType || 'Health') !== policyTab) return false
 
-        if (!inWindow) return false
+        // Search
+        if (q) {
+          return (
+            p.clientName?.toLowerCase().includes(q) ||
+            p.policyNumber?.toLowerCase().includes(q) ||
+            p.insurer?.toLowerCase().includes(q)
+          )
+        }
 
-        const match =
-          !q ||
-          p.clientName?.toLowerCase().includes(q) ||
-          p.policyNumber?.toLowerCase().includes(q) ||
-          p.insurer?.toLowerCase().includes(q)
-
-        return match
+        return true
       })
+      .sort((a, b) => (getDays(a) ?? 9999) - (getDays(b) ?? 9999))
+  }, [policies, search, dayWindow, dateFrom, dateTo, policyTab])
 
-      .sort((a, b) => {
-        const da = getDays(a)
-        const db = getDays(b)
+  // ─── Summary stats ────────────────────────────────────────────
+  const stats = useMemo(() => {
+    const overdue  = filtered.filter(p => (getDays(p) ?? 1) < 0).length
+    const dueToday = filtered.filter(p => getDays(p) === 0).length
+    const critical = filtered.filter(p => { const d = getDays(p); return d !== null && d > 0 && d <= 7 }).length
+    const totalPremium = filtered.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
+    return { overdue, dueToday, critical, totalPremium }
+  }, [filtered])
 
-        if (da === null) return 1
-        if (db === null) return -1
+  // ─── PDF Export ── ✅ FIX R8: uses autoTable ─────────────────
+  function exportPDF() {
+    const doc = new jsPDF()
+    doc.setFontSize(16)
+    doc.text('Renewal List', 14, 16)
+    doc.setFontSize(10)
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}  |  ${filtered.length} policies`, 14, 24)
 
-        return da - db
-      })
-  }, [policies, dayWindow, search])
+    autoTable(doc, {
+      startY: 30,
+      head: [['#', 'Client', 'Policy No', 'Type', 'Insurer', 'Due Date', 'Days', 'Premium ₹', 'Status']],
+      body: filtered.map((p, i) => [
+        i + 1,
+        p.clientName,
+        p.policyNumber,
+        p.policyType || 'Health',
+        p.insurer || '—',
+        fmtDate(getDueDate(p)),
+        getDays(p) ?? '—',
+        Number(p.premium || 0).toLocaleString('en-IN'),
+        getStatusInfo(getDays(p)).label,
+      ]),
+      styles:     { fontSize: 8 },
+      headStyles: { fillColor: [37, 99, 235] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    })
 
-  // FIX Bug #1: visibleRenewals applies the optimistic dismissal on top of the
-  // real-time list. Renewed cards disappear immediately on success rather than
-  // waiting for the Firestore onSnapshot to propagate back to the client.
-  const visibleRenewals = useMemo(
-    () => renewals.filter(p => !dismissedIds.has(p.id)),
-    [renewals, dismissedIds]
-  )
-
-  // ==============================
-  // FIX: handleRenew opens the modal instead of immediately submitting
-  // ==============================
-  function handleRenew(policy) {
-    if (policy.status === 'Renewed-Out') {
-      alert('This policy has already been renewed')
-      return
-    }
-    setRenewModal(policy)  // FIX Bug #3: open modal to collect new policy number
+    doc.save('renewals.pdf')
   }
 
-  // ==============================
-  // FIX: onConfirmRenew — called when user submits the modal
-  // All three bugs are fixed here in coordination with saveRenewal() in firestore.js
-  // ==============================
-  async function onConfirmRenew(newPolicyNumber) {
-    // FIX Bug #1: ref-based lock prevents race condition from double-click.
-    // useRef is used (not useState) because assignment is synchronous —
-    // the lock is set BEFORE the first await, unlike setState which is async.
-    if (submittingRef.current) return
+  // ─── RENEW ACTION ── ✅ FIX R1: creates new policy entry ─────
+  const handleRenewConfirm = useCallback(async (renewForm) => {
+    if (submittingRef.current || !renewModal) return
     submittingRef.current = true
     setSaving(true)
 
-    const policy = renewModal  // capture before modal closes
+    const policy = renewModal
 
     try {
-      const dates = generateRenewalDates(policy, policy.frequency)
+      // 1. Mark the OLD policy as Renewed-Out
+      await updatePolicy(policy.id, { status: 'Renewed-Out' })
 
-      // FIX Bug #2 + #3: saveRenewal() in firestore.js runs an atomic writeBatch:
-      //   1. Updates old doc: status→'Renewed-Out', is_renewed→true
-      //   2. Creates new doc: newPolicyNumber, parentPolicyId, policyYear+1, nextPremiumDue
-      // Both writes succeed or both roll back — no orphaned records possible.
-      await saveRenewal(policy.id, {
-        ...policy,
-        ...dates,
-        newPolicyNumber,           // FIX Bug #3: user-entered new policy number passed to DB
-      })
+      // 2. Create NEW policy entry (linked via prevPolicyId chain)
+      const newPolicyData = {
+        // Copy all fields from old policy
+        clientId:       policy.clientId,
+        clientName:     policy.clientName,
+        policyType:     policy.policyType,
+        insurer:        policy.insurer,
+        planName:       policy.planName || '',
+        frequency:      policy.frequency || 'Yearly',
+        // Override with new renewal values
+        policyNumber:   renewForm.policyNumber?.trim() || policy.policyNumber,
+        premium:        renewForm.premium,
+        startDate:      renewForm.startDate,
+        expiryDate:     renewForm.expiryDate,
+        fyCommission:   renewForm.fyCommission,
+        ryCommission:   renewForm.ryCommission,
+        notes:          renewForm.notes,
+        status:         'Active',
+        // Policy chain: link to the policy it replaced
+        prevPolicyId:   policy.id,
+        policyYear:     (policy.policyYear || 1) + 1,
+        // Carry over type-specific fields
+        sumInsured:     policy.sumInsured,
+        sumAssured:     policy.sumAssured,
+        idv:            policy.idv,
+        members:        policy.members,
+        nominee:        policy.nominee,
+        nomineeRelation: policy.nomineeRelation,
+        // Metadata
+        createdAt:      new Date().toISOString(),
+        updatedAt:      new Date().toISOString(),
+      }
 
-      // FIX Bug #1: Remove from visible list immediately — don't wait for Firestore listener
-      setDismissedIds(prev => new Set([...prev, policy.id]))
+      await addPolicy(newPolicyData)
 
+      toast.success(`✅ Renewed! New policy created for ${policy.clientName}`)
       setRenewModal(null)
-      alert(`✅ Renewed successfully!\nOld policy "${policy.policyNumber}" closed.\nNew policy "${newPolicyNumber}" (Year ${(policy.policyYear || 1) + 1}) is now active.`)
-
-    } catch (err) {
-      // saveRenewal batch failed — Firestore rolled back both writes automatically
-      alert('❌ Renewal failed: ' + err.message)
+    } catch (e) {
+      toast.error('Renewal failed: ' + e.message)
     } finally {
-      submittingRef.current = false  // always release the lock
-      setSaving(false)
+      submittingRef.current = false
+      setSaving(false)  // ✅ FIX R5: always reset saving state
     }
-  }
+  }, [renewModal])
 
-  // ==============================
-  // UI (structure unchanged — only uses visibleRenewals instead of renewals in table)
-  // ==============================
+  // ─── UI ───────────────────────────────────────────────────────
+  if (loading) return (
+    <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
+      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+      Loading renewals…
+    </div>
+  )
+
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-4">Renewals</h1>
+    <div className="p-4 sm:p-6 lg:p-8 space-y-5 bg-gray-50 dark:bg-gray-900 min-h-screen">
 
-      {/* FILTERS — unchanged */}
-      <div className="flex gap-2 mb-4">
-        {[7, 15, 30, 60, -1].map(d => (
-          <button
-            key={d}
-            onClick={() => setDayWindow(d)}
-            className={`px-3 py-1 rounded ${
-              dayWindow === d
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-200'
-            }`}
-          >
-            {d === -1 ? 'Overdue' : `${d}d`}
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">🔄 Renewals</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {filtered.length} policies · Premium due: {fmtCurrency(stats.totalPremium)}
+          </p>
+        </div>
+        <button onClick={exportPDF}
+                className="btn-secondary text-sm">
+          ⬇ Export PDF
+        </button>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Overdue',    val: stats.overdue,   color: 'red',    icon: '⏰' },
+          { label: 'Due Today',  val: stats.dueToday,  color: 'orange', icon: '🔴' },
+          { label: 'Critical (≤7d)', val: stats.critical, color: 'yellow', icon: '⚡' },
+          { label: 'Total Premium',  val: fmtCurrency(stats.totalPremium), color: 'blue', icon: '💰' },
+        ].map(({ label, val, color, icon }) => (
+          <div key={label} className="stat-card">
+            <span className="text-2xl">{icon}</span>
+            <div>
+              <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ✅ FIX R6: All policy type tabs */}
+      <div className="flex gap-1.5 flex-wrap">
+        {POLICY_TABS.map(tab => (
+          <button key={tab}
+                  onClick={() => setPolicyTab(tab)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors
+                    ${policyTab === tab
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Day window filters */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Window:</span>
+        {[
+          { d: 7,   label: '7 days' },
+          { d: 15,  label: '15 days' },
+          { d: 30,  label: '30 days' },
+          { d: 60,  label: '60 days' },
+          { d: -1,  label: '⏰ Overdue' },
+        ].map(({ d, label }) => (
+          <button key={d}
+                  onClick={() => setDayWindow(d)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors
+                    ${dayWindow === d
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50'}`}>
+            {label}
           </button>
         ))}
 
-        <input
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="border px-2 py-1"
-        />
+        {/* Date range */}
+        <div className="flex items-center gap-2 ml-2">
+          <span className="text-xs text-gray-400">From:</span>
+          <input type="date" value={dateFrom}
+                 onChange={e => setDateFrom(e.target.value)}
+                 className="form-input text-xs py-1 px-2 w-36" />
+          <span className="text-xs text-gray-400">To:</span>
+          <input type="date" value={dateTo}
+                 onChange={e => setDateTo(e.target.value)}
+                 className="form-input text-xs py-1 px-2 w-36" />
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(''); setDateTo('') }}
+                    className="text-xs text-red-500 hover:text-red-700">✕ Clear</button>
+          )}
+        </div>
       </div>
 
-      {/* TABLE — FIX Bug #1: visibleRenewals instead of renewals */}
-      <table className="w-full border">
-        <thead>
-          <tr className="bg-gray-100 text-sm">
-            <th>#</th>
-            <th>Client</th>
-            <th>Policy</th>
-            <th>Insurer</th>
-            <th>Expiry</th>
-            <th>Days</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
+      {/* Search */}
+      <SearchBar value={search} onChange={setSearch} placeholder="Client name, policy no, insurer…" />
 
-        <tbody>
-          {visibleRenewals.map((p, i) => {   /* FIX Bug #1: visibleRenewals */
-            const d = getDays(p)
-
-            return (
-              <tr key={p.id} className="border-t text-sm">
-                <td>{i + 1}</td>
-                <td>{p.clientName}</td>
-                <td>{p.policyNumber}</td>
-                <td>{p.insurer}</td>
-                <td>{p.expiryDate}</td>
-                <td>{d}</td>
-                <td>{statusBadge(d)}</td>
-
-                <td>
-                  <button
-                    onClick={() => handleRenew(p)}
-                    className="bg-green-600 text-white px-2 py-1 rounded"
-                  >
-                    Renew
-                  </button>
+      {/* ✅ FIX R7, R9: Table with premium + insurer columns */}
+      <div className="table-container">
+        <table className="min-w-full">
+          <thead>
+            <tr>
+              {['#', 'Client', 'Policy No', 'Type', 'Insurer', 'Due Date', 'Days', 'Premium ₹', 'Status', 'WhatsApp', 'Action'].map(h => (
+                <th key={h} className="table-header">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                  <p className="text-2xl mb-2">🎉</p>
+                  <p className="font-medium">No renewals in this window</p>
+                  <p className="text-xs mt-1">Try a different day window or tab</p>
                 </td>
               </tr>
-            )
-          })}
-        </tbody>
-      </table>
+            ) : (
+              filtered.map((p, i) => {
+                const days = getDays(p)
+                const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
+                const dueStr = getDueDate(p)
 
-      {/* FIX Bug #3: Renewal modal — renders only when a policy is selected */}
+                return (
+                  <tr key={p.id} className="table-row">
+                    <td className="table-cell text-gray-400 text-xs">{i + 1}</td>
+                    <td className="table-cell font-semibold">{p.clientName}</td>
+                    <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
+                    <td className="table-cell">
+                      <span className="badge-blue text-xs">{p.policyType || 'Health'}</span>
+                    </td>
+                    <td className="table-cell text-xs text-gray-600 dark:text-gray-400">
+                      {p.insurer || '—'}
+                    </td>
+                    <td className="table-cell text-xs">{fmtDate(dueStr)}</td>
+                    <td className={`table-cell text-sm font-bold
+                      ${days !== null && days < 0 ? 'text-red-600 dark:text-red-400' :
+                        days === 0 ? 'text-red-600 dark:text-red-400' :
+                        days <= 7 ? 'text-orange-600 dark:text-orange-400' :
+                        'text-gray-700 dark:text-gray-300'}`}>
+                      {days === null ? '—' : days < 0 ? `${Math.abs(days)}d ago` : `${days}d`}
+                    </td>
+                    <td className="table-cell font-semibold text-blue-700 dark:text-blue-400">
+                      {fmtCurrency(p.premium)}
+                    </td>
+                    <td className="table-cell">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusCls}`}>
+                        {statusLabel}
+                      </span>
+                    </td>
+                    <td className="table-cell">
+                      <button onClick={() => openWhatsApp(p)}
+                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
+                        📱 WA
+                      </button>
+                    </td>
+                    <td className="table-cell">
+                      {/* ✅ FIX R10: opens modal instead of firing immediately */}
+                      <button onClick={() => setRenewModal(p)}
+                              disabled={saving}
+                              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
+                        Renew →
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ✅ FIX R1 + R10: Renew modal */}
       {renewModal && (
-        <RenewalModal
+        <RenewModal
           policy={renewModal}
-          onConfirm={onConfirmRenew}
+          onConfirm={handleRenewConfirm}
           onClose={() => { if (!saving) setRenewModal(null) }}
-          saving={saving}
         />
       )}
     </div>

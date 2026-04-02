@@ -1,4 +1,7 @@
 // src/pages/ClientProfilePage.jsx
+// ✅ FIXED: CP1 (Edit button navigates with state to open edit modal),
+//           CP2 (coverage gaps only from active policies),
+//           CP3 (graceful handling of doc fetch errors)
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getClient, getAllClaims, getAllTasks } from '../firebase/firestore'
@@ -47,32 +50,44 @@ export default function ClientProfilePage() {
     if (!id) return
     const load = async () => {
       try {
-        const [c, allClaims, allTasks, clientDocs] = await Promise.all([
+        // ✅ FIX CP3: split Promise.all so a doc fetch failure doesn't blank the whole profile
+        const [c, allClaims, allTasks] = await Promise.all([
           getClient(id),
           getAllClaims(),
           getAllTasks(),
-          getDocMeta(id),
         ])
         setClient(c)
         setClaims(allClaims.filter(cl => cl.clientId === id))
         setTasks(allTasks.filter(t => t.clientId === id))
-        setDocs(clientDocs)
-      } catch(err) { toast.error(err.message) }
-      finally { setLoading(false) }
+
+        // Load docs separately — failure doesn't crash the profile
+        try {
+          const clientDocs = await getDocMeta(id)
+          setDocs(clientDocs || [])
+        } catch (docErr) {
+          console.warn('Could not load documents:', docErr.message)
+          setDocs([])
+        }
+      } catch (err) {
+        toast.error('Could not load profile: ' + err.message)
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [id])
 
   const clientPolicies = policies.filter(p => p.clientId === id)
-  const isActv = p => !['Renewed-Out','Cancelled','Matured'].includes((p.status||'').trim())
+  const isActv = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
   const activePolicies = clientPolicies.filter(p => isActv(p))
-  const gaps           = computeCoverageGaps(clientPolicies)
-  const totalPremium   = activePolicies.reduce((s,p) => s + (parseFloat(p.premium)||0), 0)
-  const totalCoverage  = activePolicies.reduce((s,p) => s + (parseFloat(p.sumInsured||p.sumAssured||p.idv)||0), 0)
 
-  // WhatsApp quick action
+  // ✅ FIX CP2: compute coverage gaps only from ACTIVE policies
+  const gaps           = computeCoverageGaps(activePolicies)
+  const totalPremium   = activePolicies.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
+  const totalCoverage  = activePolicies.reduce((s, p) => s + (parseFloat(p.sumInsured || p.sumAssured || p.idv) || 0), 0)
+
   const openWhatsApp = () => {
-    const mobile = (client?.mobile||'').replace(/\D/g,'')
+    const mobile = (client?.mobile || '').replace(/\D/g, '')
     if (!mobile) { toast.error('No mobile number — add it in Clients page'); return }
     const msg = encodeURIComponent(`Dear ${client.name},\n\nGreetings from *Gohil Investments*!\n\nThis is a courtesy call regarding your insurance portfolio. Please feel free to reach out for any queries.\n\nThank you for your continued trust.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`)
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
@@ -80,7 +95,7 @@ export default function ClientProfilePage() {
 
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
-      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"/>Loading profile…
+      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading profile…
     </div>
   )
 
@@ -106,27 +121,33 @@ export default function ClientProfilePage() {
               <span className="text-sm text-gray-500 dark:text-gray-400">{client.mobile}</span>
               {client.email && <span className="text-sm text-gray-500 dark:text-gray-400">{client.email}</span>}
               <span className={`text-xs px-2 py-0.5 rounded-full font-semibold
-                ${client.kycStatus==='Complete'?'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300':
-                  client.kycStatus==='In Progress'?'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200':
+                ${client.kycStatus === 'Complete' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
+                  client.kycStatus === 'In Progress' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200' :
                   'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'}`}>
-                KYC: {client.kycStatus||'Pending'}
+                KYC: {client.kycStatus || 'Pending'}
               </span>
             </div>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={openWhatsApp} className="btn-whatsapp">📱 WhatsApp</button>
-          <button onClick={() => navigate('/clients')} className="btn-secondary">Edit Client</button>
+          {/* ✅ FIX CP1: navigate to /clients with state to open edit modal for this client */}
+          <button
+            onClick={() => navigate('/clients', { state: { editClientId: id } })}
+            className="btn-secondary"
+          >
+            ✏️ Edit Client
+          </button>
         </div>
       </div>
 
       {/* Quick stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { icon:'📋', label:'Active Policies', val: activePolicies.length, color:'blue'   },
-          { icon:'💰', label:'Total Premium',   val: fmtCurrency(totalPremium), color:'green'  },
-          { icon:'🛡️', label:'Total Coverage',  val: fmtCurrency(totalCoverage), color:'purple' },
-          { icon:'🔍', label:'Claims',           val: claims.length,          color:'orange' },
+          { icon: '📋', label: 'Active Policies', val: activePolicies.length, color: 'blue'   },
+          { icon: '💰', label: 'Total Premium',   val: fmtCurrency(totalPremium), color: 'green'  },
+          { icon: '🛡️', label: 'Total Coverage',  val: fmtCurrency(totalCoverage), color: 'purple' },
+          { icon: '🔍', label: 'Claims',           val: claims.length,          color: 'orange' },
         ].map(({ icon, label, val, color }) => (
           <div key={label} className="stat-card">
             <span className="text-2xl">{icon}</span>
@@ -138,7 +159,7 @@ export default function ClientProfilePage() {
         ))}
       </div>
 
-      {/* Coverage gaps */}
+      {/* Coverage gaps — ✅ FIX CP2: only from active policies now */}
       {gaps.length > 0 && (
         <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
           <p className="text-sm font-bold text-orange-700 dark:text-orange-300 mb-2">🎯 Coverage Gaps — Cross-sell Opportunities</p>
@@ -165,8 +186,8 @@ export default function ClientProfilePage() {
               ['State',       client.state],
               ['Address',     client.address],
               ['Notes',       client.notes],
-            ].filter(([,v]) => v).map(([k,v]) => (
-              <div key={k} className={k==='Address'||k==='Notes' ? 'col-span-2' : ''}>
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className={k === 'Address' || k === 'Notes' ? 'col-span-2' : ''}>
                 <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">{k}</p>
                 <p className="text-gray-800 dark:text-gray-200 font-medium text-sm">{v}</p>
               </div>
@@ -203,7 +224,7 @@ export default function ClientProfilePage() {
           <div className="table-container">
             <table className="min-w-full">
               <thead><tr>
-                {['Policy No','Type','Insurer','Plan','Premium','Sum Insured/Assured','Start','Expiry','Days','Status'].map(h=>(
+                {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Expiry', 'Days', 'Status'].map(h => (
                   <th key={h} className="table-header">{h}</th>
                 ))}
               </tr></thead>
@@ -211,19 +232,24 @@ export default function ClientProfilePage() {
                 {clientPolicies.map(p => {
                   const st = renewalStatus(p.expiryDate)
                   const coverage = p.sumInsured || p.sumAssured || p.idv || '—'
-                  const bm = {green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
+                  const bm = { green: 'badge-green', yellow: 'badge-yellow', red: 'badge-red', blue: 'badge-blue', gray: 'badge-gray' }
                   return (
-                    <tr key={p.id} className="table-row">
+                    <tr key={p.id} className={`table-row ${(p.status || '') === 'Renewed-Out' ? 'opacity-50' : ''}`}>
                       <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                       <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                       <td className="table-cell text-xs">{p.insurer}</td>
-                      <td className="table-cell text-xs">{p.planName||'—'}</td>
+                      <td className="table-cell text-xs">{p.planName || '—'}</td>
                       <td className="table-cell font-semibold">{fmtCurrency(p.premium)}</td>
                       <td className="table-cell">{coverage !== '—' ? fmtCurrency(coverage) : '—'}</td>
                       <td className="table-cell text-xs">{fmtDate(p.startDate)}</td>
                       <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
                       <td className="table-cell text-xs">{daysUntil(p.expiryDate) !== null ? `${daysUntil(p.expiryDate)}d` : '—'}</td>
-                      <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
+                      <td className="table-cell">
+                        {(p.status || '') === 'Renewed-Out'
+                          ? <span className="badge-gray">Renewed</span>
+                          : <span className={bm[st.color] || 'badge-gray'}>{st.label}</span>
+                        }
+                      </td>
                     </tr>
                   )
                 })}
@@ -242,11 +268,11 @@ export default function ClientProfilePage() {
             {claims.map(c => (
               <div key={c.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
                 <div>
-                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{c.claimNumber||'—'} · {c.claimType}</p>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{c.claimNumber || '—'} · {c.claimType}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{c.insurer} · {fmtDate(c.intimationDate)}</p>
                 </div>
                 <div className="text-right">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CLAIM_STATUS_COLORS[c.status]||'badge-gray'}`}>{c.status}</span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CLAIM_STATUS_COLORS[c.status] || 'badge-gray'}`}>{c.status}</span>
                   {c.claimedAmount && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">₹{Number(c.claimedAmount).toLocaleString('en-IN')}</p>}
                 </div>
               </div>
@@ -257,18 +283,18 @@ export default function ClientProfilePage() {
 
       {/* Tasks */}
       {tasks.length > 0 && (
-        <Section title="Pending Tasks" icon="✅" badge={tasks.filter(t=>!t.done).length}>
+        <Section title="Pending Tasks" icon="✅" badge={tasks.filter(t => !t.done).length}>
           <div className="space-y-2">
-            {tasks.filter(t=>!t.done).map(t => (
+            {tasks.filter(t => !t.done).map(t => (
               <div key={t.id} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                <span className="text-lg">{t.type==='Call'?'📞':t.type==='Email'?'📧':t.type==='Meeting'?'🤝':'📌'}</span>
+                <span className="text-lg">{t.type === 'Call' ? '📞' : t.type === 'Email' ? '📧' : t.type === 'Meeting' ? '🤝' : '📌'}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{t.title}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Due: {fmtDate(t.dueDate)}</p>
                 </div>
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0
-                  ${t.priority==='High'?'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300':
-                    t.priority==='Medium'?'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200':
+                  ${t.priority === 'High' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' :
+                    t.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200' :
                     'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
                   {t.priority}
                 </span>

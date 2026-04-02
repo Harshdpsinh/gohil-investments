@@ -1,17 +1,21 @@
 // src/pages/AdminUsersPage.jsx
-// Admin-only page to create and manage staff login accounts
+// ✅ FIXED: A1 (role passed to createStaffAccount), A2 (role change confirmation)
 import { useState, useEffect } from 'react'
 import { useAuth }    from '../hooks/useAuth'
 import { getAllUsers, setUserRole } from '../firebase/firestore'
 import toast from 'react-hot-toast'
 
 export default function AdminUsersPage() {
+  // ✅ FIX A1: createStaffAccount must accept (email, password, name, role)
+  //            Make sure your useAuth hook passes 'role' to Firebase user creation
   const { createStaffAccount, isAdmin } = useAuth()
   const [users,    setUsers]    = useState([])
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form,     setForm]     = useState({ name: '', email: '', password: '', role: 'staff' })
   const [saving,   setSaving]   = useState(false)
+  // ✅ FIX A2: role change confirmation state
+  const [pendingRoleChange, setPendingRoleChange] = useState(null) // { uid, name, newRole }
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const load = async () => {
@@ -30,8 +34,9 @@ export default function AdminUsersPage() {
     if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return }
     setSaving(true)
     try {
-      await createStaffAccount(form.email, form.password, form.name)
-      toast.success(`Account created for ${form.name}`)
+      // ✅ FIX A1: pass form.role as 4th argument
+      await createStaffAccount(form.email, form.password, form.name, form.role)
+      toast.success(`Account created for ${form.name} (${form.role})`)
       setForm({ name: '', email: '', password: '', role: 'staff' })
       setShowForm(false)
       await load()
@@ -42,10 +47,19 @@ export default function AdminUsersPage() {
     } finally { setSaving(false) }
   }
 
-  const onChangeRole = async (uid, newRole) => {
-    await setUserRole(uid, { role: newRole })
-    toast.success('Role updated')
-    await load()
+  // ✅ FIX A2: two-step role change with confirmation
+  const onChangeRole = async () => {
+    if (!pendingRoleChange) return
+    const { uid, newRole } = pendingRoleChange
+    try {
+      await setUserRole(uid, { role: newRole })
+      toast.success('Role updated')
+      await load()
+    } catch (err) {
+      toast.error('Failed to update role: ' + err.message)
+    } finally {
+      setPendingRoleChange(null)
+    }
   }
 
   if (!isAdmin) return (
@@ -108,7 +122,6 @@ export default function AdminUsersPage() {
             </div>
           </form>
 
-          {/* Role explanation */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="bg-green-50 border border-green-200 rounded-lg p-3">
               <p className="font-semibold text-green-700 mb-1">✅ Staff can:</p>
@@ -122,6 +135,31 @@ export default function AdminUsersPage() {
         </div>
       )}
 
+      {/* ✅ FIX A2: Role change confirmation dialog */}
+      {pendingRoleChange && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setPendingRoleChange(null)} />
+          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h3 className="text-base font-bold text-gray-900 dark:text-white">⚠️ Confirm Role Change</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Change <strong>{pendingRoleChange.name}</strong>'s role to{' '}
+              <strong className={pendingRoleChange.newRole === 'admin' ? 'text-blue-600' : 'text-green-600'}>
+                {pendingRoleChange.newRole === 'admin' ? '🔑 Admin' : '👤 Staff'}
+              </strong>?
+            </p>
+            {pendingRoleChange.newRole === 'admin' && (
+              <p className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 rounded-lg p-2">
+                Admin users can delete records and manage accounts.
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button onClick={onChangeRole} className="btn-primary flex-1">Yes, Change Role</button>
+              <button onClick={() => setPendingRoleChange(null)} className="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Users list */}
       {loading
         ? <div className="text-gray-400 text-sm">Loading users…</div>
@@ -130,7 +168,7 @@ export default function AdminUsersPage() {
             <table className="min-w-full">
               <thead>
                 <tr>
-                  {['Name','Email','Role','Actions'].map(h => (
+                  {['Name', 'Email', 'Role', 'Change Role'].map(h => (
                     <th key={h} className="table-header">{h}</th>
                   ))}
                 </tr>
@@ -152,9 +190,10 @@ export default function AdminUsersPage() {
                         </span>
                       </td>
                       <td className="table-cell">
+                        {/* ✅ FIX A2: trigger confirmation modal instead of direct change */}
                         <select
                           value={u.role || 'staff'}
-                          onChange={e => onChangeRole(u.id, e.target.value)}
+                          onChange={e => setPendingRoleChange({ uid: u.id, name: u.name || u.email, newRole: e.target.value })}
                           className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
                         >
                           <option value="staff">Set as Staff</option>
