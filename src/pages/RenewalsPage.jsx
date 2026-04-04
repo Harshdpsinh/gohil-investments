@@ -85,6 +85,8 @@ function RenewModal({ policy, onConfirm, onClose }) {
 
   const [form, setForm] = useState({
     policyNumber:  '',          // new policy number (may change on renewal)
+    insurer:       policy.insurer || '',   // editable — client may switch company
+    planName:      policy.planName || '',  // editable — plan often changes with company
     premium:       policy.premium || '',
     startDate:     defaultStart,
     expiryDate:    defaultExpiry,
@@ -125,6 +127,17 @@ function RenewModal({ policy, onConfirm, onClose }) {
           The old policy will be marked <strong>Renewed-Out</strong>. A new policy entry will be created with the details below.
         </p>
 
+        {/* Company-changed badge — shows when insurer is edited */}
+        {form.insurer && form.insurer !== policy.insurer && (
+          <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-xl px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+            <span className="text-base">🔀</span>
+            <span>
+              <strong>Company changed:</strong> {policy.insurer} → <strong>{form.insurer}</strong>
+              &nbsp;· The new policy will be filed under the new insurer everywhere in the system.
+            </span>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="form-label">New Policy Number</label>
@@ -136,6 +149,47 @@ function RenewModal({ policy, onConfirm, onClose }) {
             <label className="form-label">Renewed Premium (₹) *</label>
             <input type="number" value={form.premium} onChange={e => set('premium', e.target.value)}
                    className="form-input" required />
+          </div>
+          {/* ── Company + Plan — editable for portability / company switch ── */}
+          <div className="sm:col-span-2">
+            <label className="form-label">
+              Insurance Company
+              {form.insurer !== policy.insurer && form.insurer
+                ? <span className="ml-2 text-amber-600 dark:text-amber-400 font-normal text-xs">⚡ Changed</span>
+                : <span className="ml-2 text-gray-400 font-normal text-xs">(change if switching insurer)</span>}
+            </label>
+            <input
+              list="renew-insurer-list"
+              value={form.insurer}
+              onChange={e => set('insurer', e.target.value)}
+              className="form-input"
+              placeholder="Type or select insurer…"
+              autoComplete="off"
+            />
+            <datalist id="renew-insurer-list">
+              {[
+                'Star Health and Allied Insurance','New India Assurance','National Insurance',
+                'United India Insurance','Oriental Insurance','HDFC ERGO General Insurance',
+                'ICICI Lombard General Insurance','Bajaj Allianz General Insurance',
+                'Reliance General Insurance','Royal Sundaram General Insurance',
+                'Niva Bupa Health Insurance','Aditya Birla Health Insurance',
+                'Care Health Insurance','ManipalCigna Health Insurance',
+                'SBI General Insurance','Tata AIG General Insurance',
+                'Cholamandalam MS General Insurance','Future Generali India Insurance',
+                'Iffco Tokio General Insurance','Kotak Mahindra General Insurance',
+                'Liberty General Insurance','Universal Sompo General Insurance',
+                'LIC of India','HDFC Life Insurance','ICICI Prudential Life Insurance',
+                'SBI Life Insurance','Max Life Insurance','Bajaj Allianz Life Insurance',
+                'Tata AIA Life Insurance','Canara HSBC Life Insurance',
+              ].map(ins => <option key={ins} value={ins} />)}
+            </datalist>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="form-label">Plan Name
+              <span className="ml-2 text-gray-400 font-normal text-xs">(update if plan changed)</span>
+            </label>
+            <input value={form.planName} onChange={e => set('planName', e.target.value)}
+                   className="form-input" placeholder="e.g. Optima Restore, Smart Select…" />
           </div>
           <div>
             <label className="form-label">New Start Date *</label>
@@ -335,9 +389,10 @@ export default function RenewalsPage() {
         clientId:       policy.clientId,
         clientName:     policy.clientName,
         policyType:     policy.policyType,
-        insurer:        policy.insurer,
-        planName:       policy.planName || '',
         frequency:      policy.frequency || 'Yearly',
+        // ── Editable on renewal — insurer/plan may change (portability / company switch) ──
+        insurer:        renewForm.insurer?.trim()  || policy.insurer,
+        planName:       renewForm.planName?.trim() || policy.planName || '',
         // Override with new renewal values
         policyNumber:   renewForm.policyNumber?.trim() || policy.policyNumber,
         premium:        renewForm.premium,
