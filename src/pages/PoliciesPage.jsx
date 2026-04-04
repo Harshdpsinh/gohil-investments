@@ -1,5 +1,5 @@
 // src/pages/PoliciesPage.jsx
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
@@ -339,34 +339,69 @@ function MotorSection({ form, set }) {
 }
 
 // ── Policy Form (main) ────────────────────────────────────────
-import { KNOWN_INSURERS } from '../utils/constants'
 
-// ── Smart insurer combobox ────────────────────────────────────
-function InsurerSelect({ value, onChange, insurers = [] }) {
-  const [list, setList] = useState([])
+// ── Known insurers list (built-in — no external import needed) ──
+const KNOWN_INSURERS = [
+  // General / Health
+  'Star Health and Allied Insurance',
+  'New India Assurance',
+  'National Insurance',
+  'United India Insurance',
+  'Oriental Insurance',
+  'HDFC ERGO General Insurance',
+  'ICICI Lombard General Insurance',
+  'Bajaj Allianz General Insurance',
+  'Reliance General Insurance',
+  'Royal Sundaram General Insurance',
+  'Niva Bupa Health Insurance',
+  'Aditya Birla Health Insurance',
+  'Care Health Insurance',
+  'ManipalCigna Health Insurance',
+  'SBI General Insurance',
+  'Tata AIG General Insurance',
+  'Cholamandalam MS General Insurance',
+  'Future Generali India Insurance',
+  'Iffco Tokio General Insurance',
+  'Kotak Mahindra General Insurance',
+  'Liberty General Insurance',
+  'Magma HDI General Insurance',
+  'Raheja QBE General Insurance',
+  'Universal Sompo General Insurance',
+  // Life
+  'LIC of India',
+  'HDFC Life Insurance',
+  'ICICI Prudential Life Insurance',
+  'SBI Life Insurance',
+  'Max Life Insurance',
+  'Bajaj Allianz Life Insurance',
+  'Kotak Mahindra Life Insurance',
+  'Aditya Birla Sun Life Insurance',
+  'Tata AIA Life Insurance',
+  'PNB MetLife India Insurance',
+  'Pramerica Life Insurance',
+  'IndiaFirst Life Insurance',
+  'Edelweiss Tokio Life Insurance',
+  'Canara HSBC Life Insurance',
+]
 
-  useEffect(() => {
-    if (insurers && insurers.length > 0) {
-      setList(insurers)
-    } else {
-      setList([])
-    }
-  }, [insurers])
-
+// ── Smart insurer combobox (datalist — supports both select & free-type) ──
+function InsurerSelect({ value, onChange }) {
   return (
-    <select
-      value={value || ''}
-      onChange={(e) => onChange(e.target.value)}
-      className="border px-2 py-1 w-full"
-    >
-      <option value="">Select Insurer</option>
-
-      {list.map((ins, i) => (
-        <option key={i} value={ins}>
-          {ins}
-        </option>
-      ))}
-    </select>
+    <div>
+      <input
+        list="insurer-options"
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        className="form-input"
+        placeholder="Type or select insurer…"
+        autoComplete="off"
+      />
+      <datalist id="insurer-options">
+        {KNOWN_INSURERS.map(ins => (
+          <option key={ins} value={ins} />
+        ))}
+      </datalist>
+    </div>
   )
 }
 
@@ -1211,9 +1246,33 @@ Wealth Management & Insurance Advisory
     finally { setBulkDeleting(false) }
   }
 
-  const onAdd    = async form => { await addPolicy(form);                toast.success('Policy added!');   setModal(null) }
-  const onEdit   = async form => { await updatePolicy(selected.id,form); toast.success('Policy updated!'); setModal(null) }
-  const onDelete = async ()   => { await deletePolicy(selected.id);      toast.success('Policy deleted') }
+  const onAdd    = async form => {
+    try {
+      await addPolicy(form)
+      toast.success('Policy added!')
+      setModal(null)
+    } catch(err) {
+      toast.error('Failed to add policy: ' + (err.message || 'Unknown error'))
+    }
+  }
+  const onEdit   = async form => {
+    try {
+      await updatePolicy(selected.id, form)
+      toast.success('Policy updated!')
+      setModal(null)
+    } catch(err) {
+      toast.error('Failed to update policy: ' + (err.message || 'Unknown error'))
+    }
+  }
+  const onDelete = async () => {
+    try {
+      await deletePolicy(selected.id)
+      toast.success('Policy deleted')
+      setDelOpen(false)
+    } catch(err) {
+      toast.error('Failed to delete: ' + (err.message || 'Unknown error'))
+    }
+  }
 
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">

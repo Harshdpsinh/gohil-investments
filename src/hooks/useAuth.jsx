@@ -62,9 +62,9 @@ export function AuthProvider({ children }) {
     return fbSignOut(auth)
   }
 
-  async function createStaffAccount(email, password, name) {
+  async function createStaffAccount(email, password, name, role = 'staff') {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await setUserRole(cred.user.uid, { email, role: 'staff', name })
+    await setUserRole(cred.user.uid, { email, role, name })
     return cred
   }
 
