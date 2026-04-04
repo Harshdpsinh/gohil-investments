@@ -73,8 +73,25 @@ function getStatusInfo(days) {
 // ─────────────────────────────────────────────────────────────
 // RENEW MODAL — collects new policy details before creating
 // ─────────────────────────────────────────────────────────────
+// Full Indian insurer list reused in RenewModal
+const RENEW_INSURERS = [
+  'Star Health and Allied Insurance','New India Assurance','National Insurance',
+  'United India Insurance','Oriental Insurance','HDFC ERGO General Insurance',
+  'ICICI Lombard General Insurance','Bajaj Allianz General Insurance',
+  'Reliance General Insurance','Royal Sundaram General Insurance',
+  'Niva Bupa Health Insurance','Aditya Birla Health Insurance',
+  'Care Health Insurance','ManipalCigna Health Insurance',
+  'SBI General Insurance','Tata AIG General Insurance',
+  'Cholamandalam MS General Insurance','Future Generali India Insurance',
+  'Iffco Tokio General Insurance','Kotak Mahindra General Insurance',
+  'Liberty General Insurance','Universal Sompo General Insurance',
+  'LIC of India','HDFC Life Insurance','ICICI Prudential Life Insurance',
+  'SBI Life Insurance','Max Life Insurance','Bajaj Allianz Life Insurance',
+  'Tata AIA Life Insurance','Canara HSBC Life Insurance',
+  'PNB MetLife India Insurance','IndiaFirst Life Insurance',
+]
+
 function RenewModal({ policy, onConfirm, onClose }) {
-  // Pre-fill with smart defaults: start = expiry+1, expiry = +1yr, premium same
   const oldExpiry = getDueDate(policy) || ''
   const defaultStart = oldExpiry
     ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
@@ -83,60 +100,157 @@ function RenewModal({ policy, onConfirm, onClose }) {
     ? toInputDate(new Date(new Date(defaultStart).getTime() + 365 * 86400000))
     : ''
 
+  // ── "Same company" or "Switch company" — explicit toggle ──
+  const [companySame, setCompanySame] = useState(true)
+
   const [form, setForm] = useState({
-    policyNumber:  '',          // new policy number (may change on renewal)
-    insurer:       policy.insurer || '',   // editable — client may switch company
-    planName:      policy.planName || '',  // editable — plan often changes with company
-    premium:       policy.premium || '',
-    startDate:     defaultStart,
-    expiryDate:    defaultExpiry,
-    fyCommission:  policy.fyCommission || '',
-    ryCommission:  policy.ryCommission || '',
-    notes:         '',
+    policyNumber: '',
+    insurer:      policy.insurer || '',
+    planName:     policy.planName || '',
+    premium:      policy.premium || '',
+    startDate:    defaultStart,
+    expiryDate:   defaultExpiry,
+    fyCommission: policy.fyCommission || '',
+    ryCommission: policy.ryCommission || '',
+    notes:        '',
   })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
+  // When user clicks "Same Company" reset insurer/plan back to original
+  const handleCompanyToggle = (same) => {
+    setCompanySame(same)
+    if (same) {
+      set('insurer',  policy.insurer  || '')
+      set('planName', policy.planName || '')
+    } else {
+      // Clear so user is forced to consciously pick the new insurer
+      set('insurer',  '')
+      set('planName', '')
+    }
+  }
+
   const handleSubmit = async () => {
     if (!form.startDate)  { toast.error('Start date required'); return }
     if (!form.expiryDate) { toast.error('Expiry date required'); return }
-    setSaving(true)
-    try {
-      await onConfirm(form)
-    } finally {
-      setSaving(false)
+    if (!companySame && !form.insurer.trim()) {
+      toast.error('Please select the new insurance company'); return
     }
+    setSaving(true)
+    try { await onConfirm({ ...form, companySame }) }
+    finally { setSaving(false) }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4">
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">🔄 Renew Policy</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
         </div>
 
-        {/* Summary of old policy */}
+        {/* Old policy summary */}
         <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3 text-sm">
           <p className="font-semibold text-blue-800 dark:text-blue-200">{policy.clientName} — {policy.policyNumber}</p>
-          <p className="text-blue-600 dark:text-blue-400 text-xs">{policy.insurer} · {policy.policyType} · Old expiry: {fmtDate(getDueDate(policy))}</p>
+          <p className="text-blue-600 dark:text-blue-400 text-xs mt-0.5">
+            {policy.insurer} · {policy.policyType} · {policy.planName || '—'} · Old expiry: {fmtDate(getDueDate(policy))}
+          </p>
         </div>
 
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          The old policy will be marked <strong>Renewed-Out</strong>. A new policy entry will be created with the details below.
-        </p>
+        {/* ── STEP 1: Company choice — prominent two-button toggle ── */}
+        <div>
+          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+            Step 1 — Is the client renewing with the <em>same company</em> or <em>switching?</em>
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => handleCompanyToggle(true)}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border-2 py-4 px-3 transition-all
+                ${companySame
+                  ? 'border-green-500 bg-green-50 dark:bg-green-900/30'
+                  : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:border-gray-300'}`}
+            >
+              <span className="text-2xl">🏢</span>
+              <span className={`text-sm font-bold ${companySame ? 'text-green-700 dark:text-green-300' : 'text-gray-600 dark:text-gray-400'}`}>
+                Same Company
+              </span>
+              {companySame && (
+                <span className="text-xs font-semibold text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/50 px-2 py-0.5 rounded-full">
+                  ✓ Selected
+                </span>
+              )}
+              <span className="text-xs text-gray-400 dark:text-gray-500 text-center leading-tight">
+                Renewing with<br /><strong className="text-gray-600 dark:text-gray-400">{policy.insurer}</strong>
+              </span>
+            </button>
 
-        {/* Company-changed badge — shows when insurer is edited */}
-        {form.insurer && form.insurer !== policy.insurer && (
-          <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-xl px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-            <span className="text-base">🔀</span>
-            <span>
-              <strong>Company changed:</strong> {policy.insurer} → <strong>{form.insurer}</strong>
-              &nbsp;· The new policy will be filed under the new insurer everywhere in the system.
-            </span>
+            <button
+              type="button"
+              onClick={() => handleCompanyToggle(false)}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border-2 py-4 px-3 transition-all
+                ${!companySame
+                  ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/30'
+                  : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 hover:border-gray-300'}`}
+            >
+              <span className="text-2xl">🔀</span>
+              <span className={`text-sm font-bold ${!companySame ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-gray-400'}`}>
+                Switch Company
+              </span>
+              {!companySame && (
+                <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 rounded-full">
+                  ✓ Selected
+                </span>
+              )}
+              <span className="text-xs text-gray-400 dark:text-gray-500 text-center leading-tight">
+                Porting to a<br />different insurer
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* ── If switching: show insurer picker + plan ── */}
+        {!companySame && (
+          <div className="space-y-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
+            <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider">
+              🔀 New Company Details
+            </p>
+            <div>
+              <label className="form-label">New Insurance Company *</label>
+              <input
+                list="renew-insurer-datalist"
+                value={form.insurer}
+                onChange={e => set('insurer', e.target.value)}
+                className="form-input"
+                placeholder="Type to search or select…"
+                autoComplete="off"
+                autoFocus
+              />
+              <datalist id="renew-insurer-datalist">
+                {RENEW_INSURERS.map(ins => <option key={ins} value={ins} />)}
+              </datalist>
+              {form.insurer && (
+                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1 font-medium">
+                  Switching: <span className="line-through text-gray-400">{policy.insurer}</span> → <strong>{form.insurer}</strong>
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="form-label">New Plan Name</label>
+              <input
+                value={form.planName}
+                onChange={e => set('planName', e.target.value)}
+                className="form-input"
+                placeholder="e.g. Optima Secure, Smart Select…"
+              />
+            </div>
           </div>
         )}
+
+        <p className="text-xs text-gray-400 dark:text-gray-500">
+          Step 2 — Fill renewal details below. Old policy → <strong>Renewed-Out</strong>. New policy entry created automatically.
+        </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -149,47 +263,6 @@ function RenewModal({ policy, onConfirm, onClose }) {
             <label className="form-label">Renewed Premium (₹) *</label>
             <input type="number" value={form.premium} onChange={e => set('premium', e.target.value)}
                    className="form-input" required />
-          </div>
-          {/* ── Company + Plan — editable for portability / company switch ── */}
-          <div className="sm:col-span-2">
-            <label className="form-label">
-              Insurance Company
-              {form.insurer !== policy.insurer && form.insurer
-                ? <span className="ml-2 text-amber-600 dark:text-amber-400 font-normal text-xs">⚡ Changed</span>
-                : <span className="ml-2 text-gray-400 font-normal text-xs">(change if switching insurer)</span>}
-            </label>
-            <input
-              list="renew-insurer-list"
-              value={form.insurer}
-              onChange={e => set('insurer', e.target.value)}
-              className="form-input"
-              placeholder="Type or select insurer…"
-              autoComplete="off"
-            />
-            <datalist id="renew-insurer-list">
-              {[
-                'Star Health and Allied Insurance','New India Assurance','National Insurance',
-                'United India Insurance','Oriental Insurance','HDFC ERGO General Insurance',
-                'ICICI Lombard General Insurance','Bajaj Allianz General Insurance',
-                'Reliance General Insurance','Royal Sundaram General Insurance',
-                'Niva Bupa Health Insurance','Aditya Birla Health Insurance',
-                'Care Health Insurance','ManipalCigna Health Insurance',
-                'SBI General Insurance','Tata AIG General Insurance',
-                'Cholamandalam MS General Insurance','Future Generali India Insurance',
-                'Iffco Tokio General Insurance','Kotak Mahindra General Insurance',
-                'Liberty General Insurance','Universal Sompo General Insurance',
-                'LIC of India','HDFC Life Insurance','ICICI Prudential Life Insurance',
-                'SBI Life Insurance','Max Life Insurance','Bajaj Allianz Life Insurance',
-                'Tata AIA Life Insurance','Canara HSBC Life Insurance',
-              ].map(ins => <option key={ins} value={ins} />)}
-            </datalist>
-          </div>
-          <div className="sm:col-span-2">
-            <label className="form-label">Plan Name
-              <span className="ml-2 text-gray-400 font-normal text-xs">(update if plan changed)</span>
-            </label>
-            <input value={form.planName} onChange={e => set('planName', e.target.value)}
-                   className="form-input" placeholder="e.g. Optima Restore, Smart Select…" />
           </div>
           <div>
             <label className="form-label">New Start Date *</label>
@@ -371,7 +444,7 @@ export default function RenewalsPage() {
     doc.save('renewals.pdf')
   }
 
-  // ─── RENEW ACTION ── ✅ FIX R1: creates new policy entry ─────
+  // ─── RENEW ACTION ─────────────────────────────────────────────
   const handleRenewConfirm = useCallback(async (renewForm) => {
     if (submittingRef.current || !renewModal) return
     submittingRef.current = true
@@ -380,44 +453,78 @@ export default function RenewalsPage() {
     const policy = renewModal
 
     try {
-      // 1. Mark the OLD policy as Renewed-Out
-      await updatePolicy(policy.id, { status: 'Renewed-Out' })
+      // ── Step 1: Mark OLD policy as Renewed-Out ─────────────────
+      await updatePolicy(policy.id, {
+        status:     'Renewed-Out',
+        is_renewed: true,
+        renewedAt:  new Date().toISOString(),
+      })
 
-      // 2. Create NEW policy entry (linked via prevPolicyId chain)
+      // ── Step 2: Build new policy — spread ALL old fields first,
+      //    then override only what changed on renewal.
+      //    This ensures Motor/Life/Health type-specific fields are
+      //    all carried across without manually listing every one.
       const newPolicyData = {
-        // Copy all fields from old policy
-        clientId:       policy.clientId,
-        clientName:     policy.clientName,
-        policyType:     policy.policyType,
-        frequency:      policy.frequency || 'Yearly',
-        // ── Editable on renewal — insurer/plan may change (portability / company switch) ──
-        insurer:        renewForm.insurer?.trim()  || policy.insurer,
-        planName:       renewForm.planName?.trim() || policy.planName || '',
-        // Override with new renewal values
-        policyNumber:   renewForm.policyNumber?.trim() || policy.policyNumber,
-        premium:        renewForm.premium,
-        startDate:      renewForm.startDate,
-        expiryDate:     renewForm.expiryDate,
-        fyCommission:   renewForm.fyCommission,
-        ryCommission:   renewForm.ryCommission,
-        notes:          renewForm.notes,
-        status:         'Active',
-        // Policy chain: link to the policy it replaced
-        prevPolicyId:   policy.id,
-        policyYear:     (policy.policyYear || 1) + 1,
-        // Carry over type-specific fields
-        sumInsured:     policy.sumInsured,
-        sumAssured:     policy.sumAssured,
-        idv:            policy.idv,
-        members:        policy.members,
-        nominee:        policy.nominee,
-        nomineeRelation: policy.nomineeRelation,
-        // Metadata
-        createdAt:      new Date().toISOString(),
-        updatedAt:      new Date().toISOString(),
+        ...policy,                            // ← carry EVERY field from old policy
+
+        // ── Fields that always change on renewal ──
+        status:       'Active',
+        policyNumber: renewForm.policyNumber?.trim() || policy.policyNumber,
+        premium:      renewForm.premium,
+        startDate:    renewForm.startDate,
+        expiryDate:   renewForm.expiryDate,
+        fyCommission: renewForm.fyCommission,
+        ryCommission: renewForm.ryCommission,
+        notes:        renewForm.notes || '',
+
+        // ── Company / plan — controlled by Same / Switch toggle ──
+        insurer:  renewForm.companySame
+          ? policy.insurer
+          : (renewForm.insurer?.trim()  || policy.insurer),
+        planName: renewForm.companySame
+          ? (renewForm.planName?.trim() || policy.planName || '')
+          : (renewForm.planName?.trim() || ''),
+
+        // ── Renewal chain metadata ──
+        prevPolicyId: policy.id,
+        policyYear:   (policy.policyYear || 1) + 1,
+        is_renewed:   false,         // new policy is not yet renewed
+        renewedAt:    null,
+
+        // ── Reset computed/runtime fields ──
+        nextPremiumDue: null,        // will be recomputed by the system
+        policyPdfUrl:   null,        // new policy — no PDF yet
+        policyPdfName:  null,
+
+        // ── Timestamps ──
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       }
 
-      await addPolicy(newPolicyData)
+      // ── CRITICAL: remove the old Firestore doc ID —
+      //    addPolicy must create a NEW document, not overwrite the old one
+      delete newPolicyData.id
+
+      // ── Sanitize: Firestore rejects `undefined` values.
+      //    Strip every key whose value is undefined or null
+      //    (null is allowed by Firestore; we strip it too for cleanliness).
+      const clean = Object.fromEntries(
+        Object.entries(newPolicyData).filter(([, v]) => v !== undefined && v !== null)
+      )
+
+      try {
+        await addPolicy(clean)
+      } catch (addErr) {
+        // ── ROLLBACK: if new policy creation fails, restore old policy
+        //    so it doesn't get permanently stuck as Renewed-Out
+        console.error('addPolicy failed, rolling back:', addErr)
+        await updatePolicy(policy.id, {
+          status:     policy.status || 'Active',
+          is_renewed: false,
+          renewedAt:  null,
+        })
+        throw addErr   // re-throw so the outer catch shows the toast
+      }
 
       toast.success(`✅ Renewed! New policy created for ${policy.clientName}`)
       setRenewModal(null)
@@ -425,7 +532,7 @@ export default function RenewalsPage() {
       toast.error('Renewal failed: ' + e.message)
     } finally {
       submittingRef.current = false
-      setSaving(false)  // ✅ FIX R5: always reset saving state
+      setSaving(false)
     }
   }, [renewModal])
 
