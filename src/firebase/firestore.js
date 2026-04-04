@@ -19,7 +19,6 @@ export async function getUserRole(uid) {
   try { const s = await getDoc(doc(db,USERS,uid)); return s.exists() ? s.data() : null } catch { return null }
 }
 
-
 export async function setUserRole(uid, data) {
   return setDoc(doc(db,USERS,uid), { ...data, updatedAt: serverTimestamp() }, { merge: true })
 }
@@ -53,7 +52,6 @@ export async function updateClient(id, data) {
  * 400 to stay well under Firestore's 500-write-per-batch limit.
  */
 export async function cascadeUpdateClient(id, data) {
-  // Helper: commit a list of {ref, upd} pairs in 400-write batches
   async function commitInChunks(pairs) {
     for (let i = 0; i < pairs.length; i += 400) {
       const b = writeBatch(db)
@@ -62,12 +60,10 @@ export async function cascadeUpdateClient(id, data) {
     }
   }
 
-  // 1. Update the client document itself (its own single-write batch)
   const clientBatch = writeBatch(db)
   clientBatch.update(doc(db, CLIENTS, id), { ...data, updatedAt: serverTimestamp() })
   await clientBatch.commit()
 
-  // 2. Propagate changes to all linked records
   const hasName   = !!data.name
   const hasMobile = data.mobile !== undefined
   const hasEmail  = data.email  !== undefined
@@ -110,10 +106,6 @@ export async function deleteClient(id) {
   return batch.commit()
 }
 
-/**
- * bulkDeleteClients(ids[])
- * Deletes multiple clients and all linked policies in chunked batches.
- */
 export async function bulkDeleteClients(ids) {
   const allPolicyRefs = []
   for (const id of ids) {
@@ -134,18 +126,6 @@ export async function bulkDeleteClients(ids) {
 }
 
 // ── CLIMER — CLIENT MERGER MODULE ─────────────────────────────
-/**
- * mergeClients(duplicateId, masterId)
- *
- * Single merge: reassigns ALL data from duplicate → master then
- * deletes the duplicate. Handles:
- *   - Policies (reassign clientId + clientName)
- *   - Claims   (reassign clientId + clientName)
- *   - Tasks    (reassign clientId + clientName)
- *   - Documents (copy subcollection docs to master, delete from dup)
- *
- * Returns { policiesMoved, claimsMoved, tasksMoved, docsMoved }
- */
 export async function mergeClients(duplicateId, masterId) {
   if (!duplicateId || !masterId) throw new Error('Both duplicate and master IDs required')
   if (duplicateId === masterId) throw new Error('Cannot merge a client into itself')
@@ -155,7 +135,6 @@ export async function mergeClients(duplicateId, masterId) {
   const dup = await getClient(duplicateId)
   if (!dup) throw new Error('Duplicate client not found')
 
-  // Collect all records linked to duplicate
   const [dupPolicies, dupClaims, dupTasks, dupDocs] = await Promise.all([
     getDocs(query(collection(db, POLICIES), where('clientId', '==', duplicateId))),
     getDocs(query(collection(db, CLAIMS),   where('clientId', '==', duplicateId))),
@@ -165,7 +144,6 @@ export async function mergeClients(duplicateId, masterId) {
 
   const ops = []
 
-  // Reassign policies to master
   dupPolicies.docs.forEach(d => {
     ops.push({ ref: d.ref, data: {
       clientId:     masterId,
@@ -175,8 +153,6 @@ export async function mergeClients(duplicateId, masterId) {
       updatedAt:    serverTimestamp(),
     }})
   })
-
-  // Reassign claims to master
   dupClaims.docs.forEach(d => {
     ops.push({ ref: d.ref, data: {
       clientId:   masterId,
@@ -184,8 +160,6 @@ export async function mergeClients(duplicateId, masterId) {
       updatedAt:  serverTimestamp(),
     }})
   })
-
-  // Reassign tasks to master
   dupTasks.docs.forEach(d => {
     ops.push({ ref: d.ref, data: {
       clientId:   masterId,
@@ -194,7 +168,6 @@ export async function mergeClients(duplicateId, masterId) {
     }})
   })
 
-  // Execute reassignment in chunks of 400
   const chunks = []
   for (let i = 0; i < ops.length; i += 400) chunks.push(ops.slice(i, i + 400))
   for (const chunk of chunks) {
@@ -203,7 +176,6 @@ export async function mergeClients(duplicateId, masterId) {
     await batch.commit()
   }
 
-  // Move documents subcollection: copy to master then delete from dup
   let docsMoved = 0
   for (const docSnap of dupDocs.docs) {
     const docData = docSnap.data()
@@ -216,7 +188,6 @@ export async function mergeClients(duplicateId, masterId) {
     docsMoved++
   }
 
-  // Finally delete the duplicate client record
   await deleteDoc(doc(db, CLIENTS, duplicateId))
 
   return {
@@ -227,13 +198,6 @@ export async function mergeClients(duplicateId, masterId) {
   }
 }
 
-/**
- * bulkMergeClients(duplicateIds[], masterId)
- *
- * Bulk merge: merges multiple duplicate clients into one master.
- * Calls mergeClients() sequentially for each duplicate.
- * Returns array of per-duplicate results.
- */
 export async function bulkMergeClients(duplicateIds, masterId) {
   if (!masterId) throw new Error('Master client ID required')
   if (!duplicateIds?.length) throw new Error('No duplicate IDs provided')
@@ -252,9 +216,16 @@ export async function bulkMergeClients(duplicateIds, masterId) {
   return results
 }
 
-export function subscribeClients(callback) {
-  return onSnapshot(query(clientsRef(), orderBy('createdAt','desc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))
+// ── FIX BUG 2: All subscribe functions now accept an optional onError callback.
+// Without an error callback, onSnapshot errors are silently swallowed by Firebase,
+// causing loading states to hang forever when connectivity is interrupted.
+// ─────────────────────────────────────────────────────────────────────────────
+export function subscribeClients(callback, onError) {
+  return onSnapshot(
+    query(clientsRef(), orderBy('createdAt','desc')),
+    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeClients:', err.code, err.message))
+  )
 }
 
 export async function findClientByMobileOrName(mobile, name) {
@@ -275,7 +246,6 @@ export async function findClientByMobileOrName(mobile, name) {
 // ── POLICIES ──────────────────────────────────────────────────
 export const policiesRef = () => collection(db, POLICIES)
 
-// ── Premium due date helper ───────────────────────────────────
 function computeNextPremiumDueStr(startDate, frequency) {
   if (!startDate) return null
   let start
@@ -325,16 +295,49 @@ export async function updatePolicy(id, data) {
   }
   return updateDoc(doc(db,POLICIES,id), update)
 }
-export async function deletePolicy(id) { return deleteDoc(doc(db,POLICIES,id)) }
+// ── SOFT DELETE — marks policy as deleted instead of removing it.
+//    Accidental deletes can always be undone from the Recycle Bin.
+export async function deletePolicy(id) {
+  return updateDoc(doc(db, POLICIES, id), {
+    deleted:   true,
+    deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
 
+// ── BULK soft-delete ─────────────────────────────────────────
 export async function bulkDeletePolicies(ids) {
   const chunks = []
   for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
   for (const chunk of chunks) {
     const batch = writeBatch(db)
-    chunk.forEach(id => batch.delete(doc(db, POLICIES, id)))
+    chunk.forEach(id => batch.update(doc(db, POLICIES, id), {
+      deleted:   true,
+      deletedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }))
     await batch.commit()
   }
+}
+
+// ── RECYCLE BIN: fetch all soft-deleted policies ──────────────
+export async function getDeletedPolicies() {
+  const s = await getDocs(query(policiesRef(), where('deleted', '==', true)))
+  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+// ── RESTORE: remove the deleted flag ─────────────────────────
+export async function restorePolicy(id) {
+  return updateDoc(doc(db, POLICIES, id), {
+    deleted:   false,
+    deletedAt: null,
+    updatedAt: serverTimestamp(),
+  })
+}
+
+// ── PERMANENT DELETE: only when explicitly chosen in Recycle Bin ──
+export async function permanentDeletePolicy(id) {
+  return deleteDoc(doc(db, POLICIES, id))
 }
 
 export async function checkDuplicate(data) {
@@ -368,10 +371,17 @@ export async function checkDuplicatePolicyNumber(policyNumber) {
   const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
   return !s.empty
 }
-export function subscribePolicies(callback) {
-  return onSnapshot(query(policiesRef(), orderBy('expiryDate','asc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))
+
+// FIX BUG 2: error callback added
+export function subscribePolicies(callback, onError) {
+  return onSnapshot(
+    query(policiesRef(), orderBy('expiryDate','asc')),
+    // Filter out soft-deleted policies client-side (avoids needing a composite index)
+    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() })).filter(p => !p.deleted)),
+    onError || (err => console.error('subscribePolicies:', err.code, err.message))
+  )
 }
+
 export async function savePolicyPdfUrl(policyId, url, name) {
   return updateDoc(doc(db,POLICIES,policyId), {
     policyPdfUrl: url, policyPdfName: name, updatedAt: serverTimestamp()
@@ -382,13 +392,13 @@ export async function savePolicyPdfUrl(policyId, url, name) {
 /**
  * saveRenewal(oldPolicyId, newData)
  *
- * Atomically closes the old policy term and creates the renewed one.
+ * Atomically closes the old policy term and creates the renewed one
+ * in a single writeBatch — if either write fails, both are rolled back.
  *
  * newData must include:
- *   - newPolicyNumber  {string}  — the policy number for the new term
- *                                  (may be same as old or different if insurer issued a new one)
- *   - startDate        {string}  — new term start date (YYYY-MM-DD)
- *   - expiryDate       {string}  — new term expiry date (YYYY-MM-DD)
+ *   - newPolicyNumber  {string}  — new policy number (blank = keep same)
+ *   - startDate        {string}  — new term start (YYYY-MM-DD)
+ *   - expiryDate       {string}  — new term expiry (YYYY-MM-DD)
  *   - frequency        {string}  — payment frequency
  *   - ...all other policy fields to carry forward
  */
@@ -398,36 +408,29 @@ export async function saveRenewal(oldPolicyId, newData) {
 
   const batch = writeBatch(db)
 
-  // ── STEP A: Close the old policy record ───────────────────────────────────
-  // FIX Bug #1 + #2: Sets status to 'Renewed-Out' so the real-time listener
-  // removes it from the renewals filter, and records the new policy number
-  // for the forward-link on the old document.
+  // STEP A: Close the old policy record
   batch.update(doc(db, POLICIES, oldPolicyId), {
-    status:                'Renewed-Out',                                           // FIX Bug #1: triggers useMemo filter
-    is_renewed:            true,                                                    // FIX Bug #2: explicit lifecycle flag
+    status:                'Renewed-Out',
+    is_renewed:            true,
     renewedAt:             serverTimestamp(),
-    renewedToPolicyNumber: (newData.newPolicyNumber || newData.policyNumber || '').trim(), // FIX Bug #2: forward-link
+    renewedToPolicyNumber: (newData.newPolicyNumber || newData.policyNumber || '').trim(),
     updatedAt:             serverTimestamp(),
   })
 
-  // ── STEP B: Compute nextPremiumDue for the new term ───────────────────────
-  // FIX Bug #3: nextPremiumDue is the field getDays() falls back to, and what
-  // the renewal filter reads next year. Must be computed from the NEW startDate.
+  // STEP B: Compute nextPremiumDue for the new term from new startDate
   const newNextPremiumDue = computeNextPremiumDueStr(newData.startDate, newData.frequency)
 
-  // ── STEP C: Strip the UI-only field before writing to Firestore ───────────
-  // FIX Bug #3: 'newPolicyNumber' is a form field name only. The DB field is
-  // 'policyNumber'. We extract it here and map it explicitly below.
+  // STEP C: Strip the UI-only field; DB field is 'policyNumber'
   const { newPolicyNumber, ...restData } = newData
 
-  // ── STEP D: Create the new policy document ────────────────────────────────
+  // STEP D: Create the new policy document
   const newRef = doc(collection(db, POLICIES))
   batch.set(newRef, {
     ...restData,
-    policyNumber:   (newPolicyNumber || restData.policyNumber || '').trim(), // FIX Bug #3: user-entered new number
-    parentPolicyId: oldPolicyId,                                             // FIX Bug #2: back-link to history chain
-    policyYear:     (old.policyYear || 1) + 1,                              // FIX Bug #3: Y1→Y2→Y3 increment
-    nextPremiumDue: newNextPremiumDue || null,                               // FIX Bug #3: drives next year's renewal filter
+    policyNumber:   (newPolicyNumber || restData.policyNumber || '').trim(),
+    parentPolicyId: oldPolicyId,
+    policyYear:     (old.policyYear || 1) + 1,
+    nextPremiumDue: newNextPremiumDue || null,
     status:         'Active',
     is_renewed:     false,
     renewedAt:      null,
@@ -435,7 +438,6 @@ export async function saveRenewal(oldPolicyId, newData) {
     updatedAt:      serverTimestamp(),
   })
 
-  // Commit atomically — if either write fails, both are rolled back. No orphans.
   await batch.commit()
   return newRef
 }
@@ -460,6 +462,15 @@ export async function updateProposal(id, data) {
   return updateDoc(doc(db,PROPOSALS,id), { ...data, updatedAt: serverTimestamp() })
 }
 export async function deleteProposal(id) { return deleteDoc(doc(db,PROPOSALS,id)) }
+
+// FIX BUG 2: error callback added
+export function subscribeProposals(callback, onError) {
+  return onSnapshot(
+    query(proposalsRef(), orderBy('createdAt', 'desc')),
+    s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeProposals:', err.code, err.message))
+  )
+}
 
 // ── CLIENT DOCUMENTS ──────────────────────────────────────────
 export async function addDocMeta(clientId, meta) {
@@ -486,9 +497,14 @@ export async function updateClaim(id, data) {
   return updateDoc(doc(db,CLAIMS,id), { ...data, updatedAt: serverTimestamp() })
 }
 export async function deleteClaim(id) { return deleteDoc(doc(db,CLAIMS,id)) }
-export function subscribeClaims(callback) {
-  return onSnapshot(query(claimsRef(), orderBy('createdAt','desc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))
+
+// FIX BUG 2: error callback added
+export function subscribeClaims(callback, onError) {
+  return onSnapshot(
+    query(claimsRef(), orderBy('createdAt','desc')),
+    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeClaims:', err.code, err.message))
+  )
 }
 export async function getAllClaims() {
   const s = await getDocs(query(claimsRef(), orderBy('createdAt','desc')))
@@ -506,16 +522,16 @@ export async function updateTask(id, data) {
   return updateDoc(doc(db,TASKS,id), { ...data, updatedAt: serverTimestamp() })
 }
 export async function deleteTask(id) { return deleteDoc(doc(db,TASKS,id)) }
-export function subscribeTasks(callback) {
-  return onSnapshot(query(tasksRef(), orderBy('dueDate','asc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))))
+
+// FIX BUG 2: error callback added
+export function subscribeTasks(callback, onError) {
+  return onSnapshot(
+    query(tasksRef(), orderBy('dueDate','asc')),
+    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeTasks:', err.code, err.message))
+  )
 }
 export async function getAllTasks() {
   const s = await getDocs(query(tasksRef(), orderBy('dueDate','asc')))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
-}
-// Subscribe to Proposals (real-time)
-export function subscribeProposals(callback) {
-  return onSnapshot(query(proposalsRef(), orderBy('createdAt', 'desc')),
-    s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))))
 }

@@ -5,7 +5,8 @@ import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
-  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
+  getDeletedPolicies, restorePolicy, permanentDeletePolicy,
 } from '../firebase/firestore'
 import { uploadPolicyPdf } from '../firebase/storage'
 import {
@@ -1129,6 +1130,168 @@ function ImportModal({ clients, onClose, onImported }) {
   )
 }
 
+
+// ── Recycle Bin Modal ─────────────────────────────────────────
+function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
+  const [deleted,    setDeleted]    = useState([])
+  const [loading,    setLoading]    = useState(true)
+  const [restoring,  setRestoring]  = useState(null)   // id being restored
+  const [permDel,    setPermDel]    = useState(null)   // id staged for permanent delete
+  const [permDeling, setPermDeling] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const rows = await getDeletedPolicies()
+      // Sort most recently deleted first
+      rows.sort((a, b) => {
+        const da = a.deletedAt?.toDate?.() || new Date(a.deletedAt || 0)
+        const db_ = b.deletedAt?.toDate?.() || new Date(b.deletedAt || 0)
+        return db_ - da
+      })
+      setDeleted(rows)
+    } catch(err) {
+      toast.error('Could not load recycle bin: ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const onRestore = async (id) => {
+    setRestoring(id)
+    try {
+      await restorePolicy(id)
+      toast.success('✅ Policy restored!')
+      setDeleted(prev => prev.filter(p => p.id !== id))
+    } catch(err) {
+      toast.error('Restore failed: ' + err.message)
+    } finally {
+      setRestoring(null)
+    }
+  }
+
+  const onPermanentDelete = async () => {
+    if (!permDel) return
+    setPermDeling(true)
+    try {
+      await permanentDeletePolicy(permDel)
+      toast.success('Policy permanently deleted')
+      setDeleted(prev => prev.filter(p => p.id !== permDel))
+      setPermDel(null)
+    } catch(err) {
+      toast.error('Failed: ' + err.message)
+    } finally {
+      setPermDeling(false)
+    }
+  }
+
+  const fmtDeletedAt = (ts) => {
+    if (!ts) return '—'
+    try {
+      const d = ts.toDate ? ts.toDate() : new Date(ts)
+      return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+    } catch { return '—' }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">🗑️ Recycle Bin — Deleted Policies</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Restore accidentally deleted policies or permanently remove them.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {loading ? (
+            <div className="flex items-center gap-2 text-gray-400 py-8 justify-center">
+              <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              Loading deleted policies…
+            </div>
+          ) : deleted.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-4xl mb-3">✅</p>
+              <p className="font-semibold text-gray-700 dark:text-gray-300">Recycle bin is empty</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">No deleted policies found.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {deleted.map(p => (
+                <div key={p.id}
+                     className="flex items-center gap-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">
+                  <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-5 gap-x-4 gap-y-0.5 text-sm">
+                    <div className="sm:col-span-2">
+                      <p className="font-semibold text-gray-800 dark:text-gray-200 truncate">{p.clientName || '—'}</p>
+                      <p className="text-xs font-mono text-gray-500 dark:text-gray-400">{p.policyNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Insurer</p>
+                      <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{p.insurer || '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Premium</p>
+                      <p className="text-xs font-medium text-blue-600 dark:text-blue-400">{fmtCurrency(p.premium)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Deleted on</p>
+                      <p className="text-xs font-medium text-red-600 dark:text-red-400">{fmtDeletedAt(p.deletedAt)}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => onRestore(p.id)}
+                      disabled={restoring === p.id}
+                      className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      {restoring === p.id ? '⏳' : '♻️ Restore'}
+                    </button>
+                    <button
+                      onClick={() => setPermDel(p.id)}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      🗑️ Delete Forever
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Permanent delete confirmation */}
+        {permDel && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setPermDel(null)} />
+            <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+              <h4 className="text-base font-bold text-gray-900 dark:text-white">⚠️ Permanent Delete</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                This will <strong>permanently delete</strong> the policy from Firestore. This <strong>cannot be undone</strong>.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={onPermanentDelete} disabled={permDeling}
+                        className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">
+                  {permDeling ? '⏳ Deleting…' : '🗑️ Yes, Delete Forever'}
+                </button>
+                <button onClick={() => setPermDel(null)} className="btn-secondary">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────
 export default function PoliciesPage() {
   const { clients }           = useClients()
@@ -1143,6 +1306,7 @@ export default function PoliciesPage() {
   const [selectedIds,  setSelectedIds]  = useState(new Set())
   const [bulkDelOpen,  setBulkDelOpen]  = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [showRecycleBin, setShowRecycleBin] = useState(false)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -1289,6 +1453,7 @@ Wealth Management & Insurance Advisory
         </div>
         <div className="flex gap-2 flex-wrap">
           {isAdmin&&<button className="btn-secondary" onClick={()=>setModal('import')}>⬆ Import</button>}
+          <button className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>setShowRecycleBin(true)}>🗑️ Recycle Bin</button>
           <button className="btn-primary" onClick={()=>{setSelected(null);setDupWarning('');setModal('add')}}>+ Add Policy</button>
         </div>
       </div>
@@ -1414,6 +1579,13 @@ Wealth Management & Insurance Advisory
       <ConfirmDialog open={bulkDelOpen} onClose={()=>setBulkDelOpen(false)} onConfirm={onBulkDelete}
                      title={`Delete ${selectedIds.size} Policies?`}
                      message={`Permanently delete ${selectedIds.size} selected policies? Cannot be undone.`} danger />
+      {showRecycleBin && (
+        <RecycleBinModal
+          onClose={() => setShowRecycleBin(false)}
+          fmtDate={fmtDate}
+          fmtCurrency={fmtCurrency}
+        />
+      )}
     </div>
   )
 }
