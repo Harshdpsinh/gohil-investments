@@ -46,7 +46,7 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
     approvedAmount:'', status:'Intimated', hospitalName:'', remarks:'',
     docs: { discharge: false, bills: false, idProof: false, form: false, fir: false, other: false }
   }
-  const [form, setForm] = useState(initial || blank)
+  const [form, setForm] = useState({ ...blank, ...(initial || {}) })
   const [saving, setSaving] = useState(false)
 
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -267,12 +267,17 @@ export default function ClaimsPage() {
     totalApproved: claims.reduce((s,c) => s + (Number(c.approvedAmount)||0), 0),
   }), [claims])
 
-  const onAdd    = async form => { await addClaim(form);                toast.success('Claim added!');   setModal(null) }
-  const onEdit   = async form => { await updateClaim(selected.id,form); toast.success('Claim updated!'); setModal(null) }
+  const onAdd    = async form => {
+    try { await addClaim(form);                toast.success('Claim added!');   setModal(null) }
+    catch(err) { toast.error('Failed to add claim: ' + err.message) }
+  }
+  const onEdit   = async form => {
+    try { await updateClaim(selected.id, form); toast.success('Claim updated!'); setModal(null) }
+    catch(err) { toast.error('Failed to update claim: ' + err.message) }
+  }
   const onDelete = async () => {
-    await deleteClaim(selected.id)
-    toast.success('Claim deleted')
-    setDelOpen(false)
+    try { await deleteClaim(selected.id); toast.success('Claim deleted'); setDelOpen(false) }
+    catch(err) { toast.error('Failed to delete: ' + err.message) }
   }
   const onStatusChange = async (id, status) => {
     await updateClaim(id, { status })

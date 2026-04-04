@@ -50,7 +50,7 @@ const EMPTY_TASK = {
 
 // ── Task Form ─────────────────────────────────────────────────
 function TaskForm({ initial, clients, policies, onSave, onCancel }) {
-  const [form, setForm]   = useState(initial || EMPTY_TASK)
+  const [form, setForm]   = useState({ ...EMPTY_TASK, ...(initial || {}) })
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
@@ -219,12 +219,21 @@ export default function TasksPage() {
   }), [tasks])
 
   const onToggle = async (task) => {
-    await updateTask(task.id, { done: !task.done })
-    toast.success(task.done ? 'Task re-opened' : '✅ Task completed!')
+    try { await updateTask(task.id, { done: !task.done }); toast.success(task.done ? 'Task re-opened' : '✅ Task completed!') }
+    catch(err) { toast.error('Failed to update task: ' + err.message) }
   }
-  const onAdd    = async form => { await addTask(form);                 toast.success('Task added!');   setModal(null) }
-  const onEdit   = async form => { await updateTask(selected.id, form); toast.success('Task updated!'); setModal(null) }
-  const onDelete = async ()   => { await deleteTask(selected.id);       toast.success('Task deleted') }
+  const onAdd    = async form => {
+    try { await addTask(form);                 toast.success('Task added!');   setModal(null) }
+    catch(err) { toast.error('Failed to add task: ' + err.message) }
+  }
+  const onEdit   = async form => {
+    try { await updateTask(selected.id, form); toast.success('Task updated!'); setModal(null) }
+    catch(err) { toast.error('Failed to update task: ' + err.message) }
+  }
+  const onDelete = async () => {
+    try { await deleteTask(selected.id); toast.success('Task deleted'); setDelOpen(false) }
+    catch(err) { toast.error('Failed to delete: ' + err.message) }
+  }
 
   const openWhatsApp = (task) => {
     let client = clients.find(c => c.id === task.clientId)
