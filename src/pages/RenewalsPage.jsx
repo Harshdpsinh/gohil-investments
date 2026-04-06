@@ -12,7 +12,11 @@ import {
   addPolicy,          // ✅ FIX R1: needed to create the new/successor policy
   updatePolicy,
 } from '../firebase/firestore'
-import { doc, setDoc, deleteField, getFirestore } from 'firebase/firestore'
+// Import db from the same config that firestore.js uses — this guarantees we
+// hit the SAME Firestore instance.  getFirestore() alone can return a new
+// instance in some Vite/Firebase setups, causing "No document to update".
+import { db } from '../firebase/config'
+import { doc, setDoc, deleteField } from 'firebase/firestore'
 import { fmtDate, fmtCurrency, toInputDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -71,24 +75,19 @@ function getStatusInfo(days) {
   return               { label: 'Active',    cls: 'bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300' }
 }
 
-/**
- * Computes nextPremiumDue for the NEW policy after renewal.
- * Yearly → null (expiryDate drives the calendar for yearly).
- * Monthly / Quarterly / Half-yearly → ISO date string from startDate + offset.
- */
+// ─────────────────────────────────────────────────────────────
+// FIX: compute nextPremiumDue for the NEW policy after renewal.
+// Yearly  → null  (expiryDate drives calendar, not nextPremiumDue).
+// Others  → startDate + frequency offset so the new policy immediately
+//            appears in Renewals / Calendar / Dashboard.
 function computeNextPremiumDue(startDate, frequency) {
   if (!startDate) return null
-  const freq = (frequency || 'Yearly').toLowerCase()
+  const freq = (frequency || 'Yearly').toLowerCase().trim()
   if (freq === 'yearly') return null
   const start = new Date(startDate)
   if (isNaN(start.getTime())) return null
-  const FREQ_DAYS = {
-    'monthly':      30,
-    'quarterly':    91,
-    'half-yearly':  182,
-    'half yearly':  182,
-  }
-  const days = FREQ_DAYS[freq]
+  const DAYS = { monthly: 30, quarterly: 91, 'half-yearly': 182, 'half yearly': 182 }
+  const days = DAYS[freq]
   if (!days) return null
   return new Date(start.getTime() + days * 86400000).toISOString()
 }
@@ -400,15 +399,24 @@ export default function RenewalsPage() {
 
         // Date range filter
         if (dateFrom && dueDate < new Date(dateFrom)) return false
-        if (dateTo   && dueDate > new Date(dateTo))   return false
+        if (dateTo) {
+          const toDate = new Date(dateTo)
+          toDate.setHours(23, 59, 59, 999)   // inclusive: include the "to" day itself
+          if (dueDate > toDate) return false
+        }
 
-        // Day window filter
-        const d = getDays(p)
-        // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
-        if (dayWindow === -1) {
-          if (d === null || d >= 0) return false
-        } else {
-          if (d === null || d < 0 || d > dayWindow) return false
+        // Day window filter — SKIP when a custom date range is active.
+        // Without this, setting dateFrom/dateTo to future months still blocks
+        // policies further than dayWindow days away.
+        const hasCustomRange = !!(dateFrom || dateTo)
+        if (!hasCustomRange) {
+          const d = getDays(p)
+          // ✅ FIX R2: overdue is d < 0
+          if (dayWindow === -1) {
+            if (d === null || d >= 0) return false
+          } else {
+            if (d === null || d < 0 || d > dayWindow) return false
+          }
         }
 
         // Type tab filter
@@ -475,31 +483,28 @@ export default function RenewalsPage() {
 
     const policy = renewModal
 
-    // Guard: Firestore needs a real document ID
+    // Guard: can't update without a real Firestore document ID
     if (!policy.id) {
-      toast.error('Policy ID missing — please refresh and try again')
+      toast.error('Policy ID missing — please refresh the page and try again')
       submittingRef.current = false
       setSaving(false)
       return
     }
 
-    const db = getFirestore()
-
     try {
       // ── Step 1: Mark OLD policy as Renewed-Out ─────────────────
-      // FIX: use setDoc+merge instead of updatePolicy (which calls updateDoc).
-      // updateDoc throws "No document to update" when the Firestore document
-      // doesn't exist or its state diverged — common with monthly policies
-      // that have been re-fetched or recreated.  setDoc+merge never throws this.
+      // FIX: use setDoc+merge instead of updatePolicy (updateDoc).
+      // updateDoc throws "No document to update" when the local React state
+      // is ahead of Firestore (common with monthly policies renewed often).
+      // setDoc+merge writes the fields regardless of whether the doc exists.
       //
-      // FIX: also wipe nextPremiumDue on the old policy using deleteField().
-      // Without this, PoliciesPage keeps showing the stale same-year due date
-      // on the Renewed-Out row even after renewal is complete.
+      // FIX: deleteField() wipes nextPremiumDue from the old policy so
+      // PoliciesPage stops showing the stale same-year due date on Renewed rows.
       await setDoc(doc(db, 'policies', policy.id), {
-        status:        'Renewed-Out',
-        is_renewed:    true,
-        renewedAt:     new Date().toISOString(),
-        nextPremiumDue: deleteField(),   // ← removes stale date from old policy
+        status:         'Renewed-Out',
+        is_renewed:     true,
+        renewedAt:      new Date().toISOString(),
+        nextPremiumDue: deleteField(),   // ← removes stale next-due from old policy
       }, { merge: true })
 
       // ── Step 2: Build new policy — spread ALL old fields first,
@@ -534,9 +539,9 @@ export default function RenewalsPage() {
         renewedAt:    null,
 
         // ── Reset computed/runtime fields ──
-        // FIX: compute correct nextPremiumDue for non-yearly policies.
+        // FIX: compute the correct nextPremiumDue for non-yearly policies.
         // null here caused renewed monthly/quarterly policies to vanish from
-        // Renewals, Calendar, and Dashboard until manually edited.
+        // Renewals, Calendar, and Dashboard; PoliciesPage fell back to expiryDate.
         nextPremiumDue: computeNextPremiumDue(renewForm.startDate, policy.frequency),
         policyPdfUrl:   null,        // new policy — no PDF yet
         policyPdfName:  null,
@@ -563,12 +568,15 @@ export default function RenewalsPage() {
         // ── ROLLBACK: if new policy creation fails, restore old policy
         //    so it doesn't get permanently stuck as Renewed-Out
         console.error('addPolicy failed, rolling back:', addErr)
-        // FIX: use setDoc+merge for rollback too — same reason as Step 1
+        // FIX: setDoc+merge for rollback too — same reason as Step 1
         await setDoc(doc(db, 'policies', policy.id), {
-          status:        policy.status || 'Active',
-          is_renewed:    false,
-          renewedAt:     null,
-          nextPremiumDue: policy.nextPremiumDue || deleteField(),
+          status:         policy.status || 'Active',
+          is_renewed:     false,
+          renewedAt:      deleteField(),
+          // Restore original nextPremiumDue if it existed, else remove field
+          ...(policy.nextPremiumDue
+            ? { nextPremiumDue: policy.nextPremiumDue }
+            : { nextPremiumDue: deleteField() }),
         }, { merge: true })
         throw addErr   // re-throw so the outer catch shows the toast
       }
