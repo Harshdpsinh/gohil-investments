@@ -246,6 +246,12 @@ export async function findClientByMobileOrName(mobile, name) {
 // ── POLICIES ──────────────────────────────────────────────────
 export const policiesRef = () => collection(db, POLICIES)
 
+// TODO (Issue #6): This function duplicates logic in src/utils/dateUtils.js.
+// Once confirmed that dateUtils exports computeNextPremiumDue(startDate, frequency) → Date|null,
+// replace this entire function with:
+//   import { computeNextPremiumDue } from '../utils/dateUtils'
+// and change all call-sites to:
+//   computeNextPremiumDue(data.startDate, data.frequency)?.toISOString().split('T')[0] || null
 function computeNextPremiumDueStr(startDate, frequency) {
   if (!startDate) return null
   let start

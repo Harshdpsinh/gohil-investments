@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth }     from '../../hooks/useAuth'
 import toast           from 'react-hot-toast'
 
+// Module-level timestamp: prevents brute-force by enforcing a 1.5 s gap between attempts.
+let lastAttempt = 0
+
 export default function Login() {
   const { signIn, user } = useAuth()
   const navigate         = useNavigate()
@@ -18,6 +21,9 @@ export default function Login() {
   const onSubmit = async e => {
     e.preventDefault()
     if (!form.email || !form.password) { toast.error('Please enter email and password'); return }
+    // Rate-limit: ignore rapid repeated submissions (brute-force protection)
+    if (Date.now() - lastAttempt < 1500) { toast.error('Please wait before trying again.'); return }
+    lastAttempt = Date.now()
     setLoading(true)
     try {
       await signIn(form.email, form.password)

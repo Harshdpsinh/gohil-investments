@@ -32,18 +32,22 @@ export function AuthProvider({ children }) {
         try {
           const profile = await withTimeout(getUserRole(u.uid), 5000)
           if (profile) {
-            setRole(profile.role || 'admin')
+            setRole(profile.role || 'staff')   // FIX #1: default to staff, never admin
           } else {
+            console.warn('First login or role fetch failed – creating default staff role')
             try {
               await withTimeout(
-                setUserRole(u.uid, { email: u.email, role: 'admin', name: 'Admin' }),
+                setUserRole(u.uid, { email: u.email, role: 'staff', name: u.email?.split('@')[0] || 'Staff' }),
                 3000
               )
-            } catch (_) {}
-            setRole('admin')
+            } catch (err) {
+              console.error('Failed to create default role:', err)
+            }
+            setRole('staff')   // FIX #1: never silently escalate to admin
           }
-        } catch (_) {
-          setRole('admin')
+        } catch (err) {
+          console.error('Role fetch error:', err)
+          setRole('staff')   // FIX #1: fail safe to staff
         }
       } else {
         setRole(null)
@@ -64,8 +68,17 @@ export function AuthProvider({ children }) {
 
   async function createStaffAccount(email, password, name, role = 'staff') {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await setUserRole(cred.user.uid, { email, role, name })
-    return cred
+    // FIX #6: retry Firestore write so Auth user is never left without a role doc
+    let retries = 3
+    while (retries--) {
+      try {
+        await setUserRole(cred.user.uid, { email, role, name })
+        return cred
+      } catch (e) {
+        if (retries === 0) throw e
+        await new Promise(r => setTimeout(r, 800))
+      }
+    }
   }
 
   const isAdmin = role === 'admin'

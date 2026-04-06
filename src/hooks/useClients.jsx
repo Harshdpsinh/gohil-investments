@@ -7,9 +7,17 @@ export function useClients() {
   const [error,   setError]   = useState(null)
 
   useEffect(() => {
-    const unsub = subscribeClients(data => {
+    // FIX #2: pass error through so pages can surface it instead of showing stale data
+    const unsub = subscribeClients((data, err) => {
+      if (err) {
+        console.error('Firestore clients subscription failed:', err)
+        setError(err.message)
+        setLoading(false)
+        return
+      }
       setClients(data)
       setLoading(false)
+      setError(null)
     })
     return unsub
   }, [])

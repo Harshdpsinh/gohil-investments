@@ -20,9 +20,12 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
     fd.append('public_id',     `${Date.now()}_${baseName}`)
 
     const xhr = new XMLHttpRequest()
-    // Always use /auto/upload — works for images, PDFs, all file types
-    // Unsigned presets support /auto/ but NOT /raw/
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/auto/upload`, true)
+    // PDFs: use /raw/upload to preserve the file byte-for-byte (no re-encoding).
+    // All other file types (images, etc.): use /auto/upload.
+    // Note: unsigned presets support both /raw/ and /auto/.
+    const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    const endpoint  = isPdfFile ? 'raw/upload' : 'auto/upload'
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${endpoint}`, true)
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {

@@ -70,6 +70,31 @@ function getStatusInfo(days) {
   return               { label: 'Active',    cls: 'bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300' }
 }
 
+/**
+ * Computes nextPremiumDue for the NEW policy after renewal.
+ * For yearly policies → null (expiry date drives the calendar).
+ * For monthly/quarterly/half-yearly → next due date based on new startDate.
+ */
+function computeNextPremiumDue(startDate, frequency) {
+  if (!startDate) return null
+  const freq = (frequency || 'Yearly').toLowerCase()
+  if (freq === 'yearly') return null
+
+  const start = new Date(startDate)
+  if (isNaN(start.getTime())) return null
+
+  const FREQ_DAYS = {
+    monthly:      30,
+    quarterly:    91,
+    'half-yearly': 182,
+    'half yearly': 182,
+  }
+  const days = FREQ_DAYS[freq]
+  if (!days) return null
+
+  return new Date(start.getTime() + days * 86400000).toISOString()
+}
+
 // ─────────────────────────────────────────────────────────────
 // RENEW MODAL — collects new policy details before creating
 // ─────────────────────────────────────────────────────────────
@@ -492,7 +517,10 @@ export default function RenewalsPage() {
         renewedAt:    null,
 
         // ── Reset computed/runtime fields ──
-        nextPremiumDue: null,        // will be recomputed by the system
+        // ✅ FIX BUG#1: compute correct nextPremiumDue for non-yearly policies.
+        // Leaving this null causes renewed policies to vanish from Renewals,
+        // Calendar, and Dashboard until manually edited.
+        nextPremiumDue: computeNextPremiumDue(renewForm.startDate, policy.frequency),
         policyPdfUrl:   null,        // new policy — no PDF yet
         policyPdfName:  null,
 

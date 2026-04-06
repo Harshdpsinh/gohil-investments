@@ -10,6 +10,12 @@ import { format } from 'date-fns'
 const BRAND = [30, 64, 175]   // blue-800
 const LIGHT = [239, 246, 255] // blue-50
 
+// FIX #5: parseInt("10,000") → NaN → "₹NaN". Use parseFloat with fallback instead.
+const safeCurrency = (val) => {
+  const n = parseFloat(String(val || '').replace(/,/g, ''))
+  return isNaN(n) ? '—' : `Rs. ${n.toLocaleString('en-IN')}`
+}
+
 export function generateProposalPDF(form) {
   const doc  = new jsPDF({ unit: 'mm', format: 'a4' })
   const W    = doc.internal.pageSize.getWidth()
@@ -72,7 +78,7 @@ export function generateProposalPDF(form) {
     ['Aadhar',         form.aadhar],
     ['Address',        form.address],
     ['Occupation',     form.occupation],
-    ['Annual Income',  form.income ? `Rs. ${parseInt(form.income).toLocaleString('en-IN')}` : ''],
+    ['Annual Income',  safeCurrency(form.income)],
     ['Employment',     form.employment],
     ['Qualification',  form.qualification],
     ['Designation',    form.designation],
@@ -84,8 +90,8 @@ export function generateProposalPDF(form) {
     ['Policy Type',         form.policyType],
     ['Insurance Company',   form.insurer],
     ['Plan Name',           form.planName],
-    ['Sum Insured/Assured', form.sumAssured ? `Rs. ${parseInt(form.sumAssured).toLocaleString('en-IN')}` : ''],
-    ['Annual Premium',      form.premium    ? `Rs. ${parseInt(form.premium).toLocaleString('en-IN')}` : ''],
+    ['Sum Insured/Assured', safeCurrency(form.sumAssured)],
+    ['Annual Premium',      safeCurrency(form.premium)],
     ['Payment Frequency',   form.frequency || 'Yearly'],
   ])
 
@@ -117,7 +123,7 @@ export function generateProposalPDF(form) {
   } else if (form.policyType === 'Life') {
     sectionTitle('3.  Life-Specific Details')
     kvTable([
-      ['Sum Assured',       form.sumAssured ? `Rs. ${parseInt(form.sumAssured).toLocaleString('en-IN')}` : ''],
+      ['Sum Assured',       safeCurrency(form.sumAssured)],
       ['Policy Term',       form.policyTerm],
       ['Plan Type',         form.planType],
       ['Nominee Name',      form.nomineeName],

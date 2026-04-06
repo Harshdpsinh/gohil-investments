@@ -154,7 +154,7 @@ export function parseImportFile(file) {
     const reader = new FileReader()
     reader.onload = e => {
       try {
-        const wb   = XLSX.read(e.target.result, { type: 'binary', cellDates: true })
+        const wb   = XLSX.read(e.target.result, { type: 'array', cellDates: true })  // FIX #4: array not binary
         const ws   = wb.Sheets[wb.SheetNames[0]]
         const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
         resolve(rows)
@@ -163,7 +163,7 @@ export function parseImportFile(file) {
       }
     }
     reader.onerror = () => reject(new Error('File read failed.'))
-    reader.readAsBinaryString(file)
+    reader.readAsArrayBuffer(file)   // FIX #4: replaces deprecated readAsBinaryString
   })
 }
 

@@ -56,9 +56,19 @@ function CommCell({ policyId, field, value }) {
     }
   }, [policyId, field, saving])
 
+  // ✅ FIX CM1 (real fix): onChange starts the debounce timer so the cell
+  // auto-saves 800 ms after the user stops typing — no Enter required.
+  // Enter still works as an immediate save (clears the pending timer first).
+  const handleChange = (e) => {
+    const newVal = e.target.value
+    setVal(newVal)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => save(newVal), 800)
+  }
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter')  { clearTimeout(debounceRef.current); save(val) }
-    if (e.key === 'Escape') { setEditing(false); setVal(value || '') }
+    if (e.key === 'Escape') { clearTimeout(debounceRef.current); setEditing(false); setVal(value || '') }
   }
 
   if (!editing) return (
@@ -73,7 +83,7 @@ function CommCell({ policyId, field, value }) {
       <input
         type="number"
         value={val}
-        onChange={e => setVal(e.target.value)}
+        onChange={handleChange}
         className="w-16 px-1 py-0.5 text-xs border border-blue-400 rounded focus:outline-none"
         autoFocus
         onKeyDown={handleKeyDown}

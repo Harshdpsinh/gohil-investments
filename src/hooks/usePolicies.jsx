@@ -7,9 +7,17 @@ export function usePolicies() {
   const [error,    setError]    = useState(null)
 
   useEffect(() => {
-    const unsub = subscribePolicies(data => {
+    // FIX #2: pass error through so pages can surface it instead of showing stale data
+    const unsub = subscribePolicies((data, err) => {
+      if (err) {
+        console.error('Firestore policies subscription failed:', err)
+        setError(err.message)
+        setLoading(false)
+        return
+      }
       setPolicies(data)
       setLoading(false)
+      setError(null)
     })
     return unsub
   }, [])

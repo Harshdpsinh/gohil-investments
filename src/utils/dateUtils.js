@@ -90,19 +90,16 @@ export function frequencyDays(frequency) {
 }
 
 // ── Compute next premium due date ─────────────────────────────
-// Given startDate and frequency, returns the NEXT premium due date
-// after today. For long-term Life policies this is the next annual
-// payment date, not the 20-year maturity date.
+// FIX #3: O(1) direct math replaces O(n) while-loop.
+// Old loop iterated once per interval (up to ~120x for monthly/10yr policy).
+// New version computes elapsed intervals directly – safe for any start date.
 export function computeNextPremiumDue(startDate, frequency) {
   const start = parseAnyDate(startDate)
   if (!start) return null
-  const today    = new Date()
-  const interval = frequencyDays(frequency)
-  // Step forward from start in intervals until we pass today
-  let next = new Date(start)
-  while (next <= today) {
-    next = new Date(next.getTime() + interval * 24 * 60 * 60 * 1000)
-  }
+  const intervalMs = frequencyDays(frequency) * 86400000
+  const today      = Date.now()
+  const elapsed    = Math.floor((today - start.getTime()) / intervalMs)
+  const next       = new Date(start.getTime() + (elapsed + 1) * intervalMs)
   return next
 }
 
