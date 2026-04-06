@@ -272,7 +272,10 @@ function computeNextPremiumDueStr(startDate, frequency) {
 }
 
 export async function addPolicy(data) {
-  const nextPremiumDue = computeNextPremiumDueStr(data.startDate, data.frequency)
+  // FIX: respect nextPremiumDue if the caller already computed it (e.g. renewal).
+  // Previously this line always ran and overwrote whatever data.nextPremiumDue contained,
+  // meaning the correct renewed date set in RenewalsPage was silently discarded.
+  const nextPremiumDue = data.nextPremiumDue ?? computeNextPremiumDueStr(data.startDate, data.frequency)
   return addDoc(policiesRef(), {
     ...data,
     parentPolicyId: data.parentPolicyId || null,
@@ -299,7 +302,12 @@ export async function updatePolicy(id, data) {
     const freq  = data.frequency || existing.frequency
     update.nextPremiumDue = computeNextPremiumDueStr(start, freq) || null
   }
-  return updateDoc(doc(db,POLICIES,id), update)
+  // FIX: use setDoc+merge instead of updateDoc.
+  // updateDoc throws "No document to update" if the Firestore document doesn't
+  // exist (can happen when local React state is stale after a partial renewal).
+  // setDoc+merge writes the fields unconditionally — updates if doc exists,
+  // creates it if not — so it never throws this error.
+  return setDoc(doc(db,POLICIES,id), update, { merge: true })
 }
 // ── SOFT DELETE — marks policy as deleted instead of removing it.
 //    Accidental deletes can always be undone from the Recycle Bin.
