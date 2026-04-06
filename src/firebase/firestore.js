@@ -272,10 +272,7 @@ function computeNextPremiumDueStr(startDate, frequency) {
 }
 
 export async function addPolicy(data) {
-  // FIX: respect nextPremiumDue if the caller already computed it (e.g. renewal).
-  // Previously this line always ran and overwrote whatever data.nextPremiumDue contained,
-  // meaning the correct renewed date set in RenewalsPage was silently discarded.
-  const nextPremiumDue = data.nextPremiumDue ?? computeNextPremiumDueStr(data.startDate, data.frequency)
+  const nextPremiumDue = computeNextPremiumDueStr(data.startDate, data.frequency)
   return addDoc(policiesRef(), {
     ...data,
     parentPolicyId: data.parentPolicyId || null,
@@ -302,21 +299,18 @@ export async function updatePolicy(id, data) {
     const freq  = data.frequency || existing.frequency
     update.nextPremiumDue = computeNextPremiumDueStr(start, freq) || null
   }
-  // FIX: use setDoc+merge instead of updateDoc.
-  // updateDoc throws "No document to update" if the Firestore document doesn't
-  // exist (can happen when local React state is stale after a partial renewal).
-  // setDoc+merge writes the fields unconditionally — updates if doc exists,
-  // creates it if not — so it never throws this error.
-  return setDoc(doc(db,POLICIES,id), update, { merge: true })
+  return updateDoc(doc(db,POLICIES,id), update)
 }
 // ── SOFT DELETE — marks policy as deleted instead of removing it.
-//    Accidental deletes can always be undone from the Recycle Bin.
+//    Accounted deletes can always be undone from the Recycle Bin.
+// FIX: use setDoc+merge — updateDoc throws "No document to update" when
+// local React state is stale (same root cause as the renewal error).
 export async function deletePolicy(id) {
-  return updateDoc(doc(db, POLICIES, id), {
+  return setDoc(doc(db, POLICIES, id), {
     deleted:   true,
     deletedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  })
+  }, { merge: true })
 }
 
 // ── BULK soft-delete ─────────────────────────────────────────
@@ -341,12 +335,13 @@ export async function getDeletedPolicies() {
 }
 
 // ── RESTORE: remove the deleted flag ─────────────────────────
+// FIX: setDoc+merge — same reason as deletePolicy above.
 export async function restorePolicy(id) {
-  return updateDoc(doc(db, POLICIES, id), {
+  return setDoc(doc(db, POLICIES, id), {
     deleted:   false,
     deletedAt: null,
     updatedAt: serverTimestamp(),
-  })
+  }, { merge: true })
 }
 
 // ── PERMANENT DELETE: only when explicitly chosen in Recycle Bin ──
