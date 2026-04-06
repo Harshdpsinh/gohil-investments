@@ -1307,15 +1307,19 @@ export default function PoliciesPage() {
   const [bulkDelOpen,  setBulkDelOpen]  = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [showRecycleBin, setShowRecycleBin] = useState(false)
+  const [showRenewed,    setShowRenewed]    = useState(false)
+  const tableScrollRef = useRef(null)
+  const topScrollRef   = useRef(null)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return policies.filter(p => {
+      if (!showRenewed && (p.status || '').trim() === 'Renewed-Out') return false
       const mQ = !q||p.policyNumber?.toLowerCase().includes(q)||p.clientName?.toLowerCase().includes(q)||p.insurer?.toLowerCase().includes(q)||p.planName?.toLowerCase().includes(q)||p.registrationNo?.toLowerCase().includes(q)
       const mT = typeFilter==='All'||p.policyType===typeFilter
       return mQ && mT
     })
-  }, [policies, search, typeFilter])
+  }, [policies, search, typeFilter, showRenewed])
 
   // ── Duplicate detector ───────────────────────────────────────
   // Detects duplicates across ALL policies (not just filtered) by:
@@ -1454,6 +1458,11 @@ Wealth Management & Insurance Advisory
         <div className="flex gap-2 flex-wrap">
           {isAdmin&&<button className="btn-secondary" onClick={()=>setModal('import')}>⬆ Import</button>}
           <button className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>setShowRecycleBin(true)}>🗑️ Recycle Bin</button>
+          <button
+            onClick={() => setShowRenewed(v => !v)}
+            className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
+            title="Renewed-Out policies are hidden by default"
+          >{showRenewed ? '🔄 Hide Renewed' : '🔄 Show Renewed'}</button>
           <button className="btn-primary" onClick={()=>{setSelected(null);setDupWarning('');setModal('add')}}>+ Add Policy</button>
         </div>
       </div>
@@ -1498,7 +1507,21 @@ Wealth Management & Insurance Advisory
           <button onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
         </div>
       )}
-      <div className="table-container">
+      {/* Top scrollbar — mirrors the table's horizontal scroll so user
+          doesn't have to scroll all the way to the bottom to see right columns */}
+      <div
+        ref={topScrollRef}
+        style={{ overflowX: 'auto', overflowY: 'hidden', height: 14 }}
+        onScroll={e => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
+        className="rounded"
+      >
+        <div style={{ height: 1, minWidth: 1500 }} />
+      </div>
+      <div
+        ref={tableScrollRef}
+        className="table-container"
+        onScroll={e => { if (topScrollRef.current) topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
+      >
         <table className="min-w-full">
           <thead><tr>
             <th className="table-header w-10">
