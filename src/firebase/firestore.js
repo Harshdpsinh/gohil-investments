@@ -5,6 +5,7 @@ import {
   onSnapshot, writeBatch, setDoc, limit
 } from 'firebase/firestore'
 import { db } from './config'
+import { computeNextPremiumDue } from '../utils/dateUtils'
 
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
@@ -246,33 +247,14 @@ export async function findClientByMobileOrName(mobile, name) {
 // ── POLICIES ──────────────────────────────────────────────────
 export const policiesRef = () => collection(db, POLICIES)
 
-// TODO (Issue #6): This function duplicates logic in src/utils/dateUtils.js.
-// Once confirmed that dateUtils exports computeNextPremiumDue(startDate, frequency) → Date|null,
-// replace this entire function with:
-//   import { computeNextPremiumDue } from '../utils/dateUtils'
-// and change all call-sites to:
-//   computeNextPremiumDue(data.startDate, data.frequency)?.toISOString().split('T')[0] || null
-function computeNextPremiumDueStr(startDate, frequency) {
-  if (!startDate) return null
-  let start
-  if (startDate?.seconds) start = new Date(startDate.seconds * 1000)
-  else { try { start = new Date(startDate) } catch { return null } }
-  if (!start || isNaN(start.getTime())) return null
-
-  const freq = (frequency||'Yearly').toLowerCase()
-  let days = 365
-  if (freq.includes('month'))  days = 30
-  else if (freq.includes('quarter') || freq.includes('3 month')) days = 90
-  else if (freq.includes('half') || freq.includes('6 month')) days = 180
-
-  const today = new Date()
-  let next = new Date(start)
-  while (next <= today) next = new Date(next.getTime() + days * 86400000)
-  return next.toISOString().split('T')[0]
+// computeNextPremiumDue is now imported from '../utils/dateUtils' above.
+// Call sites use: computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
+function _nextDueStr(startDate, frequency) {
+  return computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
 }
 
 export async function addPolicy(data) {
-  const nextPremiumDue = computeNextPremiumDueStr(data.startDate, data.frequency)
+  const nextPremiumDue = _nextDueStr(data.startDate, data.frequency)
   return addDoc(policiesRef(), {
     ...data,
     parentPolicyId: data.parentPolicyId || null,
@@ -297,7 +279,7 @@ export async function updatePolicy(id, data) {
     const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
     const start = data.startDate || existing.startDate
     const freq  = data.frequency || existing.frequency
-    update.nextPremiumDue = computeNextPremiumDueStr(start, freq) || null
+    update.nextPremiumDue = _nextDueStr(start, freq) || null
   }
   return updateDoc(doc(db,POLICIES,id), update)
 }
@@ -427,7 +409,7 @@ export async function saveRenewal(oldPolicyId, newData) {
   })
 
   // STEP B: Compute nextPremiumDue for the new term from new startDate
-  const newNextPremiumDue = computeNextPremiumDueStr(newData.startDate, newData.frequency)
+  const newNextPremiumDue = _nextDueStr(newData.startDate, newData.frequency)
 
   // STEP C: Strip the UI-only field; DB field is 'policyNumber'
   const { newPolicyNumber, ...restData } = newData

@@ -8,11 +8,9 @@ import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
 import { useAuth }      from '../hooks/useAuth'
 import {
-  saveRenewal,        // marks old as Renewed-Out AND creates new policy entry
-  addPolicy,          // ✅ FIX R1: needed to create the new/successor policy
-  updatePolicy,
+  saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
 } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, toInputDate } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, toInputDate, daysUntilPremium, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import toast from 'react-hot-toast'
@@ -23,42 +21,9 @@ import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
 // UTILS
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Returns days until the NEXT premium due date.
- * For yearly policies → uses expiryDate.
- * For monthly/quarterly/half-yearly → uses nextPremiumDue (preferred) else expiryDate.
- */
-function getDays(p) {
-  if (!p) return null
-
-  const freq = (p.frequency || 'Yearly').toLowerCase()
-  const isYearly = freq === 'yearly'
-
-  // ✅ FIX R3: correct date source per frequency
-  const dateStr = (!isYearly && p.nextPremiumDue)
-    ? p.nextPremiumDue
-    : p.expiryDate
-
-  if (!dateStr) return null
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const target = new Date(dateStr)
-  if (isNaN(target.getTime())) return null
-  target.setHours(0, 0, 0, 0)
-
-  return Math.ceil((target - today) / (1000 * 60 * 60 * 24))
-}
-
-/** Returns the relevant due date string for display */
-function getDueDate(p) {
-  if (!p) return null
-  const freq = (p.frequency || 'Yearly').toLowerCase()
-  return (!freq.includes('yearly') && p.nextPremiumDue)
-    ? p.nextPremiumDue
-    : p.expiryDate
-}
+// getDays(p)    → daysUntilPremium(p.startDate, p.frequency) from dateUtils
+// getDueDate(p) → getPolicyDueDate(p) from dateUtils
+// Both use parseAnyDate internally — handles malformed date strings from imports.
 
 // ✅ FIX R4: status with label + Tailwind color classes
 function getStatusInfo(days) {
@@ -92,7 +57,7 @@ const RENEW_INSURERS = [
 ]
 
 function RenewModal({ policy, onConfirm, onClose }) {
-  const oldExpiry = getDueDate(policy) || ''
+  const oldExpiry = getPolicyDueDate(policy) || ''
   const defaultStart = oldExpiry
     ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
     : toInputDate(new Date())
@@ -154,7 +119,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
         <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3 text-sm">
           <p className="font-semibold text-blue-800 dark:text-blue-200">{policy.clientName} — {policy.policyNumber}</p>
           <p className="text-blue-600 dark:text-blue-400 text-xs mt-0.5">
-            {policy.insurer} · {policy.policyType} · {policy.planName || '—'} · Old expiry: {fmtDate(getDueDate(policy))}
+            {policy.insurer} · {policy.policyType} · {policy.planName || '—'} · Old expiry: {fmtDate(getPolicyDueDate(policy))}
           </p>
         </div>
 
@@ -342,8 +307,8 @@ export default function RenewalsPage() {
     if (!mobile) { toast.error('No mobile number found for this client'); return }
 
     // ✅ FIX R3: use correct due date per frequency
-    const dueStr = getDueDate(policy)
-    const days   = getDays(policy)
+    const dueStr = getPolicyDueDate(policy)
+    const days   = daysUntilPremium(policy.startDate, policy.frequency)
 
     const msg = encodeURIComponent(
       `Dear ${policy.clientName},\n\n` +
@@ -369,7 +334,7 @@ export default function RenewalsPage() {
         // Exclude already-renewed policies
         if ((p.status || '').trim() === 'Renewed-Out') return false
 
-        const dueStr = getDueDate(p)
+        const dueStr = getPolicyDueDate(p)
         if (!dueStr) return false
 
         const dueDate = new Date(dueStr)
@@ -380,7 +345,7 @@ export default function RenewalsPage() {
         if (dateTo   && dueDate > new Date(dateTo))   return false
 
         // Day window filter
-        const d = getDays(p)
+        const d = daysUntilPremium(p.startDate, p.frequency)
         // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
         if (dayWindow === -1) {
           if (d === null || d >= 0) return false
@@ -402,14 +367,14 @@ export default function RenewalsPage() {
 
         return true
       })
-      .sort((a, b) => (getDays(a) ?? 9999) - (getDays(b) ?? 9999))
+      .sort((a, b) => (daysUntilPremium(a.startDate, a.frequency) ?? 9999) - (daysUntilPremium(b.startDate, b.frequency) ?? 9999))
   }, [policies, search, dayWindow, dateFrom, dateTo, policyTab])
 
   // ─── Summary stats ────────────────────────────────────────────
   const stats = useMemo(() => {
-    const overdue  = filtered.filter(p => (getDays(p) ?? 1) < 0).length
-    const dueToday = filtered.filter(p => getDays(p) === 0).length
-    const critical = filtered.filter(p => { const d = getDays(p); return d !== null && d > 0 && d <= 7 }).length
+    const overdue  = filtered.filter(p => (daysUntilPremium(p.startDate, p.frequency) ?? 1) < 0).length
+    const dueToday = filtered.filter(p => daysUntilPremium(p.startDate, p.frequency) === 0).length
+    const critical = filtered.filter(p => { const d = daysUntilPremium(p.startDate, p.frequency); return d !== null && d > 0 && d <= 7 }).length
     const totalPremium = filtered.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
     return { overdue, dueToday, critical, totalPremium }
   }, [filtered])
@@ -434,10 +399,10 @@ export default function RenewalsPage() {
           p.policyNumber,
           p.policyType || 'Health',
           p.insurer || '—',
-          fmtDate(getDueDate(p)),
-          getDays(p) ?? '—',
+          fmtDate(getPolicyDueDate(p)),
+          daysUntilPremium(p.startDate, p.frequency) ?? '—',
           Number(p.premium || 0).toLocaleString('en-IN'),
-          getStatusInfo(getDays(p)).label,
+          getStatusInfo(daysUntilPremium(p.startDate, p.frequency)).label,
         ]
       }),
       styles:     { fontSize: 8 },
@@ -448,7 +413,7 @@ export default function RenewalsPage() {
     doc.save('renewals.pdf')
   }
 
-  // ─── RENEW ACTION ─────────────────────────────────────────────
+  // ─── RENEW ACTION — uses atomic writeBatch via saveRenewal ───
   const handleRenewConfirm = useCallback(async (renewForm) => {
     if (submittingRef.current || !renewModal) return
     submittingRef.current = true
@@ -457,23 +422,17 @@ export default function RenewalsPage() {
     const policy = renewModal
 
     try {
-      // ── Step 1: Mark OLD policy as Renewed-Out ─────────────────
-      await updatePolicy(policy.id, {
-        status:     'Renewed-Out',
-        is_renewed: true,
-        renewedAt:  new Date().toISOString(),
-      })
+      // Build new policy payload.
+      // saveRenewal handles automatically: parentPolicyId, policyYear,
+      // nextPremiumDue (from startDate + frequency), status, is_renewed,
+      // renewedAt, createdAt, updatedAt — all in a single atomic writeBatch.
+      const newData = {
+        ...policy,                                   // carry every field forward
 
-      // ── Step 2: Build new policy — spread ALL old fields first,
-      //    then override only what changed on renewal.
-      //    This ensures Motor/Life/Health type-specific fields are
-      //    all carried across without manually listing every one.
-      const newPolicyData = {
-        ...policy,                            // ← carry EVERY field from old policy
+        // UI-only key: saveRenewal extracts this for the new policyNumber
+        newPolicyNumber: renewForm.policyNumber?.trim() || '',
 
-        // ── Fields that always change on renewal ──
-        status:       'Active',
-        policyNumber: renewForm.policyNumber?.trim() || policy.policyNumber,
+        // Renewal-form overrides
         premium:      renewForm.premium,
         startDate:    renewForm.startDate,
         expiryDate:   renewForm.expiryDate,
@@ -481,54 +440,28 @@ export default function RenewalsPage() {
         ryCommission: renewForm.ryCommission,
         notes:        renewForm.notes || '',
 
-        // ── Company / plan — controlled by Same / Switch toggle ──
-        insurer:  renewForm.companySame
+        // Company / plan controlled by Same / Switch toggle
+        insurer: renewForm.companySame
           ? policy.insurer
-          : (renewForm.insurer?.trim()  || policy.insurer),
+          : (renewForm.insurer?.trim() || policy.insurer),
         planName: renewForm.companySame
-          ? (renewForm.planName?.trim() || policy.planName || '')
+          ? (policy.planName || '')
           : (renewForm.planName?.trim() || ''),
 
-        // ── Renewal chain metadata ──
-        prevPolicyId: policy.id,
-        policyYear:   (policy.policyYear || 1) + 1,
-        is_renewed:   false,         // new policy is not yet renewed
-        renewedAt:    null,
-
-        // ── Reset computed/runtime fields ──
-        nextPremiumDue: null,        // will be recomputed by the system
-        policyPdfUrl:   null,        // new policy — no PDF yet
-        policyPdfName:  null,
-
-        // ── Timestamps ──
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        // Reset PDF — new term has no document yet
+        policyPdfUrl:  null,
+        policyPdfName: null,
       }
 
-      // ── CRITICAL: remove the old Firestore doc ID —
-      //    addPolicy must create a NEW document, not overwrite the old one
-      delete newPolicyData.id
+      // Remove old Firestore doc ID — saveRenewal creates a new document
+      delete newData.id
 
-      // ── Sanitize: Firestore rejects `undefined` values.
-      //    Strip every key whose value is undefined or null
-      //    (null is allowed by Firestore; we strip it too for cleanliness).
+      // Strip undefined values — Firestore rejects them (null is fine)
       const clean = Object.fromEntries(
-        Object.entries(newPolicyData).filter(([, v]) => v !== undefined && v !== null)
+        Object.entries(newData).filter(([, v]) => v !== undefined)
       )
 
-      try {
-        await addPolicy(clean)
-      } catch (addErr) {
-        // ── ROLLBACK: if new policy creation fails, restore old policy
-        //    so it doesn't get permanently stuck as Renewed-Out
-        console.error('addPolicy failed, rolling back:', addErr)
-        await updatePolicy(policy.id, {
-          status:     policy.status || 'Active',
-          is_renewed: false,
-          renewedAt:  null,
-        })
-        throw addErr   // re-throw so the outer catch shows the toast
-      }
+      await saveRenewal(policy.id, clean)
 
       toast.success(`✅ Renewed! New policy created for ${policy.clientName}`)
       setRenewModal(null)
@@ -658,9 +591,9 @@ export default function RenewalsPage() {
               </tr>
             ) : (
               filtered.map((p, i) => {
-                const days = getDays(p)
+                const days = daysUntilPremium(p.startDate, p.frequency)
                 const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
-                const dueStr = getDueDate(p)
+                const dueStr = getPolicyDueDate(p)
 
                 return (
                   <tr key={p.id} className="table-row">
