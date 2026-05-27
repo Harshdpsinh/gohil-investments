@@ -9,6 +9,7 @@ import { usePolicies } from '../hooks/usePolicies'
 import { fmtDate, fmtCurrency, daysUntil, renewalStatus } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
+import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -88,6 +89,24 @@ export default function ClientProfilePage() {
 
   const openWhatsApp = () => {
     const mobile = (client?.mobile || '').replace(/\D/g, '')
+    if (!mobile) {
+      toast.error('No mobile number found for this client. Add it in Clients page.')
+      return
+    }
+    const safeMsg =
+      `Dear ${client.name},\n\n` +
+      `Greetings from Gohil Investments!\n\n` +
+      `This is a courtesy message regarding your insurance portfolio. Please feel free to reach out for any queries.\n\n` +
+      `Thank you for your continued trust.\n\n` +
+      `Gohil Investments\nWealth Management & Insurance Advisory\n` +
+      `Harshdipsinh Gohil - 7698997894\n` +
+      `Pradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`
+    try {
+      openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+    return
     if (!mobile) { toast.error('No mobile number — add it in Clients page'); return }
     const msg = encodeURIComponent(`Dear ${client.name},\n\nGreetings from *Gohil Investments*!\n\nThis is a courtesy call regarding your insurance portfolio. Please feel free to reach out for any queries.\n\nThank you for your continued trust.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`)
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')

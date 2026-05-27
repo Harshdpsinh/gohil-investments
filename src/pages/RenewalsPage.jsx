@@ -9,8 +9,9 @@ import { useClients }   from '../hooks/useClients'
 import { useAuth }      from '../hooks/useAuth'
 import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
+  markPremiumPaid,
 } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -43,6 +44,13 @@ function renewalErrorMessage(error) {
   if (message.includes('unavailable') || message.includes('network')) return 'Network problem while saving renewal. Please check your connection and try again.'
   if (message.includes('date')) return message
   return 'Renewal could not be saved. Please refresh and try again.'
+}
+
+function isTermRenewalDue(policy) {
+  const due = parseAnyDate(getPolicyDueDate(policy))
+  const expiry = parseAnyDate(policy?.expiryDate)
+  if (!due || !expiry) return true
+  return due >= expiry
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -518,6 +526,22 @@ export default function RenewalsPage() {
     }
   }, [renewModal])
 
+  const handlePremiumPaid = useCallback(async (policy) => {
+    if (submittingRef.current || !policy?.id) return
+    submittingRef.current = true
+    setSaving(true)
+
+    try {
+      await markPremiumPaid(policy.id)
+      toast.success(`Premium marked paid for ${policy.clientName}. Next due date updated.`)
+    } catch (e) {
+      toast.error(renewalErrorMessage(e))
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }, [])
+
   // ─── UI ───────────────────────────────────────────────────────
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
@@ -639,6 +663,7 @@ export default function RenewalsPage() {
                 const days = daysUntilPolicyDue(p)
                 const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
                 const dueStr = getPolicyDueDate(p)
+                const termRenewalDue = isTermRenewalDue(p)
 
                 return (
                   <tr key={p.id} className="table-row">
@@ -670,15 +695,14 @@ export default function RenewalsPage() {
                     <td className="table-cell">
                       <button onClick={() => openWhatsApp(p)}
                               className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
-                        📱 WA
+                        WA
                       </button>
                     </td>
                     <td className="table-cell">
-                      {/* ✅ FIX R10: opens modal instead of firing immediately */}
-                      <button onClick={() => setRenewModal(p)}
+                      <button onClick={() => termRenewalDue ? setRenewModal(p) : handlePremiumPaid(p)}
                               disabled={saving}
-                              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
-                        Renew →
+                              className={`${termRenewalDue ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'} disabled:opacity-50 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors`}>
+                        {termRenewalDue ? 'Renew' : 'Mark Paid'}
                       </button>
                     </td>
                   </tr>

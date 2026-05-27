@@ -26,6 +26,7 @@ import {
   LIFE_IMPORT_HEADERS,   LIFE_IMPORT_SAMPLE,   parseLifeRow,
   MOTOR_IMPORT_HEADERS,  MOTOR_IMPORT_SAMPLE,  parseMotorRow,
 } from '../utils/exportUtils'
+import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
 // ── Fuzzy match (Levenshtein distance) ───────────────────────
@@ -1397,6 +1398,30 @@ export default function PoliciesPage() {
       client = clients.find(c => c.name.toLowerCase().trim() === (policy.clientName||'').toLowerCase().trim())
     }
     const mobile = client?.mobile?.replace(/\D/g,'')
+    if (!mobile) {
+      toast.error('No mobile number on file for this client')
+      return
+    }
+    const expiry  = fmtDate(policy.expiryDate)
+    const premium = policy.premium ? fmtCurrency(policy.premium) : ''
+    const safeMsg =
+      `Dear ${policy.clientName},\n\n` +
+      `Your ${policy.policyType || 'Insurance'} policy (${policy.insurer || 'Insurer'} - ${policy.planName || ''}) is due for renewal.\n\n` +
+      `Policy No: ${policy.policyNumber}\n` +
+      `Expiry Date: ${expiry}\n` +
+      `Premium: ${premium}\n\n` +
+      `Kindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\n` +
+      `For any query, please call or WhatsApp us.\n\n` +
+      `Gohil Investments\nWealth Management & Insurance Advisory\n` +
+      `Harshdipsinh Gohil - 7698997894\n` +
+      `Pradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`
+    try {
+      openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+    return
+    {
     if (!mobile) { toast.error('No mobile number on file for this client'); return }
     const expiry  = fmtDate(policy.expiryDate)
     const premium = policy.premium ? `₹${Number(policy.premium).toLocaleString('en-IN')}` : ''
@@ -1408,6 +1433,7 @@ Wealth Management & Insurance Advisory
 📍 Bhavnagar, Gujarat`
     )
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+    }
   }
 
   // ── Bulk select ──────────────────────────────────────────

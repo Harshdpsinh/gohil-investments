@@ -5,7 +5,7 @@ import {
   onSnapshot, writeBatch, setDoc, limit, runTransaction
 } from 'firebase/firestore'
 import { db } from './config'
-import { computeNextPremiumDue, normaliseFrequency } from '../utils/dateUtils'
+import { addFrequencyInterval, computeNextPremiumDue, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
 
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
@@ -641,6 +641,38 @@ export async function saveRenewal(oldPolicyId, newData) {
     }))
 
     return newRef
+  })
+}
+
+export async function markPremiumPaid(policyId) {
+  const policyRef = doc(db, POLICIES, policyId)
+
+  return runTransaction(db, async tx => {
+    const snap = await tx.get(policyRef)
+    if (!snap.exists()) throw new Error('Policy not found.')
+
+    const policy = { id: snap.id, ...snap.data() }
+    if ((policy.status || '').trim() === 'Renewed-Out' || policy.is_renewed) {
+      throw new Error('This policy has already been renewed. Refresh the page before updating premium dues.')
+    }
+
+    const currentDue = policy.nextPremiumDue || _nextDueStr(policy.startDate, policy.frequency)
+    if (!currentDue) throw new Error('Could not calculate this policy premium due date.')
+
+    const nextInstallmentDue = addFrequencyInterval(currentDue, policy.frequency)
+    if (!nextInstallmentDue) throw new Error('Could not calculate next premium due date.')
+
+    const expiry = parseAnyDate(policy.expiryDate)
+    const cappedDue = expiry && nextInstallmentDue > expiry ? expiry : nextInstallmentDue
+
+    tx.update(policyRef, {
+      lastPremiumPaidAt: serverTimestamp(),
+      lastPremiumPaidDueDate: currentDue,
+      nextPremiumDue: toInputDate(cappedDue),
+      updatedAt: serverTimestamp(),
+    })
+
+    return policyRef
   })
 }
 

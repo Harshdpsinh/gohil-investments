@@ -8,6 +8,8 @@ import { fmtCurrency, daysUntil, fmtDate, parseAnyDate, daysUntilPremium } from 
 import { useNavigate } from 'react-router-dom'
 import { subscribeTasks, subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
+import { openWhatsAppLink } from '../services/whatsappService'
+import toast from 'react-hot-toast'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement,
   Title, Tooltip, Legend, LineElement, PointElement, Filler
@@ -108,8 +110,26 @@ export default function DashboardPage() {
       client = clients.find(c => c.name?.toLowerCase().trim() === (policy.clientName || '').toLowerCase().trim())
     }
     const mobile = (client?.mobile || '').replace(/\D/g, '')
+    if (!mobile) {
+      toast.error('No mobile number found for this client.')
+      return
+    }
     if (!mobile) return
     const d = getPremDays(policy)
+    const safeMsg =
+      `Dear ${policy.clientName},\n\n` +
+      `Your ${policy.policyType || 'Insurance'} policy (${policy.policyNumber}) with ${policy.insurer || 'your insurer'} premium is due` +
+      `${d !== null && d >= 0 ? ` in ${d} days` : ' - please renew urgently'}.\n\n` +
+      `Please contact us for renewal.\n\n` +
+      `Gohil Investments\nWealth Management & Insurance Advisory\n` +
+      `Harshdipsinh Gohil - 7698997894\n` +
+      `Pradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`
+    try {
+      openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+    return
     const msg = encodeURIComponent(
       `Dear ${policy.clientName},\n\nYour *${policy.policyType}* policy (${policy.policyNumber}) with *${policy.insurer}* premium is due${d !== null && d >= 0 ? ` in *${d} days*` : ' — please renew urgently'}.\n\nPlease contact us for renewal.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`
     )

@@ -1,5 +1,5 @@
 // src/utils/dateUtils.js
-import { format, differenceInDays, parseISO, isValid } from 'date-fns'
+import { format, differenceInDays, parseISO, isValid, addMonths, startOfDay } from 'date-fns'
 
 // ── Universal date parser ─────────────────────────────────────
 // Handles: Firestore Timestamp {seconds,nanoseconds}, ISO string,
@@ -72,10 +72,10 @@ export const currentMonthName = () => format(new Date(), 'MMMM yyyy')
 // Maps any user-typed frequency to one of 4 standard values
 export function normaliseFrequency(val) {
   const v = (val||'').toLowerCase().trim()
-  if (['yearly','year','annual','annually','per year','p.a.','pa','1 year','12 months'].some(x=>v.includes(x))) return 'Yearly'
   if (['half','6 month','semi','bi-annual','biannual','half year'].some(x=>v.includes(x))) return 'Half-Yearly'
   if (['quarter','3 month','qtr'].some(x=>v.includes(x))) return 'Quarterly'
   if (['month','monthly','1 month','per month'].some(x=>v.includes(x))) return 'Monthly'
+  if (['yearly','year','annual','annually','per year','p.a.','pa','1 year','12 months'].some(x=>v.includes(x))) return 'Yearly'
   return 'Yearly'  // safe default
 }
 
@@ -89,6 +89,21 @@ export function frequencyDays(frequency) {
   }
 }
 
+export function frequencyMonths(frequency) {
+  switch(normaliseFrequency(frequency)) {
+    case 'Monthly':     return 1
+    case 'Quarterly':   return 3
+    case 'Half-Yearly': return 6
+    default:            return 12
+  }
+}
+
+export function addFrequencyInterval(date, frequency) {
+  const d = parseAnyDate(date)
+  if (!d) return null
+  return addMonths(d, frequencyMonths(frequency))
+}
+
 // ── Compute next premium due date ─────────────────────────────
 // FIX #3: O(1) direct math replaces O(n) while-loop.
 // Old loop iterated once per interval (up to ~120x for monthly/10yr policy).
@@ -96,11 +111,14 @@ export function frequencyDays(frequency) {
 export function computeNextPremiumDue(startDate, frequency) {
   const start = parseAnyDate(startDate)
   if (!start) return null
-  if (start.getTime() > Date.now()) return start
-  const intervalMs = frequencyDays(frequency) * 86400000
-  const today      = Date.now()
-  const elapsed    = Math.floor((today - start.getTime()) / intervalMs)
-  const next       = new Date(start.getTime() + (elapsed + 1) * intervalMs)
+  const today = startOfDay(new Date())
+  let next = startOfDay(start)
+  const months = frequencyMonths(frequency)
+  let intervals = 0
+  while (next < today && intervals < 2400) {
+    intervals += 1
+    next = startOfDay(addMonths(start, intervals * months))
+  }
   return next
 }
 
