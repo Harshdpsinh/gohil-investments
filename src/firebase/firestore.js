@@ -371,6 +371,7 @@ function normalisePolicyPayload(data, { partial = false } = {}) {
   assertOptionalNumber(next.idv, 'IDV')
   assertOptionalDate(next.startDate, 'Start date')
   assertOptionalDate(next.expiryDate, 'Expiry date')
+  assertOptionalDate(next.nextPremiumDue, 'Premium due date')
 
   ;['planName', 'nominee', 'nomineeRelation', 'registrationNo', 'notes'].forEach(field => {
     if (next[field] !== undefined && next[field] !== null) next[field] = String(next[field]).trim()
@@ -425,7 +426,7 @@ export async function addPolicy(data) {
   const payload = normalisePolicyPayload(data)
   assertPolicyDateOrder(payload.startDate, payload.expiryDate)
   await assertUniquePolicyNumber(payload.policyNumber)
-  const nextPremiumDue = _nextDueStr(payload.startDate, payload.frequency)
+  const nextPremiumDue = payload.nextPremiumDue || _nextDueStr(payload.startDate, payload.frequency)
   return addDoc(policiesRef(), cleanFirestoreData({
     ...payload,
     parentPolicyId: payload.parentPolicyId || null,
@@ -452,11 +453,13 @@ export async function updatePolicy(id, data) {
   }
   if (payload.policyNumber !== undefined) await assertUniquePolicyNumber(payload.policyNumber, id)
   const update = { ...payload, updatedAt: serverTimestamp() }
-  if (payload.startDate || payload.frequency) {
+  if (payload.nextPremiumDue === undefined && (payload.startDate || payload.frequency)) {
     const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
-    const start = payload.startDate || existing.startDate
-    const freq  = payload.frequency || existing.frequency
-    update.nextPremiumDue = _nextDueStr(start, freq) || null
+    if (!existing.nextPremiumDue) {
+      const start = payload.startDate || existing.startDate
+      const freq  = payload.frequency || existing.frequency
+      update.nextPremiumDue = _nextDueStr(start, freq) || null
+    }
   }
   return updateDoc(doc(db,POLICIES,id), update)
 }

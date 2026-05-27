@@ -202,7 +202,8 @@ export const POLICY_COLS = [
   { header: 'Plan',            accessor: r => r.planName },
   { header: 'Premium',         accessor: r => r.premium },
   { header: 'Start Date',      accessor: r => fmtDate(r.startDate) },
-  { header: 'Expiry Date',     accessor: r => fmtDate(r.expiryDate) },
+  { header: 'Policy End Date', accessor: r => fmtDate(r.expiryDate) },
+  { header: 'Premium Due Date', accessor: r => fmtDate(r.nextPremiumDue) },
   { header: 'Status',          accessor: r => r.status || 'Active' },
   { header: 'Frequency',       accessor: r => r.frequency },
   { header: 'FY Commission %', accessor: r => r.fyCommission || '' },
@@ -226,7 +227,7 @@ export const CLIENT_IMPORT_SAMPLE = [
 export const HEALTH_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Expiry Date', 'Status',
+  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Health-specific
   'Sum Insured (₹)',
   'Nominee Name', 'Nominee Relation',
@@ -241,7 +242,7 @@ export const HEALTH_IMPORT_HEADERS = [
 
 export const HEALTH_IMPORT_SAMPLE = [
   'ICL-H-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'ICICI Lombard', 'Health Shield Gold',
-  '18500', 'Yearly', '01/04/2024', '31/03/2025', 'Active',
+  '18500', 'Yearly', '01/04/2024', '31/03/2025', '31/03/2025', 'Active',
   '500000',
   'Sunita Shah', 'Spouse',
   '15', '7.5',
@@ -279,7 +280,8 @@ export function parseHealthRow(r) {
     premium:         num(r['Premium (₹)']),
     frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
-    expiryDate:      normaliseDate(r['Expiry Date']),
+    expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date']),
+    nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
     sumInsured:      num(r['Sum Insured (₹)']),
     nominee:         str(r['Nominee Name']),
@@ -297,7 +299,7 @@ export function parseHealthRow(r) {
 export const LIFE_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Expiry Date', 'Status',
+  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Life-specific
   'Sum Assured (₹)', 'Policy Sub-type',
   'PPT (years)', 'Policy Term (years)', 'Maturity Date',
@@ -308,7 +310,7 @@ export const LIFE_IMPORT_HEADERS = [
 
 export const LIFE_IMPORT_SAMPLE = [
   'LIC-T-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'LIC of India', 'Tech Term',
-  '12000', 'Yearly', '01/04/2024', '31/03/2025', 'Active',
+  '12000', 'Yearly', '01/04/2024', '31/03/2054', '31/03/2025', 'Active',
   '10000000', 'Term',
   '30', '30', '31/03/2054',
   'Sunita Shah', 'Spouse',
@@ -331,7 +333,8 @@ export function parseLifeRow(r) {
     premium:         num(r['Premium (₹)']),
     frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
-    expiryDate:      normaliseDate(r['Expiry Date']),
+    expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date'] || r['Maturity Date']),
+    nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
     sumAssured:      num(r['Sum Assured (₹)']),
     policySubType:   str(r['Policy Sub-type']) || 'Term',
@@ -352,7 +355,7 @@ export function parseLifeRow(r) {
 export const MOTOR_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Expiry Date', 'Status',
+  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Motor-specific
   'Vehicle Type', 'Registration No', 'IDV (₹)', 'NCB %',
   'Nominee Name', 'Nominee Relation',
@@ -362,7 +365,7 @@ export const MOTOR_IMPORT_HEADERS = [
 
 export const MOTOR_IMPORT_SAMPLE = [
   'HDFC-M-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'HDFC ERGO', 'Comprehensive Motor',
-  '8500', 'Yearly', '01/04/2024', '31/03/2025', 'Active',
+  '8500', 'Yearly', '01/04/2024', '31/03/2025', '31/03/2025', 'Active',
   '4W', 'GJ-03-AA-1234', '650000', '20',
   'Sunita Shah', 'Spouse',
   '15', '5',
@@ -384,7 +387,8 @@ export function parseMotorRow(r) {
     premium:         num(r['Premium (₹)']),
     frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
-    expiryDate:      normaliseDate(r['Expiry Date']),
+    expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date']),
+    nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
     vehicleType:     str(r['Vehicle Type']) || '4W',
     registrationNo:  str(r['Registration No']),

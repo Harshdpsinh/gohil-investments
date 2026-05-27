@@ -69,7 +69,7 @@ const ADDONS = [
 const BASE_EMPTY = {
   policyNumber:'', clientId:'', clientName:'', policyType:'Health',
   insurer:'', planName:'', premium:'', sumAssured:'', frequency:'Yearly',
-  startDate:'', expiryDate:'', status:'Active',
+  startDate:'', expiryDate:'', nextPremiumDue:'', status:'Active',
   nominee:'', nomineeRelation:'',
   fyCommission:'', ryCommission:'', notes:''
 }
@@ -416,7 +416,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     // Fix #10: convert any Firestore Timestamps to yyyy-MM-dd strings for date inputs
     const fixDates = (obj) => {
       const fixed = { ...obj }
-      const dateFields = ['startDate','expiryDate','maturityDate','tpExpiry','dateOfFirstEntry','dob']
+      const dateFields = ['startDate','expiryDate','nextPremiumDue','maturityDate','tpExpiry','dateOfFirstEntry','dob']
       dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
       return fixed
     }
@@ -469,9 +469,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     if (!form.clientId)            { toast.error('Please select a client'); return }
     if (!form.insurer.trim())      { toast.error('Insurer is required'); return }
     if (!form.startDate)           { toast.error('Start date required'); return }
-    if (!form.expiryDate)          { toast.error('Expiry date required');   return }
+    if (!form.expiryDate)          { toast.error('Policy end / expiry date required');   return }
     if (new Date(form.expiryDate) <= new Date(form.startDate)) {
-      toast.error('Expiry date must be after start date'); return
+      toast.error('Policy end / expiry date must be after start date'); return
+    }
+    if (form.nextPremiumDue && Number.isNaN(new Date(form.nextPremiumDue).getTime())) {
+      toast.error('Premium due / renewal date must be valid'); return
     }
     if (!form.premium || Number(form.premium) <= 0) {
       toast.error('Premium must be greater than zero'); return
@@ -549,7 +552,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           {sel('frequency','Payment Frequency',FREQS)}
           {sel('status','Status',STATUS)}
           {inp('startDate','Start Date','date')}
-          {inp('expiryDate','Expiry Date *','date')}
+          {inp('expiryDate','Policy End / Expiry Date *','date')}
+          {inp('nextPremiumDue','Premium Due / Renewal Date','date')}
           {inp('nominee','Nominee Name')}
           {inp('nomineeRelation','Nominee Relation')}
         </div>
@@ -1404,13 +1408,15 @@ export default function PoliciesPage() {
       toast.error('No mobile number on file for this client')
       return
     }
+    const dueDate = fmtDate(policy.nextPremiumDue || policy.expiryDate)
     const expiry  = fmtDate(policy.expiryDate)
     const premium = policy.premium ? fmtCurrency(policy.premium) : ''
     const safeMsg =
       `Dear ${policy.clientName},\n\n` +
       `Your ${policy.policyType || 'Insurance'} policy (${policy.insurer || 'Insurer'} - ${policy.planName || ''}) is due for renewal.\n\n` +
       `Policy No: ${policy.policyNumber}\n` +
-      `Expiry Date: ${expiry}\n` +
+      `Premium Due / Renewal Date: ${dueDate}\n` +
+      `Policy End / Expiry Date: ${expiry}\n` +
       `Premium: ${premium}\n\n` +
       `Kindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\n` +
       `For any query, please call or WhatsApp us.\n\n` +
@@ -1579,7 +1585,7 @@ Wealth Management & Insurance Advisory
               :displayPolicies.map(p=>{
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
                 const isDup = duplicatePolicyIds.has(p.id)
-                const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.expiryDate)
+                const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.nextPremiumDue || p.expiryDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
                   <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''} ${isDup?'bg-orange-50 dark:bg-orange-900/10':''}`}>
