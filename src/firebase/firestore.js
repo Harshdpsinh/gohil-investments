@@ -663,7 +663,10 @@ export async function markPremiumPaid(policyId) {
     if (!nextInstallmentDue) throw new Error('Could not calculate next premium due date.')
 
     const expiry = parseAnyDate(policy.expiryDate)
-    const cappedDue = expiry && nextInstallmentDue > expiry ? expiry : nextInstallmentDue
+    const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+    const cappedDue = !isLifePolicy && expiry && nextInstallmentDue > expiry
+      ? expiry
+      : nextInstallmentDue
 
     tx.update(policyRef, {
       lastPremiumPaidAt: serverTimestamp(),

@@ -47,6 +47,7 @@ function renewalErrorMessage(error) {
 }
 
 function isTermRenewalDue(policy) {
+  if (String(policy?.policyType || '').trim().toLowerCase() === 'life') return false
   const due = parseAnyDate(getPolicyDueDate(policy))
   const expiry = parseAnyDate(policy?.expiryDate)
   if (!due || !expiry) return true
