@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
+import { useAuth }     from '../hooks/useAuth'
 import {
   addClaim, updateClaim, deleteClaim, subscribeClaims, CLAIM_STATUSES
 } from '../firebase/firestore'
@@ -10,6 +11,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar     from '../components/ui/SearchBar'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
+import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
 const CLAIM_TYPES  = ['Cashless','Reimbursement','Death','Maturity','Motor Accident','Motor Theft','Other']
@@ -91,8 +93,13 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
   const submit = async () => {
     if (!form.clientName) { toast.error('Client required'); return }
     if (!form.policyNumber && !form.insurer) { toast.error('Policy or Insurer required'); return }
+    if (form.claimedAmount && Number(form.claimedAmount) < 0) { toast.error('Claimed amount cannot be negative'); return }
+    if (form.approvedAmount && Number(form.approvedAmount) < 0) { toast.error('Approved amount cannot be negative'); return }
+    if (form.claimedAmount && form.approvedAmount && Number(form.approvedAmount) > Number(form.claimedAmount)) {
+      toast.error('Approved amount cannot be greater than claimed amount'); return
+    }
     setSaving(true)
-    try { await onSave(form) } catch(err) { toast.error(err.message) } finally { setSaving(false) }
+    try { await onSave(form) } catch(err) { toast.error(err.message || 'Could not save claim. Please check the details.') } finally { setSaving(false) }
   }
 
   return (
@@ -230,6 +237,7 @@ function PipelineView({ claims, onEdit, onStatusChange }) {
 export default function ClaimsPage() {
   const { clients }  = useClients()
   const { policies } = usePolicies()
+  const { isAdmin }  = useAuth()
   const [claims,  setClaims]  = useState([])
   const [loading, setLoading] = useState(true)
   const [view,    setView]    = useState('table')   // 'table' | 'pipeline'
@@ -241,7 +249,13 @@ export default function ClaimsPage() {
 
   useEffect(() => {
     setLoading(true)
-    const unsub = subscribeClaims(data => { setClaims(data); setLoading(false) })
+    const unsub = subscribeClaims(
+      data => { setClaims(data); setLoading(false) },
+      err => {
+        toast.error('Could not load claims: ' + (err.message || 'Unknown error'))
+        setLoading(false)
+      }
+    )
     return () => unsub()
   }, [])
 
@@ -280,8 +294,14 @@ export default function ClaimsPage() {
     catch(err) { toast.error('Failed to delete: ' + err.message) }
   }
   const onStatusChange = async (id, status) => {
-    await updateClaim(id, { status })
+    try {
+      await updateClaim(id, { status })
+      toast.success(`Status changed to ${status}`)
+      return
     toast.success(`Status → ${status}`)
+    } catch (err) {
+      toast.error(err.message || 'Could not update claim status.')
+    }
   }
 
   // WhatsApp for claim update
@@ -292,6 +312,29 @@ export default function ClaimsPage() {
       client = clients.find(c => c.name.toLowerCase().trim() === (claim.clientName||'').toLowerCase().trim())
     }
     const mobile = client?.mobile?.replace(/\D/g,'')
+    if (!mobile) {
+      toast.error('No mobile for ' + (claim.clientName || 'this client') + ' - add it in Clients page')
+      return
+    }
+    const safeMsg =
+      `Dear ${claim.clientName || 'Client'},\n\n` +
+      `Update on your insurance claim:\n\n` +
+      `Claim No: ${claim.claimNumber || 'N/A'}\n` +
+      `Insurer: ${claim.insurer || 'N/A'}\n` +
+      `Status: ${claim.status || 'N/A'}\n` +
+      `${claim.approvedAmount ? `Approved Amount: ${fmtCurrency(claim.approvedAmount)}\n` : ''}\n` +
+      `For any queries, please contact us.\n\n` +
+      `Gohil Investments\n` +
+      `Wealth Management & Insurance Advisory\n` +
+      `Harshdipsinh Gohil - 7698997894\n` +
+      `Pradipsinh Gohil - 9426204547\n` +
+      `Bhavnagar, Gujarat`
+    try {
+      openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+    return
     if (!mobile) { toast.error('No mobile for ' + (claim.clientName||'this client') + ' — add it in Clients page'); return }
     const msg = encodeURIComponent(
       `Dear ${claim.clientName},\n\nUpdate on your insurance claim:\n\n📋 Claim No: ${claim.claimNumber || 'N/A'}\n🏢 Insurer: ${claim.insurer}\n📊 Status: *${claim.status}*\n${claim.approvedAmount ? `💰 Approved Amount: ₹${Number(claim.approvedAmount).toLocaleString('en-IN')}` : ''}\n\nFor any queries, please contact us.\n\n*Gohil Investments*
@@ -414,8 +457,10 @@ Wealth Management & Insurance Advisory
                                   className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
                           <button onClick={()=>openWhatsApp(c)}
                                   className="px-2 py-1 text-xs bg-green-50 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded hover:bg-green-100">📱</button>
-                          <button onClick={()=>{setSelected(c);setDelOpen(true)}}
-                                  className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                          {isAdmin && (
+                            <button onClick={()=>{setSelected(c);setDelOpen(true)}}
+                                    className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                          )}
                         </div>
                       </td>
                     </tr>

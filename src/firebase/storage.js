@@ -5,6 +5,25 @@ import { addDocMeta, deleteDocMeta } from './firestore'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+
+function validateClientDocument(file) {
+  if (!file) throw new Error('No file selected.')
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error('File must be smaller than 10 MB.')
+  const name = file.name.toLowerCase()
+  const hasAllowedExtension = /\.(pdf|jpe?g|png|webp)$/.test(name)
+  if (!ALLOWED_CLIENT_TYPES.includes(file.type) || !hasAllowedExtension) {
+    throw new Error('Only PDF, JPG, PNG, or WEBP files are allowed.')
+  }
+}
+
+function validatePolicyPdf(file) {
+  if (!file) throw new Error('No file selected.')
+  if (file.size > MAX_UPLOAD_BYTES) throw new Error('File must be smaller than 10 MB.')
+  const isPdf = file.type === 'application/pdf' && file.name.toLowerCase().endsWith('.pdf')
+  if (!isPdf) throw new Error('Only PDF files are allowed.')
+}
 
 function cloudinaryUpload(file, folder, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
@@ -42,7 +61,7 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
 }
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+  validateClientDocument(file)
   const meta  = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress)
   await addDocMeta(clientId, meta)
   return meta
@@ -53,8 +72,7 @@ export async function deleteClientDocument(clientId, docId) {
 }
 
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
-  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-  if (!isPdf) throw new Error('Only PDF files are allowed.')
+  validatePolicyPdf(file)
   const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress)
   return { url: meta.url, name: meta.name }
 }

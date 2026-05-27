@@ -1,8 +1,9 @@
 // src/pages/ClientsPage.jsx
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
+import { useAuth }     from '../hooks/useAuth'
 import {
   addClient, cascadeUpdateClient, deleteClient,
   bulkDeleteClients, getDocMeta,
@@ -14,6 +15,7 @@ import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import { exportToCSV, exportToExcel, exportToPDF, CLIENT_COLS } from '../utils/exportUtils'
+import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 import { differenceInDays } from 'date-fns'
 
@@ -57,6 +59,21 @@ function ClientForm({ initial, onSave, onCancel }) {
   const onSubmit = async e => {
     e.preventDefault()
     if (!form.name.trim()) { toast.error('Name is required'); return }
+    if (form.mobile && !/^[6-9]\d{9}$/.test(form.mobile.replace(/\D/g, '').slice(-10))) {
+      toast.error('Enter a valid 10 digit Indian mobile number'); return
+    }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      toast.error('Enter a valid email address'); return
+    }
+    if (form.pan && !/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(form.pan.trim())) {
+      toast.error('PAN must be in format ABCDE1234F'); return
+    }
+    if (form.aadhar && form.aadhar.replace(/\D/g, '').length !== 12) {
+      toast.error('Aadhar must contain exactly 12 digits'); return
+    }
+    if (form.income && Number(form.income) < 0) {
+      toast.error('Annual income cannot be negative'); return
+    }
     setSaving(true)
     try { await onSave(form) }
     catch(err) { toast.error('Save failed: ' + (err.message || 'Unknown error')) }
@@ -108,6 +125,7 @@ function ClientForm({ initial, onSave, onCancel }) {
 // ── Document Manager ──────────────────────────────────────────
 // Fix: was using useState for side effect — changed to useEffect
 function DocumentManager({ clientId }) {
+  const { isAdmin } = useAuth()
   const [docs,      setDocs]      = useState([])
   const [loading,   setLoading]   = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -184,7 +202,9 @@ function DocumentManager({ clientId }) {
                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline truncate max-w-[70%]">📄 {d.name}</a>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="text-xs text-gray-400 dark:text-gray-500">{Math.round((d.size||0)/1024)} KB</span>
-                    <button onClick={() => onDelete(d)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                    {isAdmin && (
+                      <button onClick={() => onDelete(d)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                    )}
                   </div>
                 </li>
               ))}
@@ -467,7 +487,9 @@ function CliMerModal({ clients, onClose, onMerged }) {
 export default function ClientsPage() {
   const { clients, loading } = useClients()
   const { policies }         = usePolicies()
+  const { isAdmin }          = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [search,       setSearch]       = useState('')
   const [kycFilter,    setKycFilter]    = useState('All')
   const [modal,        setModal]        = useState(null)
@@ -504,6 +526,20 @@ export default function ClientsPage() {
     })
   }, [clientData, search, kycFilter, showGapsOnly])
 
+  useEffect(() => {
+    const editClientId = location.state?.editClientId
+    if (!editClientId || loading) return
+    const client = clients.find(c => c.id === editClientId)
+    if (!client) {
+      toast.error('Client not found for editing.')
+      navigate('/clients', { replace: true, state: null })
+      return
+    }
+    setSelected(client)
+    setModal('edit')
+    navigate('/clients', { replace: true, state: null })
+  }, [clients, loading, location.state, navigate])
+
   const kycBadge = s => s==='Complete'?'badge-green':s==='In Progress'?'badge-yellow':'badge-red'
 
   const onAdd    = async form => { await addClient(form); toast.success('Client added!'); setModal(null) }
@@ -512,7 +548,12 @@ export default function ClientsPage() {
     toast.success('Client updated — changes reflected everywhere!')
     setModal(null)
   }
-  const onDelete = async () => { await deleteClient(selected.id); toast.success('Client deleted') }
+  const onDelete = async () => {
+    await deleteClient(selected.id)
+    toast.success('Client deleted')
+    setDelOpen(false)
+    setSelected(null)
+  }
 
   const openGreeting = client => {
     const count = policies.filter(p =>
@@ -526,9 +567,11 @@ export default function ClientsPage() {
   }
 
   const sendBirthdayWA = () => {
-    const mobile = greetingClient?.mobile?.replace(/\D/g,'')
-    if (!mobile) { toast.error('No mobile number'); return }
-    window.open(`https://wa.me/91${mobile}?text=${encodeURIComponent(greetingMsg)}`, '_blank')
+    try {
+      openWhatsAppLink({ mobile: greetingClient?.mobile, message: greetingMsg })
+    } catch (err) {
+      toast.error(err.message)
+    }
   }
 
   const allFilteredIds = filtered.map(c => c.id)
@@ -571,12 +614,14 @@ export default function ClientsPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-primary" onClick={() => { setSelected(null); setModal('add') }}>+ Add Client</button>
-          <button
-            className="px-4 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-            onClick={() => setModal('climer')}
-            title="Merge duplicate clients">
-            🔀 CliMer
-          </button>
+          {isAdmin && (
+            <button
+              className="px-4 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              onClick={() => setModal('climer')}
+              title="Merge duplicate clients">
+              🔀 CliMer
+            </button>
+          )}
         </div>
       </div>
 
@@ -612,7 +657,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Bulk action bar */}
-      {someSelected && (
+      {isAdmin && someSelected && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">
           <span className="text-sm font-semibold text-red-700 dark:text-red-300">
             {selectedIds.size} client{selectedIds.size > 1 ? 's' : ''} selected
@@ -698,8 +743,10 @@ export default function ClientsPage() {
                                 className="px-2 py-1 text-xs bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 rounded hover:bg-pink-100"
                                 title="Send Birthday Greeting">🎂</button>
                       )}
-                      <button onClick={() => { setSelected(c); setDelOpen(true) }}
-                              className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                      {isAdmin && (
+                        <button onClick={() => { setSelected(c); setDelOpen(true) }}
+                                className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                      )}
                     </div>
                   </td>
                 </tr>

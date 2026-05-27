@@ -117,8 +117,8 @@ export default function DashboardPage() {
   }, [clients])
 
   useEffect(() => {
-    const u1 = subscribeTasks(setTasks)
-    const u2 = subscribeClaims(setClaims)
+    const u1 = subscribeTasks(setTasks, err => console.error('Dashboard tasks subscription failed:', err))
+    const u2 = subscribeClaims(setClaims, err => console.error('Dashboard claims subscription failed:', err))
     return () => { u1(); u2() }
   }, [])
 

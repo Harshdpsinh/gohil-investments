@@ -2,16 +2,60 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAuth() { return request.auth != null; }
+    function isAdmin() {
+      return isAuth()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isSelf(userId) { return isAuth() && request.auth.uid == userId; }
+    function validRole(role) { return role in ['admin', 'staff']; }
+    function validUserProfile() {
+      return request.resource.data.role is string
+        && validRole(request.resource.data.role)
+        && request.resource.data.email is string
+        && request.resource.data.name is string;
+    }
+    function isSoftDeleteChange() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['deleted', 'deletedAt']);
+    }
 
     match /clients/{clientId} {
-      allow read, write: if isAuth();
-      match /documents/{docId} { allow read, write: if isAuth(); }
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+      match /documents/{docId} {
+        allow read, create, update: if isAuth();
+        allow delete: if isAdmin();
+      }
     }
-    match /policies/{policyId}    { allow read, write: if isAuth(); }
-    match /proposals/{proposalId} { allow read, write: if isAuth(); }
-    match /claims/{claimId}       { allow read, write: if isAuth(); }
-    match /tasks/{taskId}         { allow read, write: if isAuth(); }
-    match /users/{userId}         { allow read, write: if isAuth(); }
+    match /policies/{policyId} {
+      allow read, create: if isAuth();
+      allow update: if isAuth() && (!isSoftDeleteChange() || isAdmin());
+      allow delete: if isAdmin();
+    }
+    match /proposals/{proposalId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /claims/{claimId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /tasks/{taskId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /users/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create: if (isSelf(userId)
+          && validUserProfile()
+          && request.resource.data.role == 'staff')
+        || (isAdmin() && validUserProfile());
+      allow update: if isAdmin()
+        && validUserProfile()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'email', 'role', 'updatedAt']);
+      allow delete: if false;
+    }
     match /{document=**}          { allow read, write: if false; }
   }
 }

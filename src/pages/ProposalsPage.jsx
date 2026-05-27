@@ -1,6 +1,7 @@
 // src/pages/ProposalsPage.jsx
 import { useState, useEffect } from 'react'
 import { useClients }       from '../hooks/useClients'
+import { useAuth }          from '../hooks/useAuth'
 import {
   addProposal, subscribeProposals, deleteProposal,
   addClient, updateClient, findClientByMobileOrName
@@ -136,12 +137,26 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
   const onSubmit = async e => {
     e.preventDefault()
     if (!form.proposerName.trim()) { toast.error('Proposer name is required'); return }
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { toast.error('Enter a valid email address'); return }
+    const mobileDigits = form.mobile.replace(/\D/g, '')
+    const proposalMobile = mobileDigits.startsWith('91') && mobileDigits.length > 10
+      ? mobileDigits.slice(2)
+      : mobileDigits.startsWith('0') && mobileDigits.length === 11
+        ? mobileDigits.slice(1)
+        : mobileDigits
+    if (form.mobile && (proposalMobile.length !== 10 || !/^[6-9]/.test(proposalMobile))) { toast.error('Enter a valid 10 digit Indian mobile number'); return }
+    if (form.pan && !/^[A-Za-z]{5}[0-9]{4}[A-Za-z]$/.test(form.pan.trim())) { toast.error('Enter a valid PAN number'); return }
+    if (form.aadhar && form.aadhar.replace(/\D/g, '').length !== 12) { toast.error('Enter a valid 12 digit Aadhaar number'); return }
+    if (form.premium && Number(form.premium) <= 0) { toast.error('Premium must be greater than zero'); return }
+    if (form.sumAssured && Number(form.sumAssured) < 0) { toast.error('Sum assured cannot be negative'); return }
+    if (form.income && Number(form.income) < 0) { toast.error('Income cannot be negative'); return }
     setSaving(true)
     setUpsertStatus('checking')
 
     try {
       let clientId   = form.clientId || null
       let clientName = form.proposerName
+      let createdNewClient = false
 
       // Only run upsert lookup if not already linked from dropdown
       if (!clientId) {
@@ -177,6 +192,7 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
             kycStatus: 'Pending',
           })
           clientId = ref.id
+          createdNewClient = true
           setUpsertStatus('created')
           toast(`🆕 New client "${form.proposerName}" created`, { icon: '✅' })
         }
@@ -185,12 +201,12 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
       // Save the proposal with the resolved clientId
       // Set terminal status BEFORE calling onSave — onSave closes the modal
       // which unmounts this component, making any setState after it a no-op / warning
-      const finalStatus = form.clientId ? 'linked' : (existing ? 'linked' : 'created')
+      const finalStatus = createdNewClient ? 'created' : 'linked'
       setUpsertStatus(finalStatus)
       await onSave({ ...form, clientId, clientName })
 
     } catch (err) {
-      toast.error(err.message)
+      toast.error(err.message || 'Could not save proposal. Please check the details and try again.')
       setUpsertStatus(null)
     } finally {
       setSaving(false)
@@ -336,6 +352,7 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
 
 export default function ProposalsPage() {
   const { clients }               = useClients()
+  const { isAdmin }               = useAuth()
   const [proposals, setProposals] = useState([])
   const [loading, setLoading]     = useState(true)
   const [modal,    setModal]      = useState(null)
@@ -345,22 +362,36 @@ export default function ProposalsPage() {
   // Realtime subscription — consistent with every other page in the app
   useEffect(() => {
     setLoading(true)
-    const unsub = subscribeProposals(data => {
-      setProposals(data)
-      setLoading(false)
-    })
+    const unsub = subscribeProposals(
+      data => {
+        setProposals(data)
+        setLoading(false)
+      },
+      err => {
+        toast.error('Could not load proposals: ' + (err.message || 'Unknown error'))
+        setLoading(false)
+      }
+    )
     return () => unsub()
   }, [])
 
   const onAdd = async form => {
-    await addProposal(form)
-    toast.success('Proposal saved!')
-    setModal(null)
+    try {
+      await addProposal(form)
+      toast.success('Proposal saved!')
+      setModal(null)
+    } catch (err) {
+      toast.error(err.message || 'Could not save proposal. Please try again.')
+    }
   }
   const onDelete = async () => {
-    await deleteProposal(selected.id)
-    toast.success('Proposal deleted')
-    setDelOpen(false)
+    try {
+      await deleteProposal(selected.id)
+      toast.success('Proposal deleted')
+      setDelOpen(false)
+    } catch (err) {
+      toast.error(err.message || 'Could not delete proposal.')
+    }
   }
 
   return (
@@ -410,8 +441,10 @@ export default function ProposalsPage() {
                         <div className="flex gap-1">
                           <button onClick={() => generateProposalPDF(p)}
                                   className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">📄 PDF</button>
-                          <button onClick={() => { setSelected(p); setDelOpen(true) }}
-                                  className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100">Del</button>
+                          {isAdmin && (
+                            <button onClick={() => { setSelected(p); setDelOpen(true) }}
+                                    className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100">Del</button>
+                          )}
                         </div>
                       </td>
                     </tr>

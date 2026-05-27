@@ -1,6 +1,6 @@
 // src/components/auth/Login.jsx
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth }     from '../../hooks/useAuth'
 import toast           from 'react-hot-toast'
 
@@ -14,7 +14,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
 
-  if (user) { navigate('/dashboard', { replace: true }); return null }
+  if (user) return <Navigate to="/dashboard" replace />
 
   const onChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))
 

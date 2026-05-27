@@ -464,7 +464,21 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     e.preventDefault()
     if (!form.policyNumber.trim()) { toast.error('Policy Number required'); return }
     if (!form.clientId)            { toast.error('Please select a client'); return }
+    if (!form.insurer.trim())      { toast.error('Insurer is required'); return }
+    if (!form.startDate)           { toast.error('Start date required'); return }
     if (!form.expiryDate)          { toast.error('Expiry date required');   return }
+    if (new Date(form.expiryDate) <= new Date(form.startDate)) {
+      toast.error('Expiry date must be after start date'); return
+    }
+    if (!form.premium || Number(form.premium) <= 0) {
+      toast.error('Premium must be greater than zero'); return
+    }
+    if (form.fyCommission && (Number(form.fyCommission) < 0 || Number(form.fyCommission) > 100)) {
+      toast.error('FY commission must be between 0 and 100'); return
+    }
+    if (form.ryCommission && (Number(form.ryCommission) < 0 || Number(form.ryCommission) > 100)) {
+      toast.error('RY commission must be between 0 and 100'); return
+    }
     setSaving(true)
     // Strip UI-only fields before saving to Firestore
     const { _clientMobile: _cm, _clientEmail: _ce, ...cleanForm } = form
@@ -1457,7 +1471,7 @@ Wealth Management & Insurance Advisory
         </div>
         <div className="flex gap-2 flex-wrap">
           {isAdmin&&<button className="btn-secondary" onClick={()=>setModal('import')}>⬆ Import</button>}
-          <button className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>setShowRecycleBin(true)}>🗑️ Recycle Bin</button>
+          {isAdmin && <button className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>setShowRecycleBin(true)}>🗑️ Recycle Bin</button>}
           <button
             onClick={() => setShowRenewed(v => !v)}
             className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
@@ -1500,7 +1514,7 @@ Wealth Management & Insurance Advisory
         </div>
       )}
       {/* Bulk delete bar */}
-      {someSelected && (
+      {isAdmin && someSelected && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-xl px-4 py-3">
           <span className="text-sm font-semibold text-red-700 dark:text-red-300">{selectedIds.size} policies selected</span>
           <button onClick={()=>setBulkDelOpen(true)} className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">🗑️ Delete Selected</button>

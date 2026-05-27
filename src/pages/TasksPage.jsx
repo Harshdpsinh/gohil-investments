@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
+import { useAuth }     from '../hooks/useAuth'
 import {
   subscribeTasks, addTask, updateTask, deleteTask,
   TASK_PRIORITIES, TASK_TYPES
@@ -9,6 +10,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import { fmtDate, parseAnyDate } from '../utils/dateUtils'
+import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 import { differenceInDays } from 'date-fns'
 
@@ -76,7 +78,10 @@ function TaskForm({ initial, clients, policies, onSave, onCancel }) {
 
   const onSubmit = async () => {
     if (!form.title.trim()) { toast.error('Task title is required'); return }
+    if (form.title.trim().length > 120) { toast.error('Task title must be 120 characters or less'); return }
     if (!form.dueDate)       { toast.error('Due date is required');   return }
+    if (!parseAnyDate(form.dueDate)) { toast.error('Due date must be valid'); return }
+    if (form.policyId && !form.clientId) { toast.error('Select a client before linking a policy'); return }
     setSaving(true)
     try { await onSave(form) }
     finally { setSaving(false) }
@@ -123,7 +128,7 @@ function TaskForm({ initial, clients, policies, onSave, onCancel }) {
 }
 
 // ── Task Card ─────────────────────────────────────────────────
-function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp }) {
+function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp, canDelete }) {
   // urgency is precomputed in the filtered useMemo — no double parse here
   const urgency  = task._urgency || taskUrgency(task.dueDate)
   const daysLeft = task.dueDate
@@ -168,7 +173,9 @@ function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp }) {
           <div className="flex flex-col gap-1">
             <button onClick={()=>onEdit(task)}    className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
             {task.clientId && onWhatsApp && <button onClick={()=>onWhatsApp(task)} className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">📱</button>}
-            <button onClick={()=>onDelete(task)}  className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+            {canDelete && (
+              <button onClick={()=>onDelete(task)}  className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+            )}
           </div>
         </div>
       </div>
@@ -180,6 +187,7 @@ function TaskCard({ task, onToggle, onEdit, onDelete, onWhatsApp }) {
 export default function TasksPage() {
   const { clients }  = useClients()
   const { policies } = usePolicies()
+  const { isAdmin }  = useAuth()
   const [tasks,    setTasks]    = useState([])
   const [loading,  setLoading]  = useState(true)
   const [search,   setSearch]   = useState('')
@@ -190,7 +198,13 @@ export default function TasksPage() {
   const [delOpen,  setDelOpen]  = useState(false)
 
   useEffect(() => {
-    const unsub = subscribeTasks(data => { setTasks(data); setLoading(false) })
+    const unsub = subscribeTasks(
+      data => { setTasks(data); setLoading(false) },
+      err => {
+        toast.error('Could not load tasks: ' + (err.message || 'Unknown error'))
+        setLoading(false)
+      }
+    )
     return unsub
   }, [])
 
@@ -241,6 +255,27 @@ export default function TasksPage() {
       client = clients.find(c => c.name.toLowerCase().trim() === (task.clientName||'').toLowerCase().trim())
     }
     const mobile = (client?.mobile||'').replace(/\D/g,'')
+    if (!mobile) {
+      toast.error('No mobile for ' + (task.clientName || 'client') + ' - add it in Clients page')
+      return
+    }
+    const safeMsg =
+      `Dear ${task.clientName || 'Client'},\n\n` +
+      `This is a reminder regarding: ${task.title}\n` +
+      `${task.dueDate ? `Due date: ${fmtDate(task.dueDate)}\n` : ''}` +
+      `${task.policyNumber ? `Policy: ${task.policyNumber}\n` : ''}\n` +
+      `Please feel free to contact us at your earliest convenience.\n\n` +
+      `Gohil Investments\n` +
+      `Wealth Management & Insurance Advisory\n` +
+      `Harshdipsinh Gohil - 7698997894\n` +
+      `Pradipsinh Gohil - 9426204547\n` +
+      `Bhavnagar, Gujarat`
+    try {
+      openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+    return
     if (!mobile) { toast.error('No mobile for ' + (task.clientName||'client') + ' — add it in Clients page'); return }
     const typeIcon = task.type === 'Call' ? '📞' : task.type === 'Meeting' ? '🤝' : '📋'
     const msg = encodeURIComponent(
@@ -321,6 +356,7 @@ Wealth Management & Insurance Advisory
               onEdit={t=>{ setSelected(t); setModal('edit') }}
               onDelete={t=>{ setSelected(t); setDelOpen(true) }}
               onWhatsApp={openWhatsApp}
+              canDelete={isAdmin}
             />
           ))
         }

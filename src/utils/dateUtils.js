@@ -96,6 +96,7 @@ export function frequencyDays(frequency) {
 export function computeNextPremiumDue(startDate, frequency) {
   const start = parseAnyDate(startDate)
   if (!start) return null
+  if (start.getTime() > Date.now()) return start
   const intervalMs = frequencyDays(frequency) * 86400000
   const today      = Date.now()
   const elapsed    = Math.floor((today - start.getTime()) / intervalMs)
@@ -108,4 +109,19 @@ export function daysUntilPremium(startDate, frequency) {
   const next = computeNextPremiumDue(startDate, frequency)
   if (!next) return null
   return Math.ceil((next - new Date()) / (1000 * 60 * 60 * 24))
+}
+
+export function getDueDate(policy) {
+  if (!policy) return ''
+  const storedDue = toInputDate(policy.nextPremiumDue)
+  if (storedDue) return storedDue
+  const computedDue = computeNextPremiumDue(policy.startDate, policy.frequency)
+  if (computedDue) return toInputDate(computedDue)
+  return toInputDate(policy.expiryDate)
+}
+
+export function daysUntilPolicyDue(policy) {
+  const due = parseAnyDate(getDueDate(policy))
+  if (!due) return null
+  return differenceInDays(due, new Date())
 }

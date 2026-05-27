@@ -2,10 +2,10 @@
 import {
   collection, doc, addDoc, getDoc, getDocs, updateDoc,
   deleteDoc, query, where, orderBy, serverTimestamp,
-  onSnapshot, writeBatch, setDoc, limit
+  onSnapshot, writeBatch, setDoc, limit, runTransaction
 } from 'firebase/firestore'
 import { db } from './config'
-import { computeNextPremiumDue } from '../utils/dateUtils'
+import { computeNextPremiumDue, normaliseFrequency } from '../utils/dateUtils'
 
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
@@ -31,8 +31,50 @@ export async function getAllUsers() {
 // ── CLIENTS ───────────────────────────────────────────────────
 export const clientsRef = () => collection(db, CLIENTS)
 
+const CLIENT_KYC_OPTIONS = ['Pending', 'In Progress', 'Complete']
+const CLIENT_GENDER_OPTIONS = ['Male', 'Female', 'Other']
+
+function normaliseClientPayload(data, { partial = false } = {}) {
+  const next = { ...data }
+
+  if (!partial || next.name !== undefined) next.name = assertString(next.name, 'Client name', 120)
+  if (next.email !== undefined) {
+    assertOptionalEmail(next.email)
+    next.email = String(next.email || '').trim().toLowerCase()
+  }
+  if (next.mobile !== undefined) {
+    assertOptionalMobile(next.mobile)
+    next.mobile = String(next.mobile || '').trim()
+  }
+  if (next.dob !== undefined) assertOptionalDate(next.dob, 'Date of birth')
+  if (next.gender) assertInList(next.gender, CLIENT_GENDER_OPTIONS, 'Gender')
+  if (next.kycStatus) assertInList(next.kycStatus, CLIENT_KYC_OPTIONS, 'KYC status')
+  if (next.income !== undefined) assertOptionalNumber(next.income, 'Annual income')
+
+  if (next.pan) {
+    next.pan = String(next.pan).trim().toUpperCase()
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(next.pan)) {
+      throw new Error('PAN must be in format ABCDE1234F.')
+    }
+  }
+  if (next.aadhar) {
+    const digits = String(next.aadhar).replace(/\D/g, '')
+    if (digits.length !== 12) throw new Error('Aadhar must contain exactly 12 digits.')
+    next.aadhar = digits
+  }
+
+  ;['address', 'city', 'state', 'occupation', 'employment', 'qualification', 'designation', 'notes'].forEach(field => {
+    if (next[field] !== undefined && next[field] !== null) {
+      next[field] = String(next[field]).trim()
+    }
+  })
+
+  return cleanFirestoreData(next)
+}
+
 export async function addClient(data) {
-  return addDoc(clientsRef(), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  const payload = normaliseClientPayload(data)
+  return addDoc(clientsRef(), { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
 }
 export async function getClient(id) {
   const s = await getDoc(doc(db,CLIENTS,id))
@@ -43,7 +85,16 @@ export async function getAllClients() {
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
 }
 export async function updateClient(id, data) {
-  return updateDoc(doc(db,CLIENTS,id), { ...data, updatedAt: serverTimestamp() })
+  const payload = normaliseClientPayload(data, { partial: true })
+  return updateDoc(doc(db,CLIENTS,id), { ...payload, updatedAt: serverTimestamp() })
+}
+
+async function deleteRefsInChunks(refs) {
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = writeBatch(db)
+    refs.slice(i, i + 400).forEach(ref => batch.delete(ref))
+    await batch.commit()
+  }
 }
 
 /**
@@ -53,6 +104,8 @@ export async function updateClient(id, data) {
  * 400 to stay well under Firestore's 500-write-per-batch limit.
  */
 export async function cascadeUpdateClient(id, data) {
+  const payload = normaliseClientPayload(data, { partial: true })
+
   async function commitInChunks(pairs) {
     for (let i = 0; i < pairs.length; i += 400) {
       const b = writeBatch(db)
@@ -62,12 +115,12 @@ export async function cascadeUpdateClient(id, data) {
   }
 
   const clientBatch = writeBatch(db)
-  clientBatch.update(doc(db, CLIENTS, id), { ...data, updatedAt: serverTimestamp() })
+  clientBatch.update(doc(db, CLIENTS, id), { ...payload, updatedAt: serverTimestamp() })
   await clientBatch.commit()
 
-  const hasName   = !!data.name
-  const hasMobile = data.mobile !== undefined
-  const hasEmail  = data.email  !== undefined
+  const hasName   = !!payload.name
+  const hasMobile = payload.mobile !== undefined
+  const hasEmail  = payload.email  !== undefined
 
   if (hasName || hasMobile || hasEmail) {
     const [pols, cls, tsk] = await Promise.all([
@@ -78,20 +131,20 @@ export async function cascadeUpdateClient(id, data) {
 
     const polPairs = pols.docs.map(d => {
       const upd = { updatedAt: serverTimestamp() }
-      if (hasName)   upd.clientName   = data.name
-      if (hasMobile) upd.clientMobile = data.mobile
-      if (hasEmail)  upd.clientEmail  = data.email
+      if (hasName)   upd.clientName   = payload.name
+      if (hasMobile) upd.clientMobile = payload.mobile
+      if (hasEmail)  upd.clientEmail  = payload.email
       return { ref: d.ref, upd }
     })
     const clsPairs = cls.docs.map(d => {
       const upd = { updatedAt: serverTimestamp() }
-      if (hasName)   upd.clientName   = data.name
-      if (hasMobile) upd.clientMobile = data.mobile
+      if (hasName)   upd.clientName   = payload.name
+      if (hasMobile) upd.clientMobile = payload.mobile
       return { ref: d.ref, upd }
     })
     const tskPairs = tsk.docs.map(d => {
       const upd = { updatedAt: serverTimestamp() }
-      if (hasName) upd.clientName = data.name
+      if (hasName) upd.clientName = payload.name
       return { ref: d.ref, upd }
     })
 
@@ -100,30 +153,40 @@ export async function cascadeUpdateClient(id, data) {
 }
 
 export async function deleteClient(id) {
-  const pols = await getDocs(query(collection(db,POLICIES), where('clientId','==',id)))
-  const batch = writeBatch(db)
-  pols.docs.forEach(d => batch.delete(d.ref))
-  batch.delete(doc(db,CLIENTS,id))
-  return batch.commit()
+  const [pols, cls, tsk, docs] = await Promise.all([
+    getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
+    getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
+    getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
+    getDocs(collection(db, CLIENTS, id, DOCS_META)),
+  ])
+
+  await deleteRefsInChunks([
+    ...pols.docs.map(d => d.ref),
+    ...cls.docs.map(d => d.ref),
+    ...tsk.docs.map(d => d.ref),
+    ...docs.docs.map(d => d.ref),
+    doc(db, CLIENTS, id),
+  ])
 }
 
 export async function bulkDeleteClients(ids) {
-  const allPolicyRefs = []
+  const allRefs = []
   for (const id of ids) {
-    const pols = await getDocs(query(collection(db, POLICIES), where('clientId', '==', id)))
-    pols.docs.forEach(d => allPolicyRefs.push(d.ref))
+    const [pols, cls, tsk, docs] = await Promise.all([
+      getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
+      getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
+      getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
+      getDocs(collection(db, CLIENTS, id, DOCS_META)),
+    ])
+    allRefs.push(
+      ...pols.docs.map(d => d.ref),
+      ...cls.docs.map(d => d.ref),
+      ...tsk.docs.map(d => d.ref),
+      ...docs.docs.map(d => d.ref),
+      doc(db, CLIENTS, id),
+    )
   }
-  const allRefs = [
-    ...ids.map(id => doc(db, CLIENTS, id)),
-    ...allPolicyRefs,
-  ]
-  const chunks = []
-  for (let i = 0; i < allRefs.length; i += 400) chunks.push(allRefs.slice(i, i + 400))
-  for (const chunk of chunks) {
-    const batch = writeBatch(db)
-    chunk.forEach(ref => batch.delete(ref))
-    await batch.commit()
-  }
+  await deleteRefsInChunks(allRefs)
 }
 
 // ── CLIMER — CLIENT MERGER MODULE ─────────────────────────────
@@ -246,6 +309,9 @@ export async function findClientByMobileOrName(mobile, name) {
 
 // ── POLICIES ──────────────────────────────────────────────────
 export const policiesRef = () => collection(db, POLICIES)
+const POLICY_TYPES = ['Health','Life','Motor','Home','Travel','Marine','Fire','Other']
+const POLICY_STATUSES = ['Active','Lapsed','Cancelled','Matured','Renewed-Out']
+const POLICY_FREQUENCIES = ['Yearly','Half-Yearly','Quarterly','Monthly']
 
 // computeNextPremiumDue is now imported from '../utils/dateUtils' above.
 // Call sites use: computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
@@ -253,17 +319,122 @@ function _nextDueStr(startDate, frequency) {
   return computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
 }
 
+function cleanFirestoreData(data) {
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined)
+  )
+}
+
+function assertPolicyDateOrder(startDate, expiryDate) {
+  if (!startDate) throw new Error('Start date is required.')
+  if (!expiryDate) throw new Error('Expiry date is required.')
+  if (new Date(expiryDate) <= new Date(startDate)) {
+    throw new Error('Expiry date must be after start date.')
+  }
+}
+
+async function assertUniquePolicyNumber(policyNumber, currentId = null) {
+  const number = String(policyNumber || '').trim()
+  if (!number) return
+  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', number), limit(5)))
+  const duplicate = s.docs.find(d => d.id !== currentId && !d.data().deleted)
+  if (duplicate) throw new Error(`Policy number "${number}" already exists.`)
+}
+
+function normalisePolicyPayload(data, { partial = false } = {}) {
+  const next = { ...data }
+
+  if (!partial || next.policyNumber !== undefined) {
+    next.policyNumber = assertString(next.policyNumber, 'Policy number', 80)
+  }
+  if (!partial || next.clientId !== undefined) {
+    if (!next.clientId) throw new Error('Client is required.')
+  }
+  if (next.clientName !== undefined) next.clientName = String(next.clientName || '').trim()
+  if (!partial && next.policyType === undefined) next.policyType = 'Health'
+  if (!partial && next.status === undefined) next.status = 'Active'
+  if (!partial && next.frequency === undefined) next.frequency = 'Yearly'
+  if (next.policyType !== undefined) assertInList(next.policyType, POLICY_TYPES, 'Policy type')
+  if (next.status !== undefined) assertInList(next.status || 'Active', POLICY_STATUSES, 'Policy status')
+  if (next.frequency !== undefined) {
+    next.frequency = normaliseFrequency(next.frequency)
+    assertInList(next.frequency, POLICY_FREQUENCIES, 'Premium frequency')
+  }
+  if (next.insurer !== undefined && next.insurer !== null) next.insurer = String(next.insurer).trim()
+  if (!partial && !next.insurer) throw new Error('Insurer is required.')
+
+  assertOptionalNumber(next.premium, 'Premium', { min: 1, max: 1000000000 })
+  assertOptionalNumber(next.fyCommission, 'FY commission', { min: 0, max: 100 })
+  assertOptionalNumber(next.ryCommission, 'RY commission', { min: 0, max: 100 })
+  assertOptionalNumber(next.sumInsured, 'Sum insured')
+  assertOptionalNumber(next.sumAssured, 'Sum assured')
+  assertOptionalNumber(next.idv, 'IDV')
+  assertOptionalDate(next.startDate, 'Start date')
+  assertOptionalDate(next.expiryDate, 'Expiry date')
+
+  ;['planName', 'nominee', 'nomineeRelation', 'registrationNo', 'notes'].forEach(field => {
+    if (next[field] !== undefined && next[field] !== null) next[field] = String(next[field]).trim()
+  })
+  if (next.registrationNo) next.registrationNo = next.registrationNo.toUpperCase()
+
+  return cleanFirestoreData(next)
+}
+
+function assertString(value, label, max = 200) {
+  const text = String(value || '').trim()
+  if (!text) throw new Error(`${label} is required.`)
+  if (text.length > max) throw new Error(`${label} must be ${max} characters or less.`)
+  return text
+}
+
+function assertOptionalNumber(value, label, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (value === undefined || value === null || value === '') return
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < min || n > max) {
+    throw new Error(`${label} must be between ${min} and ${max}.`)
+  }
+}
+
+function assertOptionalDate(value, label) {
+  if (!value) return
+  if (Number.isNaN(new Date(value).getTime())) throw new Error(`${label} must be a valid date.`)
+}
+
+function assertInList(value, allowed, label) {
+  if (!allowed.includes(value)) {
+    throw new Error(`${label} must be one of: ${allowed.join(', ')}.`)
+  }
+}
+
+function assertOptionalEmail(email) {
+  if (!email) return
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+    throw new Error('Email address is not valid.')
+  }
+}
+
+function assertOptionalMobile(mobile) {
+  if (!mobile) return
+  const digits = String(mobile).replace(/\D/g, '')
+  if (digits.length < 10 || digits.length > 15) {
+    throw new Error('Mobile number must contain 10 to 15 digits.')
+  }
+}
+
 export async function addPolicy(data) {
-  const nextPremiumDue = _nextDueStr(data.startDate, data.frequency)
-  return addDoc(policiesRef(), {
-    ...data,
-    parentPolicyId: data.parentPolicyId || null,
-    policyYear:     data.policyYear     || 1,
+  const payload = normalisePolicyPayload(data)
+  assertPolicyDateOrder(payload.startDate, payload.expiryDate)
+  await assertUniquePolicyNumber(payload.policyNumber)
+  const nextPremiumDue = _nextDueStr(payload.startDate, payload.frequency)
+  return addDoc(policiesRef(), cleanFirestoreData({
+    ...payload,
+    parentPolicyId: payload.parentPolicyId || null,
+    policyYear:     payload.policyYear     || 1,
     nextPremiumDue: nextPremiumDue || null,
     renewedAt:      null,
     createdAt:      serverTimestamp(),
     updatedAt:      serverTimestamp()
-  })
+  }))
 }
 export async function getPolicy(id) {
   const s = await getDoc(doc(db,POLICIES,id))
@@ -274,11 +445,17 @@ export async function getAllPolicies() {
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
 }
 export async function updatePolicy(id, data) {
-  const update = { ...data, updatedAt: serverTimestamp() }
-  if (data.startDate || data.frequency) {
+  const payload = normalisePolicyPayload(data, { partial: true })
+  if ((data.startDate && data.expiryDate) || data.startDate || data.expiryDate) {
     const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
-    const start = data.startDate || existing.startDate
-    const freq  = data.frequency || existing.frequency
+    assertPolicyDateOrder(payload.startDate || existing.startDate, payload.expiryDate || existing.expiryDate)
+  }
+  if (payload.policyNumber !== undefined) await assertUniquePolicyNumber(payload.policyNumber, id)
+  const update = { ...payload, updatedAt: serverTimestamp() }
+  if (payload.startDate || payload.frequency) {
+    const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
+    const start = payload.startDate || existing.startDate
+    const freq  = payload.frequency || existing.frequency
     update.nextPremiumDue = _nextDueStr(start, freq) || null
   }
   return updateDoc(doc(db,POLICIES,id), update)
@@ -301,11 +478,11 @@ export async function bulkDeletePolicies(ids) {
   for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
   for (const chunk of chunks) {
     const batch = writeBatch(db)
-    chunk.forEach(id => batch.update(doc(db, POLICIES, id), {
+    chunk.forEach(id => batch.set(doc(db, POLICIES, id), {
       deleted:   true,
       deletedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }))
+    }, { merge: true }))
     await batch.commit()
   }
 }
@@ -335,12 +512,14 @@ export async function checkDuplicate(data) {
   const { policyNumber, clientName, premium, insurer, registrationNo } = data
 
   if (policyNumber?.trim()) {
-    const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
-    if (!s.empty) return { isDup: true, reason: `Policy number "${policyNumber}" already exists`, existing: { id: s.docs[0].id, ...s.docs[0].data() } }
+    const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(5)))
+    const match = s.docs.find(d => !d.data().deleted)
+    if (match) return { isDup: true, reason: `Policy number "${policyNumber}" already exists`, existing: { id: match.id, ...match.data() } }
   }
   if (registrationNo?.trim()) {
-    const s = await getDocs(query(policiesRef(), where('registrationNo', '==', registrationNo.trim()), limit(1)))
-    if (!s.empty) return { isDup: true, reason: `Registration number "${registrationNo}" already exists`, existing: { id: s.docs[0].id, ...s.docs[0].data() } }
+    const s = await getDocs(query(policiesRef(), where('registrationNo', '==', registrationNo.trim()), limit(5)))
+    const match = s.docs.find(d => !d.data().deleted)
+    if (match) return { isDup: true, reason: `Registration number "${registrationNo}" already exists`, existing: { id: match.id, ...match.data() } }
   }
   if (clientName?.trim() && premium && insurer?.trim()) {
     const s = await getDocs(query(policiesRef(),
@@ -357,10 +536,10 @@ export async function checkDuplicate(data) {
   return { isDup: false, reason: '', existing: null }
 }
 
-export async function checkDuplicatePolicyNumber(policyNumber) {
+export async function checkDuplicatePolicyNumber(policyNumber, currentId = null) {
   if (!policyNumber?.trim()) return false
-  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(1)))
-  return !s.empty
+  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(5)))
+  return s.docs.some(d => d.id !== currentId && !d.data().deleted)
 }
 
 // FIX BUG 2: error callback added
@@ -384,7 +563,8 @@ export async function savePolicyPdfUrl(policyId, url, name) {
  * saveRenewal(oldPolicyId, newData)
  *
  * Atomically closes the old policy term and creates the renewed one
- * in a single writeBatch — if either write fails, both are rolled back.
+ * in a transaction. The deterministic child ID prevents duplicate renewed
+ * policies if the user double-clicks or the request is retried.
  *
  * newData must include:
  *   - newPolicyNumber  {string}  — new policy number (blank = keep same)
@@ -394,43 +574,74 @@ export async function savePolicyPdfUrl(policyId, url, name) {
  *   - ...all other policy fields to carry forward
  */
 export async function saveRenewal(oldPolicyId, newData) {
-  const old = await getPolicy(oldPolicyId)
-  if (!old) throw new Error('Original policy not found')
+  const oldRef = doc(db, POLICIES, oldPolicyId)
+  const newRef = doc(db, POLICIES, `${oldPolicyId}_renewal`)
 
-  const batch = writeBatch(db)
+  assertPolicyDateOrder(newData.startDate, newData.expiryDate)
+  const requestedPolicyNumber = (newData.newPolicyNumber || '').trim()
+  if (requestedPolicyNumber) {
+    const dupSnap = await getDocs(query(policiesRef(), where('policyNumber', '==', requestedPolicyNumber), limit(5)))
+    const duplicate = dupSnap.docs.find(d => d.id !== oldPolicyId && d.id !== newRef.id && !d.data().deleted)
+    if (duplicate) {
+      throw new Error(`Policy number "${requestedPolicyNumber}" already exists. Use a unique renewal policy number or leave it blank to keep the existing number.`)
+    }
+  }
 
-  // STEP A: Close the old policy record
-  batch.update(doc(db, POLICIES, oldPolicyId), {
-    status:                'Renewed-Out',
-    is_renewed:            true,
-    renewedAt:             serverTimestamp(),
-    renewedToPolicyNumber: (newData.newPolicyNumber || newData.policyNumber || '').trim(),
-    updatedAt:             serverTimestamp(),
+  return runTransaction(db, async tx => {
+    const oldSnap = await tx.get(oldRef)
+    if (!oldSnap.exists()) throw new Error('Original policy not found.')
+
+    const old = { id: oldSnap.id, ...oldSnap.data() }
+    if ((old.status || '').trim() === 'Renewed-Out' || old.is_renewed) {
+      throw new Error('This policy has already been renewed. Refresh the page to see the new policy.')
+    }
+
+    const existingNewSnap = await tx.get(newRef)
+    if (existingNewSnap.exists()) {
+      throw new Error('A renewal record already exists for this policy. Refresh the page before trying again.')
+    }
+
+    const { newPolicyNumber, id, renewedAt, renewedToPolicyNumber, deleted, deletedAt, ...restData } = newData
+    const policyNumber = (newPolicyNumber || restData.policyNumber || old.policyNumber || '').trim()
+    if (!policyNumber) throw new Error('New policy number is required.')
+    if (!restData.clientId) throw new Error('Renewal must be linked to a client.')
+
+    const policyPayload = normalisePolicyPayload({
+      ...restData,
+      policyNumber,
+      status: 'Active',
+    })
+    assertPolicyDateOrder(policyPayload.startDate, policyPayload.expiryDate)
+    const newNextPremiumDue = _nextDueStr(policyPayload.startDate, policyPayload.frequency)
+
+    tx.update(oldRef, {
+      status:                'Renewed-Out',
+      is_renewed:            true,
+      renewedAt:             serverTimestamp(),
+      renewedToPolicyId:     newRef.id,
+      renewedToPolicyNumber: policyNumber,
+      updatedAt:             serverTimestamp(),
+    })
+
+    tx.set(newRef, cleanFirestoreData({
+      ...policyPayload,
+      parentPolicyId:       oldPolicyId,
+      renewedFromPolicyId:  oldPolicyId,
+      policyYear:           (old.policyYear || 1) + 1,
+      nextPremiumDue:       newNextPremiumDue || null,
+      status:               'Active',
+      is_renewed:           false,
+      renewedAt:            null,
+      renewedToPolicyId:    null,
+      renewedToPolicyNumber:null,
+      deleted:              false,
+      deletedAt:            null,
+      createdAt:            serverTimestamp(),
+      updatedAt:            serverTimestamp(),
+    }))
+
+    return newRef
   })
-
-  // STEP B: Compute nextPremiumDue for the new term from new startDate
-  const newNextPremiumDue = _nextDueStr(newData.startDate, newData.frequency)
-
-  // STEP C: Strip the UI-only field; DB field is 'policyNumber'
-  const { newPolicyNumber, ...restData } = newData
-
-  // STEP D: Create the new policy document
-  const newRef = doc(collection(db, POLICIES))
-  batch.set(newRef, {
-    ...restData,
-    policyNumber:   (newPolicyNumber || restData.policyNumber || '').trim(),
-    parentPolicyId: oldPolicyId,
-    policyYear:     (old.policyYear || 1) + 1,
-    nextPremiumDue: newNextPremiumDue || null,
-    status:         'Active',
-    is_renewed:     false,
-    renewedAt:      null,
-    createdAt:      serverTimestamp(),
-    updatedAt:      serverTimestamp(),
-  })
-
-  await batch.commit()
-  return newRef
 }
 
 export async function getPolicyChain(policyId) {
@@ -442,15 +653,49 @@ export async function getPolicyChain(policyId) {
 
 // ── PROPOSALS ─────────────────────────────────────────────────
 export const proposalsRef = () => collection(db, PROPOSALS)
+function normaliseProposalPayload(data, { partial = false } = {}) {
+  const next = { ...data }
+  if (!partial || next.proposerName !== undefined) next.proposerName = assertString(next.proposerName, 'Proposer name', 120)
+  if (next.email !== undefined && next.email !== '') {
+    next.email = String(next.email).trim().toLowerCase()
+    assertOptionalEmail(next.email)
+  }
+  if (next.mobile !== undefined && next.mobile !== '') {
+    const digits = String(next.mobile).replace(/\D/g, '')
+    const national = digits.startsWith('91') && digits.length > 10
+      ? digits.slice(2)
+      : digits.startsWith('0') && digits.length === 11
+        ? digits.slice(1)
+        : digits
+    if (national.length !== 10 || !/^[6-9]\d{9}$/.test(national)) {
+      throw new Error('Mobile number must be a valid 10 digit Indian number.')
+    }
+    next.mobile = national
+  }
+  if (next.pan !== undefined && next.pan !== '') {
+    next.pan = String(next.pan).trim().toUpperCase()
+    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(next.pan)) throw new Error('PAN number is not valid.')
+  }
+  if (next.aadhar !== undefined && next.aadhar !== '') {
+    next.aadhar = String(next.aadhar).replace(/\D/g, '')
+    if (!/^\d{12}$/.test(next.aadhar)) throw new Error('Aadhaar number must contain exactly 12 digits.')
+  }
+  assertOptionalNumber(next.premium, 'Premium', { min: 1 })
+  assertOptionalNumber(next.sumAssured, 'Sum insured')
+  assertOptionalNumber(next.income, 'Annual income')
+  return next
+}
 export async function addProposal(data) {
-  return addDoc(proposalsRef(), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  const payload = normaliseProposalPayload(data)
+  return addDoc(proposalsRef(), cleanFirestoreData({ ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
 }
 export async function getAllProposals() {
   const s = await getDocs(query(proposalsRef(), orderBy('createdAt','desc')))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
 }
 export async function updateProposal(id, data) {
-  return updateDoc(doc(db,PROPOSALS,id), { ...data, updatedAt: serverTimestamp() })
+  const payload = normaliseProposalPayload(data, { partial: true })
+  return updateDoc(doc(db,PROPOSALS,id), cleanFirestoreData({ ...payload, updatedAt: serverTimestamp() }))
 }
 export async function deleteProposal(id) { return deleteDoc(doc(db,PROPOSALS,id)) }
 
@@ -482,10 +727,29 @@ export const CLAIM_STATUSES = [
 ]
 export const claimsRef = () => collection(db, CLAIMS)
 export async function addClaim(data) {
-  return addDoc(claimsRef(), { ...data, status: data.status || 'Intimated', createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  if (!data.clientId && !data.clientName?.trim()) throw new Error('Claim must be linked to a client.')
+  if (!data.policyId && !data.insurer?.trim()) throw new Error('Claim must have a policy or insurer.')
+  const status = data.status || 'Intimated'
+  assertInList(status, CLAIM_STATUSES, 'Claim status')
+  assertOptionalDate(data.intimationDate, 'Intimation date')
+  assertOptionalDate(data.incidentDate, 'Incident date')
+  assertOptionalNumber(data.claimedAmount, 'Claimed amount')
+  assertOptionalNumber(data.approvedAmount, 'Approved amount')
+  if (data.claimedAmount && data.approvedAmount && Number(data.approvedAmount) > Number(data.claimedAmount)) {
+    throw new Error('Approved amount cannot be greater than claimed amount.')
+  }
+  return addDoc(claimsRef(), cleanFirestoreData({ ...data, status, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
 }
 export async function updateClaim(id, data) {
-  return updateDoc(doc(db,CLAIMS,id), { ...data, updatedAt: serverTimestamp() })
+  if (data.status !== undefined) assertInList(data.status, CLAIM_STATUSES, 'Claim status')
+  assertOptionalDate(data.intimationDate, 'Intimation date')
+  assertOptionalDate(data.incidentDate, 'Incident date')
+  assertOptionalNumber(data.claimedAmount, 'Claimed amount')
+  assertOptionalNumber(data.approvedAmount, 'Approved amount')
+  if (data.claimedAmount && data.approvedAmount && Number(data.approvedAmount) > Number(data.claimedAmount)) {
+    throw new Error('Approved amount cannot be greater than claimed amount.')
+  }
+  return updateDoc(doc(db,CLAIMS,id), cleanFirestoreData({ ...data, updatedAt: serverTimestamp() }))
 }
 export async function deleteClaim(id) { return deleteDoc(doc(db,CLAIMS,id)) }
 
@@ -507,10 +771,20 @@ export const TASK_PRIORITIES = ['High','Medium','Low']
 export const TASK_TYPES      = ['Call','Email','Meeting','Follow-up','Document Collection','Other']
 export const tasksRef = () => collection(db, TASKS)
 export async function addTask(data) {
-  return addDoc(tasksRef(), { ...data, done: false, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+  const title = assertString(data.title, 'Task title')
+  assertInList(data.type || 'Call', TASK_TYPES, 'Task type')
+  assertInList(data.priority || 'Medium', TASK_PRIORITIES, 'Task priority')
+  assertOptionalDate(data.dueDate, 'Due date')
+  if (data.policyId && !data.clientId) throw new Error('A policy-linked task must also be linked to a client.')
+  return addDoc(tasksRef(), cleanFirestoreData({ ...data, title, done: false, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
 }
 export async function updateTask(id, data) {
-  return updateDoc(doc(db,TASKS,id), { ...data, updatedAt: serverTimestamp() })
+  if (data.title !== undefined) data.title = assertString(data.title, 'Task title')
+  if (data.type !== undefined) assertInList(data.type, TASK_TYPES, 'Task type')
+  if (data.priority !== undefined) assertInList(data.priority, TASK_PRIORITIES, 'Task priority')
+  assertOptionalDate(data.dueDate, 'Due date')
+  if (data.policyId && !data.clientId) throw new Error('A policy-linked task must also be linked to a client.')
+  return updateDoc(doc(db,TASKS,id), cleanFirestoreData({ ...data, updatedAt: serverTimestamp() }))
 }
 export async function deleteTask(id) { return deleteDoc(doc(db,TASKS,id)) }
 

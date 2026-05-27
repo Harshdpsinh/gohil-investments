@@ -10,7 +10,8 @@ import { useAuth }      from '../hooks/useAuth'
 import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
 } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, toInputDate, daysUntilPremium, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import toast from 'react-hot-toast'
@@ -21,7 +22,7 @@ import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
 // UTILS
 // ─────────────────────────────────────────────────────────────
 
-// getDays(p)    → daysUntilPremium(p.startDate, p.frequency) from dateUtils
+// getDays(p)    → daysUntilPolicyDue(p) from dateUtils
 // getDueDate(p) → getPolicyDueDate(p) from dateUtils
 // Both use parseAnyDate internally — handles malformed date strings from imports.
 
@@ -33,6 +34,15 @@ function getStatusInfo(days) {
   if (days <= 7)      return { label: 'Critical',  cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-300' }
   if (days <= 15)     return { label: 'Warning',   cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/60 dark:text-yellow-200' }
   return               { label: 'Active',    cls: 'bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300' }
+}
+
+function renewalErrorMessage(error) {
+  const message = error?.message || ''
+  if (message.includes('already been renewed') || message.includes('already exists')) return message
+  if (message.includes('permission-denied')) return 'You do not have permission to renew policies. Please contact an admin.'
+  if (message.includes('unavailable') || message.includes('network')) return 'Network problem while saving renewal. Please check your connection and try again.'
+  if (message.includes('date')) return message
+  return 'Renewal could not be saved. Please refresh and try again.'
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -98,6 +108,20 @@ function RenewModal({ policy, onConfirm, onClose }) {
   const handleSubmit = async () => {
     if (!form.startDate)  { toast.error('Start date required'); return }
     if (!form.expiryDate) { toast.error('Expiry date required'); return }
+    if (new Date(form.expiryDate) <= new Date(form.startDate)) {
+      toast.error('Expiry date must be after start date'); return
+    }
+    if (!(Number(form.premium) > 0)) {
+      toast.error('Premium must be greater than 0'); return
+    }
+    if (form.policyNumber && form.policyNumber.trim().length < 3) {
+      toast.error('Policy number must be at least 3 characters'); return
+    }
+    const fy = form.fyCommission === '' ? null : Number(form.fyCommission)
+    const ry = form.ryCommission === '' ? null : Number(form.ryCommission)
+    if ((fy !== null && (fy < 0 || fy > 100)) || (ry !== null && (ry < 0 || ry > 100))) {
+      toast.error('Commission percentages must be between 0 and 100'); return
+    }
     if (!companySame && !form.insurer.trim()) {
       toast.error('Please select the new insurance company'); return
     }
@@ -306,9 +330,30 @@ export default function RenewalsPage() {
     const mobile = client?.mobile?.replace(/\D/g, '')
     if (!mobile) { toast.error('No mobile number found for this client'); return }
 
+    {
+      const dueStr = getPolicyDueDate(policy)
+      const days = daysUntilPolicyDue(policy)
+      const urgency = days !== null && days >= 0 ? ` (${days} days remaining)` : ' - please renew urgently'
+      const msg =
+        `Dear ${policy.clientName},\n\n` +
+        `Your ${policy.policyType || 'Insurance'} policy (${policy.policyNumber}) with ${policy.insurer || 'your insurer'} ` +
+        `is due for renewal${dueStr ? ` on ${fmtDate(dueStr)}` : ''}${urgency}.\n\n` +
+        `Premium: ${fmtCurrency(policy.premium || 0)}\n\n` +
+        `Please contact us to renew.\n\n` +
+        `Gohil Investments\nWealth Management & Insurance Advisory\n` +
+        `Harshdipsinh Gohil - 7698997894\n` +
+        `Pradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`
+      try {
+        openWhatsAppLink({ mobile: client?.mobile, message: msg })
+      } catch (err) {
+        toast.error(err.message)
+      }
+      return
+    }
+
     // ✅ FIX R3: use correct due date per frequency
     const dueStr = getPolicyDueDate(policy)
-    const days   = daysUntilPremium(policy.startDate, policy.frequency)
+    const days   = daysUntilPolicyDue(policy)
 
     const msg = encodeURIComponent(
       `Dear ${policy.clientName},\n\n` +
@@ -345,7 +390,7 @@ export default function RenewalsPage() {
         if (dateTo   && dueDate > new Date(dateTo))   return false
 
         // Day window filter
-        const d = daysUntilPremium(p.startDate, p.frequency)
+        const d = daysUntilPolicyDue(p)
         // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
         if (dayWindow === -1) {
           if (d === null || d >= 0) return false
@@ -367,14 +412,14 @@ export default function RenewalsPage() {
 
         return true
       })
-      .sort((a, b) => (daysUntilPremium(a.startDate, a.frequency) ?? 9999) - (daysUntilPremium(b.startDate, b.frequency) ?? 9999))
+      .sort((a, b) => (daysUntilPolicyDue(a) ?? 9999) - (daysUntilPolicyDue(b) ?? 9999))
   }, [policies, search, dayWindow, dateFrom, dateTo, policyTab])
 
   // ─── Summary stats ────────────────────────────────────────────
   const stats = useMemo(() => {
-    const overdue  = filtered.filter(p => (daysUntilPremium(p.startDate, p.frequency) ?? 1) < 0).length
-    const dueToday = filtered.filter(p => daysUntilPremium(p.startDate, p.frequency) === 0).length
-    const critical = filtered.filter(p => { const d = daysUntilPremium(p.startDate, p.frequency); return d !== null && d > 0 && d <= 7 }).length
+    const overdue  = filtered.filter(p => (daysUntilPolicyDue(p) ?? 1) < 0).length
+    const dueToday = filtered.filter(p => daysUntilPolicyDue(p) === 0).length
+    const critical = filtered.filter(p => { const d = daysUntilPolicyDue(p); return d !== null && d > 0 && d <= 7 }).length
     const totalPremium = filtered.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
     return { overdue, dueToday, critical, totalPremium }
   }, [filtered])
@@ -400,9 +445,9 @@ export default function RenewalsPage() {
           p.policyType || 'Health',
           p.insurer || '—',
           fmtDate(getPolicyDueDate(p)),
-          daysUntilPremium(p.startDate, p.frequency) ?? '—',
+          daysUntilPolicyDue(p) ?? '—',
           Number(p.premium || 0).toLocaleString('en-IN'),
-          getStatusInfo(daysUntilPremium(p.startDate, p.frequency)).label,
+          getStatusInfo(daysUntilPolicyDue(p)).label,
         ]
       }),
       styles:     { fontSize: 8 },
@@ -423,7 +468,7 @@ export default function RenewalsPage() {
 
     try {
       // Build new policy payload.
-      // saveRenewal handles automatically: parentPolicyId, policyYear,
+      // saveRenewal handles automatically and transactionally: parentPolicyId, policyYear,
       // nextPremiumDue (from startDate + frequency), status, is_renewed,
       // renewedAt, createdAt, updatedAt — all in a single atomic writeBatch.
       const newData = {
@@ -466,7 +511,7 @@ export default function RenewalsPage() {
       toast.success(`✅ Renewed! New policy created for ${policy.clientName}`)
       setRenewModal(null)
     } catch (e) {
-      toast.error('Renewal failed: ' + e.message)
+      toast.error(renewalErrorMessage(e))
     } finally {
       submittingRef.current = false
       setSaving(false)
@@ -591,7 +636,7 @@ export default function RenewalsPage() {
               </tr>
             ) : (
               filtered.map((p, i) => {
-                const days = daysUntilPremium(p.startDate, p.frequency)
+                const days = daysUntilPolicyDue(p)
                 const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
                 const dueStr = getPolicyDueDate(p)
 

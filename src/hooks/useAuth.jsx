@@ -5,8 +5,10 @@ import {
   signOut as fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
+  getAuth,
 } from 'firebase/auth'
-import { auth } from '../firebase/config'
+import { initializeApp, getApp, getApps } from 'firebase/app'
+import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
 
 const AuthContext = createContext(null)
@@ -66,18 +68,40 @@ export function AuthProvider({ children }) {
     return fbSignOut(auth)
   }
 
-  async function createStaffAccount(email, password, name, role = 'staff') {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
-    // FIX #6: retry Firestore write so Auth user is never left without a role doc
-    let retries = 3
-    while (retries--) {
-      try {
-        await setUserRole(cred.user.uid, { email, role, name })
-        return cred
-      } catch (e) {
-        if (retries === 0) throw e
-        await new Promise(r => setTimeout(r, 800))
+  async function createStaffAccount(email, password, name, requestedRole = 'staff') {
+    if (role !== 'admin') {
+      throw new Error('Only admins can create staff accounts.')
+    }
+    const cleanEmail = String(email || '').trim().toLowerCase()
+    const cleanName = String(name || '').trim()
+    if (!cleanName) throw new Error('Name is required.')
+    if (!cleanEmail) throw new Error('Email is required.')
+    if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
+
+    const safeRole = requestedRole === 'admin' ? 'admin' : 'staff'
+    const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
+      ? getApp('staffAccountCreation')
+      : initializeApp(firebaseConfig, 'staffAccountCreation')
+    const secondaryAuth = getAuth(secondaryApp)
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
+    try {
+      // Keep the current admin signed into the CRM while the secondary Auth instance
+      // creates the new staff account.
+      await secondaryAuth.signOut()
+
+      let retries = 3
+      while (retries--) {
+        try {
+          await setUserRole(cred.user.uid, { email: cleanEmail, role: safeRole, name: cleanName })
+          return cred
+        } catch (e) {
+          if (retries === 0) throw e
+          await new Promise(r => setTimeout(r, 800))
+        }
       }
+    } catch (err) {
+      await secondaryAuth.signOut().catch(() => {})
+      throw err
     }
   }
 

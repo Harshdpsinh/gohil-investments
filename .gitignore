@@ -4,3 +4,6 @@ dist/
 .env.local
 .DS_Store
 *.log
+*token*.txt
+*uid*.txt
+node-*-x64.msi

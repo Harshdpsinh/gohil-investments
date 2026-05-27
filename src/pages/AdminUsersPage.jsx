@@ -19,30 +19,41 @@ export default function AdminUsersPage() {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const load = async () => {
+    if (!isAdmin) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    const list = await getAllUsers()
-    setUsers(list)
-    setLoading(false)
+    try {
+      const list = await getAllUsers()
+      setUsers(list)
+    } catch (err) {
+      toast.error(err.message || 'Could not load user accounts.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [isAdmin])
 
   const onCreateUser = async e => {
     e.preventDefault()
-    if (!form.name.trim())  { toast.error('Name is required'); return }
-    if (!form.email.trim()) { toast.error('Email is required'); return }
+    const cleanName = form.name.trim()
+    const cleanEmail = form.email.trim().toLowerCase()
+    if (!cleanName)  { toast.error('Name is required'); return }
+    if (!cleanEmail) { toast.error('Email is required'); return }
     if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return }
     setSaving(true)
     try {
       // ✅ FIX A1: pass form.role as 4th argument
-      await createStaffAccount(form.email, form.password, form.name, form.role)
-      toast.success(`Account created for ${form.name} (${form.role})`)
+      await createStaffAccount(cleanEmail, form.password, cleanName, form.role)
+      toast.success(`Account created for ${cleanName} (${form.role})`)
       setForm({ name: '', email: '', password: '', role: 'staff' })
       setShowForm(false)
       await load()
     } catch (err) {
       if (err.code === 'auth/email-already-in-use') toast.error('Email already in use')
-      else if (err.code === 'auth/weak-password')   toast.error('Password too weak (min 6 chars)')
+      else if (err.code === 'auth/weak-password')   toast.error('Password too weak (min 8 chars)')
       else toast.error(err.message)
     } finally { setSaving(false) }
   }
@@ -212,7 +223,7 @@ export default function AdminUsersPage() {
       <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-yellow-800">
         <p className="font-semibold mb-1">⚠️ Important</p>
         <p>• Accounts are created in Firebase Authentication. To <strong>delete</strong> an account, go to Firebase Console → Authentication → Users.</p>
-        <p>• The first account that ever logs in is automatically made <strong>Admin</strong>.</p>
+        <p>• New self-created role records default to <strong>Staff</strong>; create or promote Admin users from this page.</p>
         <p>• You can promote any staff member to Admin using the dropdown above.</p>
       </div>
     </div>
