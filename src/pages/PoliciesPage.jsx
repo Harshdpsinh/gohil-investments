@@ -8,7 +8,7 @@ import {
   savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
 } from '../firebase/firestore'
-import { uploadPolicyPdf } from '../firebase/storage'
+import { getDownloadUrl, uploadPolicyPdf } from '../firebase/storage'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
@@ -141,6 +141,8 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded }) {
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
           <a href={existingUrl} target="_blank" rel="noopener noreferrer"
              className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">📄 {existingName||'View PDF'}</a>
+          <a href={getDownloadUrl(existingUrl, existingName)} download={existingName || 'policy.pdf'}
+             className="text-xs text-blue-600 font-semibold hover:underline">Download</a>
           <span className="text-xs text-green-600 font-semibold">✅ Stored</span>
         </div>
       )}
@@ -1612,7 +1614,10 @@ Wealth Management & Insurance Advisory
                     </td>
                     <td className="table-cell text-center">
                       {p.policyPdfUrl
-                        ?<a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">📄 View</a>
+                        ?<div className="flex justify-center gap-1">
+                          <a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">View</a>
+                          <a href={getDownloadUrl(p.policyPdfUrl, p.policyPdfName)} download={p.policyPdfName || 'policy.pdf'} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</a>
+                        </div>
                         :<span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell">

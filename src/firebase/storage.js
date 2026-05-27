@@ -31,18 +31,21 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
       reject(new Error('Cloudinary not configured.')); return
     }
     const safeName = file.name.replace(/\s+/g, '_')
+    const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     const baseName = safeName.replace(/\.[^/.]+$/, '')
+    const publicId = isPdfFile
+      ? `${Date.now()}_${baseName}.pdf`
+      : `${Date.now()}_${baseName}`
     const fd = new FormData()
     fd.append('file',          file)
     fd.append('upload_preset', PRESET)
     fd.append('folder',        folder)
-    fd.append('public_id',     `${Date.now()}_${baseName}`)
+    fd.append('public_id',     publicId)
 
     const xhr = new XMLHttpRequest()
     // PDFs: use /raw/upload to preserve the file byte-for-byte (no re-encoding).
     // All other file types (images, etc.): use /auto/upload.
     // Note: unsigned presets support both /raw/ and /auto/.
-    const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     const endpoint  = isPdfFile ? 'raw/upload' : 'auto/upload'
     xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${endpoint}`, true)
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
@@ -58,6 +61,16 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
     xhr.onerror = () => reject(new Error('Network error during upload'))
     xhr.send(fd)
   })
+}
+
+export function getDownloadUrl(url, fileName = '') {
+  if (!url) return ''
+  if (!url.includes('/upload/')) return url
+  const safeFileName = String(fileName || 'document.pdf')
+    .replace(/[^\w.\-() ]+/g, '')
+    .trim()
+    .replace(/\s+/g, '_') || 'document.pdf'
+  return url.replace('/upload/', `/upload/fl_attachment:${encodeURIComponent(safeFileName)}/`)
 }
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
