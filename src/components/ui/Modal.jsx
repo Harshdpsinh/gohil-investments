@@ -20,12 +20,12 @@ export default function Modal({ open, onClose, title, children, size = 'md' }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-gray-900/70 backdrop-blur-sm" onClick={onClose} />
       {/* Dialog */}
       <div className={`relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full
-                       ${widths[size]} max-h-[90vh] flex flex-col
+                       ${widths[size]} max-w-[calc(100vw-2rem)] max-h-[90vh] flex flex-col min-w-0
                        border border-gray-200 dark:border-gray-700`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4
@@ -41,7 +41,7 @@ export default function Modal({ open, onClose, title, children, size = 'md' }) {
           </button>
         </div>
         {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5 min-w-0">
           {children}
         </div>
       </div>

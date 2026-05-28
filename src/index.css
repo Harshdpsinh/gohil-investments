@@ -70,7 +70,13 @@
 
   /* ── Table ── */
   .table-container {
-    @apply overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700;
+    @apply overflow-auto max-w-full rounded-xl border border-gray-200 dark:border-gray-700;
+    max-height: clamp(360px, calc(100vh - 280px), 760px);
+    scrollbar-gutter: stable;
+  }
+  .table-container > table {
+    width: max-content;
+    min-width: 100%;
   }
   .table-header {
     @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase
@@ -131,7 +137,7 @@
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 8px; height: 10px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }

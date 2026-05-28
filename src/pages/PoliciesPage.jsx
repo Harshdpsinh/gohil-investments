@@ -1563,14 +1563,14 @@ Wealth Management & Insurance Advisory
         onScroll={e => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
         className="rounded"
       >
-        <div style={{ height: 1, minWidth: 1500 }} />
+        <div style={{ height: 1, minWidth: 2200 }} />
       </div>
       <div
         ref={tableScrollRef}
         className="table-container"
         onScroll={e => { if (topScrollRef.current) topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
       >
-        <table className="min-w-full">
+        <table className="min-w-full" style={{ minWidth: 2200 }}>
           <thead><tr>
             <th className="table-header w-10">
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
