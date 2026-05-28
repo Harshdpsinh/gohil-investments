@@ -1299,11 +1299,11 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
                 This will <strong>permanently delete</strong> the policy from Firestore. This <strong>cannot be undone</strong>.
               </p>
               <div className="flex gap-3">
-                <button onClick={onPermanentDelete} disabled={permDeling}
+                <button type="button" onClick={onPermanentDelete} disabled={permDeling}
                         className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">
                   {permDeling ? '⏳ Deleting…' : '🗑️ Yes, Delete Forever'}
                 </button>
-                <button onClick={() => setPermDel(null)} className="btn-secondary">Cancel</button>
+                <button type="button" onClick={() => setPermDel(null)} className="btn-secondary">Cancel</button>
               </div>
             </div>
           </div>
@@ -1388,6 +1388,14 @@ export default function PoliciesPage() {
     [filtered, showDupsOnly, duplicatePolicyIds]
   )
 
+  useEffect(() => {
+    const visibleIds = new Set(displayPolicies.map(p => p.id))
+    setSelectedIds(prev => {
+      const next = new Set([...prev].filter(id => visibleIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [displayPolicies])
+
   // ── Duplicate detector ───────────────────────────────────
   const [dupWarning, setDupWarning] = useState('')
   const checkDup = useCallback(async (policyNumber) => {
@@ -1445,20 +1453,42 @@ Wealth Management & Insurance Advisory
   }
 
   // ── Bulk select ──────────────────────────────────────────
-  const allFilteredIds = filtered.map(p => p.id)
-  const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.has(id))
-  const someSelected   = allFilteredIds.some(id => selectedIds.has(id))
+  const allVisibleIds  = displayPolicies.map(p => p.id)
+  const allSelected    = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedIds.has(id))
+  const someSelected   = allVisibleIds.some(id => selectedIds.has(id))
   const toggleOne  = id => setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
   const toggleAll  = () => {
-    if (allSelected) setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.delete(id)); return n })
-    else             setSelectedIds(prev => { const n=new Set(prev); allFilteredIds.forEach(id=>n.add(id)); return n })
+    if (allSelected) setSelectedIds(prev => { const n=new Set(prev); allVisibleIds.forEach(id=>n.delete(id)); return n })
+    else             setSelectedIds(prev => { const n=new Set(prev); allVisibleIds.forEach(id=>n.add(id)); return n })
   }
   const clearSel = () => setSelectedIds(new Set())
 
+  const toggleRenewedVisibility = () => {
+    setDelOpen(false)
+    setBulkDelOpen(false)
+    setSelected(null)
+    clearSel()
+    setShowRenewed(v => !v)
+  }
+
+  const resetDeleteState = () => {
+    setDelOpen(false)
+    setBulkDelOpen(false)
+    setSelected(null)
+    clearSel()
+  }
+
   const onBulkDelete = async () => {
+    if (selectedIds.size === 0) return
     setBulkDeleting(true)
-    try { await bulkDeletePolicies([...selectedIds]); toast.success(`✅ ${selectedIds.size} policies deleted`); clearSel(); setBulkDelOpen(false) }
-    catch(err) { toast.error(err.message) }
+    try {
+      const count = selectedIds.size
+      await bulkDeletePolicies([...selectedIds])
+      toast.success(`✅ ${count} policies moved to Recycle Bin`)
+      clearSel()
+      setBulkDelOpen(false)
+    }
+    catch(err) { toast.error('Failed to delete selected policies: ' + (err.message || 'Unknown error')) }
     finally { setBulkDeleting(false) }
   }
 
@@ -1481,10 +1511,17 @@ Wealth Management & Insurance Advisory
     }
   }
   const onDelete = async () => {
+    if (!selected?.id) {
+      toast.error('Please select a policy to delete.')
+      setDelOpen(false)
+      return
+    }
     try {
       await deletePolicy(selected.id)
-      toast.success('Policy deleted')
+      toast.success('Policy moved to Recycle Bin')
       setDelOpen(false)
+      setSelected(null)
+      clearSel()
     } catch(err) {
       toast.error('Failed to delete: ' + (err.message || 'Unknown error'))
     }
@@ -1504,14 +1541,15 @@ Wealth Management & Insurance Advisory
           <p className="text-sm text-gray-500 dark:text-gray-400">{policies.length} total</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {isAdmin&&<button className="btn-secondary" onClick={()=>setModal('import')}>⬆ Import</button>}
-          {isAdmin && <button className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>setShowRecycleBin(true)}>🗑️ Recycle Bin</button>}
+          {isAdmin&&<button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setModal('import')}}>⬆ Import</button>}
+          {isAdmin && <button type="button" className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>{resetDeleteState();setShowRecycleBin(true)}}>🗑️ Recycle Bin</button>}
           <button
-            onClick={() => setShowRenewed(v => !v)}
+            type="button"
+            onClick={toggleRenewedVisibility}
             className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
             title="Renewed-Out policies are hidden by default"
           >{showRenewed ? '🔄 Hide Renewed' : '🔄 Show Renewed'}</button>
-          <button className="btn-primary" onClick={()=>{setSelected(null);setDupWarning('');setModal('add')}}>+ Add Policy</button>
+          <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setModal('add')}}>+ Add Policy</button>
         </div>
       </div>
 
@@ -1551,8 +1589,8 @@ Wealth Management & Insurance Advisory
       {isAdmin && someSelected && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-xl px-4 py-3">
           <span className="text-sm font-semibold text-red-700 dark:text-red-300">{selectedIds.size} policies selected</span>
-          <button onClick={()=>setBulkDelOpen(true)} className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">🗑️ Delete Selected</button>
-          <button onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
+          <button type="button" onClick={()=>setBulkDelOpen(true)} className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">🗑️ Delete Selected</button>
+          <button type="button" onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
         </div>
       )}
       {/* Top scrollbar — mirrors the table's horizontal scroll so user
@@ -1628,8 +1666,8 @@ Wealth Management & Insurance Advisory
                     </td>
                     <td className="table-cell">
                       <div className="flex gap-1">
-                        <button onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
-                        {isAdmin&&<button onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
+                        <button type="button" onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                        {isAdmin&&<button type="button" onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
                       </div>
                     </td>
                   </tr>
@@ -1648,11 +1686,11 @@ Wealth Management & Insurance Advisory
       <Modal open={modal==='import'} onClose={()=>setModal(null)} title="📥 Import Policies — Choose Type" size="lg">
         <ImportModal clients={clients} onClose={()=>setModal(null)} onImported={()=>{}} />
       </Modal>
-      <ConfirmDialog open={delOpen} onClose={()=>setDelOpen(false)} onConfirm={onDelete}
+      <ConfirmDialog open={delOpen && !!selected?.id} onClose={()=>setDelOpen(false)} onConfirm={onDelete}
                      title="Delete Policy?" message={`Delete "${selected?.policyNumber}"?`} danger />
-      <ConfirmDialog open={bulkDelOpen} onClose={()=>setBulkDelOpen(false)} onConfirm={onBulkDelete}
+      <ConfirmDialog open={bulkDelOpen && selectedIds.size > 0} onClose={()=>setBulkDelOpen(false)} onConfirm={onBulkDelete}
                      title={`Delete ${selectedIds.size} Policies?`}
-                     message={`Permanently delete ${selectedIds.size} selected policies? Cannot be undone.`} danger />
+                     message={`Move ${selectedIds.size} selected policies to the Recycle Bin? You can restore them later.`} danger />
       {showRecycleBin && (
         <RecycleBinModal
           onClose={() => setShowRecycleBin(false)}
