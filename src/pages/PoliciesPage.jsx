@@ -1480,10 +1480,11 @@ Wealth Management & Insurance Advisory
 
   const onBulkDelete = async () => {
     if (selectedIds.size === 0) return
+    const ids = [...selectedIds]
     setBulkDeleting(true)
     try {
-      const count = selectedIds.size
-      await bulkDeletePolicies([...selectedIds])
+      const count = ids.length
+      await bulkDeletePolicies(ids)
       toast.success(`✅ ${count} policies moved to Recycle Bin`)
       clearSel()
       setBulkDelOpen(false)
@@ -1589,7 +1590,10 @@ Wealth Management & Insurance Advisory
       {isAdmin && someSelected && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-xl px-4 py-3">
           <span className="text-sm font-semibold text-red-700 dark:text-red-300">{selectedIds.size} policies selected</span>
-          <button type="button" onClick={()=>setBulkDelOpen(true)} className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">🗑️ Delete Selected</button>
+          <button type="button" onClick={onBulkDelete} disabled={bulkDeleting}
+                  className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
+          </button>
           <button type="button" onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
         </div>
       )}
