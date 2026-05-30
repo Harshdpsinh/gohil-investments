@@ -170,12 +170,24 @@ export function parseImportFile(file) {
 // ── Date normaliser ───────────────────────────────────────────
 export function normaliseDate(val) {
   if (!val) return ''
-  if (val instanceof Date) return val.toISOString().split('T')[0]
+  if (val instanceof Date) return format(val, 'yyyy-MM-dd')
   const s   = String(val).trim()
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-  return s
+  if (!dmy) {
+    throw new Error(`Date "${s}" must be in dd/mm/yyyy format.`)
+  }
+  const day = Number(dmy[1])
+  const month = Number(dmy[2])
+  const year = Number(dmy[3])
+  const parsed = new Date(year, month - 1, day)
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    throw new Error(`Date "${s}" is not a valid calendar date.`)
+  }
+  return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 }
 
 const yesNo = val => String(val||'').trim().toLowerCase() === 'yes'

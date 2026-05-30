@@ -213,7 +213,7 @@ export default function DashboardPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">{format(NOW, 'EEEE, d MMMM yyyy')}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">{fmtDate(NOW)}</p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

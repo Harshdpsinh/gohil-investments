@@ -418,26 +418,38 @@ Wealth Management & Insurance Advisory
         <div className="table-container">
           <table className="min-w-full">
             <thead><tr>
-              {['Claim No','Client','Policy No','Type','Insurer','Intimation','Claimed ₹','Approved ₹','Status','Hospital','Docs','Actions'].map(h=>(
+              {['Claim No','Client','Policy No','Type','Insurer','Intimation','Claimed ₹','Approved ₹','Status','Hospital','Docs'].map(h=>(
                 <th key={h} className="table-header">{h}</th>
               ))}
             </tr></thead>
             <tbody className="bg-white dark:bg-gray-800">
               {filtered.length === 0
-                ? <tr><td colSpan={12} className="text-center text-gray-400 dark:text-gray-500 py-10">No claims found</td></tr>
+                ? <tr><td colSpan={11} className="text-center text-gray-400 dark:text-gray-500 py-10">No claims found</td></tr>
                 : filtered.map(c => {
                   const docsCount = Object.values(c.docs||{}).filter(Boolean).length
                   const docsTotal = 6
                   return (
                     <tr key={c.id} className="table-row">
-                      <td className="table-cell font-mono text-xs font-semibold">{c.claimNumber||'—'}</td>
-                      <td className="table-cell font-medium">{c.clientName||'—'}</td>
-                      <td className="table-cell text-xs">{c.policyNumber||'—'}</td>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold">{c.claimNumber || '?'}</span>
+                          <button onClick={()=>{setSelected(c);setModal('edit')}}
+                                  className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                          <button onClick={()=>openWhatsApp(c)}
+                                  className="px-2 py-1 text-xs bg-green-50 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded hover:bg-green-100">WA</button>
+                          {isAdmin && (
+                            <button onClick={()=>{setSelected(c);setDelOpen(true)}}
+                                    className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="table-cell font-medium">{c.clientName || '?'}</td>
+                      <td className="table-cell text-xs">{c.policyNumber || '?'}</td>
                       <td className="table-cell"><span className="badge-blue text-xs">{c.claimType}</span></td>
-                      <td className="table-cell text-xs">{c.insurer||'—'}</td>
+                      <td className="table-cell text-xs">{c.insurer || '?'}</td>
                       <td className="table-cell">{fmtDate(c.intimationDate)}</td>
-                      <td className="table-cell text-right">{c.claimedAmount ? `₹${Number(c.claimedAmount).toLocaleString('en-IN')}` : '—'}</td>
-                      <td className="table-cell text-right">{c.approvedAmount ? `₹${Number(c.approvedAmount).toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="table-cell text-right">{c.claimedAmount ? `?${Number(c.claimedAmount).toLocaleString('en-IN')}` : '?'}</td>
+                      <td className="table-cell text-right">{c.approvedAmount ? `?${Number(c.approvedAmount).toLocaleString('en-IN')}` : '?'}</td>
                       <td className="table-cell">
                         <select value={c.status}
                                 onChange={e => onStatusChange(c.id, e.target.value)}
@@ -445,23 +457,11 @@ Wealth Management & Insurance Advisory
                           {CLAIM_STATUSES.map(s=><option key={s}>{s}</option>)}
                         </select>
                       </td>
-                      <td className="table-cell text-xs">{c.hospitalName||'—'}</td>
+                      <td className="table-cell text-xs">{c.hospitalName || '?'}</td>
                       <td className="table-cell text-center">
                         <span className={`text-xs font-semibold ${docsCount===docsTotal?'text-green-600':'text-orange-500'}`}>
                           {docsCount}/{docsTotal}
                         </span>
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex gap-1">
-                          <button onClick={()=>{setSelected(c);setModal('edit')}}
-                                  className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
-                          <button onClick={()=>openWhatsApp(c)}
-                                  className="px-2 py-1 text-xs bg-green-50 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded hover:bg-green-100">📱</button>
-                          {isAdmin && (
-                            <button onClick={()=>{setSelected(c);setDelOpen(true)}}
-                                    className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
-                          )}
-                        </div>
                       </td>
                     </tr>
                   )

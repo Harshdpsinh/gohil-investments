@@ -745,9 +745,21 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
   const onClickImport = () => {
     if (!rows?.length) return
-    if (preflighting || importing) return  // already running — block double click
-    setPreflighting(true)  // lock button immediately on first click
+    if (preflighting || importing) return
     setErrors([])
+
+    const rowErrors = []
+    rows.forEach((r, i) => {
+      try { parseRow(r) }
+      catch (err) { rowErrors.push(`Row ${i + 2}: ${err.message}`) }
+    })
+    if (rowErrors.length > 0) {
+      setErrors(rowErrors)
+      toast.error('Fix date format before importing. Use dd/mm/yyyy.')
+      return
+    }
+
+    setPreflighting(true)
 
     const names = [...new Set(rows.map(r => String(r['Client Name']||'').trim()).filter(Boolean))]
     const unmatched = names.filter(n => !clients.some(c => c.name.toLowerCase().trim() === n.toLowerCase()))
@@ -756,7 +768,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       preflight({}, true)
     } else {
       if (unmatched.length > 0) {
-        setPreflighting(false)  // release lock while mapping screen is shown
+        setPreflighting(false)
         setUnmapped(unmatched)
         setStep('mapping')
       } else {
@@ -774,7 +786,9 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
     const dups = [], lapses = []
 
     for (const [i, r] of rows.entries()) {
-      const data = parseRow(r)
+      let data
+      try { data = parseRow(r) }
+      catch (err) { setErrors([`Row ${i + 2}: ${err.message}`]); throw err }
       const pNo  = data.policyNumber
       if (!pNo) continue
 
@@ -824,7 +838,9 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
     const today = new Date()
     const lapses = []
     for (const [i, r] of pendingRows.entries()) {
-      const data = parseRow(r)
+      let data
+      try { data = parseRow(r) }
+      catch (err) { setErrors([`Row ${i + 2}: ${err.message}`]); toast.error(err.message); return }
       const pNo  = data.policyNumber
       if (!pNo) continue
       const isDup = dupRows.some(d => d.pNo === pNo)
@@ -851,7 +867,9 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
     const autoCreated = {}
 
     for (const [i, r] of (pendingRows.length ? pendingRows : rows).entries()) {
-      const data = parseRow(r)
+      let data
+      try { data = parseRow(r) }
+      catch (err) { errs.push(`Row ${i+2}: ${err.message}`); continue }
       const pNo  = data.policyNumber
       if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
 
@@ -1272,7 +1290,7 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     if (!ts) return '—'
     try {
       const d = ts.toDate ? ts.toDate() : new Date(ts)
-      return d.toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+      return `${fmtDate(d)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
     } catch { return '—' }
   }
 
@@ -1689,13 +1707,13 @@ Wealth Management & Insurance Advisory
             <th className="table-header w-10">
               <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 cursor-pointer" />
             </th>
-            {['Policy No','Client','Phone','Type','Insurer','Premium','Next Due','Expiry','Days','Yr','Status','FY%','RY%','Dup','WhatsApp','PDF','Actions'].map(h=>(
+            {['Policy No','Client','Phone','Type','Insurer','Premium','Next Due','Expiry','Days','Yr','Status','FY%','RY%','Dup','WhatsApp','PDF'].map(h=>(
               <th key={h} className="table-header">{h}</th>
             ))}
           </tr></thead>
           <tbody className="bg-white dark:bg-gray-800">
             {displayPolicies.length===0
-              ?<tr><td colSpan={18} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
+              ?<tr><td colSpan={17} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
               :displayPolicies.map(p=>{
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
                 const isDup = duplicatePolicyIds.has(p.id)
@@ -1706,7 +1724,13 @@ Wealth Management & Insurance Advisory
                     <td className="table-cell">
                       <input type="checkbox" checked={selectedIds.has(p.id)} onChange={()=>toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
                     </td>
-                    <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-xs font-semibold">{p.policyNumber}</span>
+                        <button type="button" onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                        {isAdmin&&<button type="button" onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
+                      </div>
+                    </td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
                     <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
                       {p.clientMobile || <span className="text-gray-300 dark:text-gray-600">—</span>}
@@ -1740,12 +1764,7 @@ Wealth Management & Insurance Advisory
                         existingName={p.policyPdfName}
                       />
                     </td>
-                    <td className="table-cell">
-                      <div className="flex gap-1">
-                        <button type="button" onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
-                        {isAdmin&&<button type="button" onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
-                      </div>
-                    </td>
+
                   </tr>
                 )
               })

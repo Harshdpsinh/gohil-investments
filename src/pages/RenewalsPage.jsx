@@ -439,7 +439,7 @@ export default function RenewalsPage() {
     doc.setFontSize(16)
     doc.text('Renewal List', 14, 16)
     doc.setFontSize(10)
-    doc.text(`Generated: ${new Date().toLocaleDateString('en-IN')}  |  ${filtered.length} policies`, 14, 24)
+    doc.text(`Generated: ${fmtDate(new Date())}  |  ${filtered.length} policies`, 14, 24)
 
     autoTable(doc, {
       startY: 30,

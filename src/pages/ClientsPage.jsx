@@ -698,14 +698,14 @@ export default function ClientsPage() {
                 <input type="checkbox" checked={allSelected} onChange={toggleAll}
                        className="w-4 h-4 cursor-pointer" title={allSelected?'Deselect all':'Select all visible'} />
               </th>
-              {['Name','Mobile','Email','PAN','Policies','KYC','Birthday','Coverage Gaps','Actions'].map(h=>(
+              {['Name','Mobile','Email','PAN','Policies','KYC','Birthday','Coverage Gaps'].map(h=>(
                 <th key={h} className="table-header">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="bg-white dark:bg-gray-800">
             {filtered.length === 0
-              ? <tr><td colSpan={10} className="text-center text-gray-400 dark:text-gray-500 py-10">No clients found</td></tr>
+              ? <tr><td colSpan={9} className="text-center text-gray-400 dark:text-gray-500 py-10">No clients found</td></tr>
               : filtered.map(c => (
                 <tr key={c.id} className={`table-row ${selectedIds.has(c.id)?'bg-blue-50 dark:bg-blue-900/20':c._bday!==null?'bg-pink-50/40 dark:bg-pink-900/10':''}`}>
                   <td className="table-cell">
@@ -713,8 +713,21 @@ export default function ClientsPage() {
                            onChange={() => toggleOne(c.id)} className="w-4 h-4 cursor-pointer" />
                   </td>
                   <td className="table-cell">
-                    <span className="font-semibold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
-                          onClick={() => { setSelected(c); setModal('view') }}>{c.name}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
+                            onClick={() => { setSelected(c); setModal('view') }}>{c.name}</span>
+                      <button onClick={() => { setSelected(c); setModal('edit') }}
+                              className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
+                      {c._bday !== null && c._bday <= 7 && (
+                        <button onClick={() => openGreeting(c)}
+                                className="px-2 py-1 text-xs bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 rounded hover:bg-pink-100"
+                                title="Send Birthday Greeting">Bday</button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={() => { setSelected(c); setDelOpen(true) }}
+                                className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
+                      )}
+                    </div>
                   </td>
                   <td className="table-cell">
                     {c.mobile
@@ -747,21 +760,7 @@ export default function ClientsPage() {
                       : <span className="text-xs text-green-600 dark:text-green-400 font-semibold">✅ All covered</span>
                     }
                   </td>
-                  <td className="table-cell">
-                    <div className="flex gap-1">
-                      <button onClick={() => { setSelected(c); setModal('edit') }}
-                              className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
-                      {c._bday !== null && c._bday <= 7 && (
-                        <button onClick={() => openGreeting(c)}
-                                className="px-2 py-1 text-xs bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 rounded hover:bg-pink-100"
-                                title="Send Birthday Greeting">🎂</button>
-                      )}
-                      {isAdmin && (
-                        <button onClick={() => { setSelected(c); setDelOpen(true) }}
-                                className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>
-                      )}
-                    </div>
-                  </td>
+
                 </tr>
               ))
             }

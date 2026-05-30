@@ -9,7 +9,7 @@ import {
   eachDayOfInterval, getDay, isSameDay, isSameMonth,
   addMonths, subMonths
 } from 'date-fns'
-import { fmtCurrency, daysUntilPremium } from '../utils/dateUtils'
+import { fmtCurrency, daysUntilPremium, fmtDate } from '../utils/dateUtils'
 
 const TYPE_COLORS = {
   Health: 'bg-blue-500',
@@ -201,7 +201,7 @@ export default function CalendarPage() {
           {selected && selectedPolicies.length > 0 && (
             <div className="card">
               <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-3">
-                📅 {format(selected, 'dd MMMM yyyy')} — {selectedPolicies.length} expir{selectedPolicies.length === 1 ? 'y' : 'ies'}
+                📅 {fmtDate(selected)} — {selectedPolicies.length} expir{selectedPolicies.length === 1 ? 'y' : 'ies'}
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {selectedPolicies.map(p => (
@@ -251,7 +251,7 @@ export default function CalendarPage() {
                         <p className="text-xs text-gray-400 dark:text-gray-500">{p.insurer}</p>
                       </div>
                       <p className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-                        {d ? format(d, 'dd MMM') : '—'}
+                        {d ? fmtDate(d) : '?'}
                       </p>
                     </div>
                   )

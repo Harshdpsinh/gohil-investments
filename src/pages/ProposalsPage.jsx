@@ -415,38 +415,38 @@ export default function ProposalsPage() {
             <table className="min-w-full">
               <thead>
                 <tr>
-                  {['Proposer','Type','Insurer','Plan','Premium','Client Linked','Created','Actions'].map(h => (
+                  {['Proposer','Type','Insurer','Plan','Premium','Client Linked','Created'].map(h => (
                     <th key={h} className="table-header">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800">
                 {proposals.length === 0
-                  ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No proposals yet.</td></tr>
+                  ? <tr><td colSpan={7} className="text-center py-12 text-gray-400">No proposals yet.</td></tr>
                   : proposals.map(p => (
                     <tr key={p.id} className="table-row">
-                      <td className="table-cell font-semibold">{p.proposerName}</td>
-                      <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
-                      <td className="table-cell">{p.insurer || '—'}</td>
-                      <td className="table-cell">{p.planName || '—'}</td>
-                      <td className="table-cell">{p.premium ? `₹${parseInt(p.premium).toLocaleString('en-IN')}` : '—'}</td>
                       <td className="table-cell">
-                        {p.clientId
-                          ? <span className="text-xs text-green-600 font-semibold">✅ {p.clientName || 'Linked'}</span>
-                          : <span className="text-xs text-gray-400">—</span>
-                        }
-                      </td>
-                      <td className="table-cell text-xs text-gray-400">{fmtDateTime(p.createdAt)}</td>
-                      <td className="table-cell">
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{p.proposerName}</span>
                           <button onClick={() => generateProposalPDF(p)}
-                                  className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">📄 PDF</button>
+                                  className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">PDF</button>
                           {isAdmin && (
                             <button onClick={() => { setSelected(p); setDelOpen(true) }}
                                     className="px-2 py-1 text-xs bg-red-50 text-red-700 rounded hover:bg-red-100">Del</button>
                           )}
                         </div>
                       </td>
+                      <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
+                      <td className="table-cell">{p.insurer || '?'}</td>
+                      <td className="table-cell">{p.planName || '?'}</td>
+                      <td className="table-cell">{p.premium ? `?${parseInt(p.premium).toLocaleString('en-IN')}` : '?'}</td>
+                      <td className="table-cell">
+                        {p.clientId
+                          ? <span className="text-xs text-green-600 font-semibold">Linked: {p.clientName || 'Client'}</span>
+                          : <span className="text-xs text-gray-400">?</span>
+                        }
+                      </td>
+                      <td className="table-cell text-xs text-gray-400">{fmtDateTime(p.createdAt)}</td>
                     </tr>
                   ))}
               </tbody>
