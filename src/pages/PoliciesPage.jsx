@@ -114,43 +114,87 @@ function QuickAddClientModal({ onCreated, onClose }) {
 }
 
 // ── Policy PDF Upload ─────────────────────────────────────────
-function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded }) {
+function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () => {}, compact = false }) {
   const fileRef = useRef()
   const [progress, setProgress]   = useState(null)
   const [uploading, setUploading] = useState(false)
+
   const onFileChange = async e => {
-    const file = e.target.files[0]; if (!file) return
-    setUploading(true); setProgress(0)
+    const file = e.target.files[0]
+    if (!file) return
+    if (!policyId) {
+      toast.error('Save the policy before attaching a PDF.')
+      return
+    }
+
+    setUploading(true)
+    setProgress(0)
     try {
-      const { url, name } = await uploadPolicyPdf(policyId, file, p=>setProgress(p))
+      const { url, name } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
       await savePolicyPdfUrl(policyId, url, name)
-      toast.success('PDF uploaded!')
+      toast.success('PDF uploaded')
       onUploaded(url, name)
-    } catch(err) { toast.error(err.message) }
-    finally { setUploading(false); setProgress(null); if(fileRef.current)fileRef.current.value='' }
+    } catch(err) {
+      toast.error(err.message || 'PDF upload failed')
+    } finally {
+      setUploading(false)
+      setProgress(null)
+      if (fileRef.current) fileRef.current.value = ''
+    }
   }
+
   if (!policyId) return (
     <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-3 text-xs text-gray-400 text-center">
-      📎 Save policy first, then attach PDF from Edit button.
+      Save policy first, then attach PDF.
     </div>
   )
+
+  if (compact) {
+    return (
+      <div className="flex items-center justify-center gap-1 min-w-[190px]">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={onFileChange}
+          disabled={uploading}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100 disabled:opacity-60"
+        >
+          {uploading ? `Uploading ${progress || 0}%` : existingUrl ? 'Replace PDF' : 'Upload PDF'}
+        </button>
+        {existingUrl && (
+          <>
+            <a href={existingUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-100">View</a>
+            <a href={getDownloadUrl(existingUrl, existingName)} download={existingName || 'policy.pdf'} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</a>
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-2">
-      <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">📎 Policy Document (PDF)</p>
+      <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">Policy Document (PDF)</p>
       {existingUrl && (
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
           <a href={existingUrl} target="_blank" rel="noopener noreferrer"
-             className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">📄 {existingName||'View PDF'}</a>
+             className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">{existingName || 'View PDF'}</a>
           <a href={getDownloadUrl(existingUrl, existingName)} download={existingName || 'policy.pdf'}
              className="text-xs text-blue-600 font-semibold hover:underline">Download</a>
-          <span className="text-xs text-green-600 font-semibold">✅ Stored</span>
+          <span className="text-xs text-green-600 font-semibold">Stored</span>
         </div>
       )}
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFileChange} disabled={uploading}
              className="text-xs cursor-pointer file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-indigo-100 file:text-indigo-700" />
       {uploading && (
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-indigo-600"><span>Uploading…</span><span>{progress}%</span></div>
+          <div className="flex justify-between text-xs text-indigo-600"><span>Uploading...</span><span>{progress}%</span></div>
           <div className="w-full bg-indigo-100 rounded-full h-1.5">
             <div className="bg-indigo-600 h-1.5 rounded-full" style={{width:`${progress}%`}} />
           </div>
@@ -1159,6 +1203,7 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
   const [restoring,  setRestoring]  = useState(null)   // id being restored
   const [permDel,    setPermDel]    = useState(null)   // id staged for permanent delete
   const [permDeling, setPermDeling] = useState(false)
+  const [emptying,   setEmptying]   = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -1208,6 +1253,21 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     }
   }
 
+  const onEmptyRecycleBin = async () => {
+    if (deleted.length === 0) return
+    if (!window.confirm(`Permanently delete ${deleted.length} old deleted polic${deleted.length === 1 ? 'y' : 'ies'}? This cannot be undone.`)) return
+    setEmptying(true)
+    try {
+      await Promise.all(deleted.map(p => permanentDeletePolicy(p.id)))
+      toast.success('Recycle bin emptied')
+      setDeleted([])
+    } catch(err) {
+      toast.error('Could not empty recycle bin: ' + (err.message || 'Unknown error'))
+    } finally {
+      setEmptying(false)
+    }
+  }
+
   const fmtDeletedAt = (ts) => {
     if (!ts) return '—'
     try {
@@ -1229,7 +1289,19 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
               Restore accidentally deleted policies or permanently remove them.
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+          <div className="flex items-center gap-2">
+            {deleted.length > 0 && (
+              <button
+                type="button"
+                onClick={onEmptyRecycleBin}
+                disabled={emptying}
+                className="px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60"
+              >
+                {emptying ? 'Deleting...' : 'Empty Recycle Bin'}
+              </button>
+            )}
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">?</button>
+          </div>
         </div>
 
         {/* Body */}
@@ -1485,7 +1557,7 @@ Wealth Management & Insurance Advisory
     try {
       const count = ids.length
       await bulkDeletePolicies(ids)
-      toast.success(`✅ ${count} policies moved to Recycle Bin`)
+      toast.success(`${count} policies deleted permanently`)
       clearSel()
       setBulkDelOpen(false)
     }
@@ -1519,7 +1591,7 @@ Wealth Management & Insurance Advisory
     }
     try {
       await deletePolicy(selected.id)
-      toast.success('Policy moved to Recycle Bin')
+      toast.success('Policy deleted permanently')
       setDelOpen(false)
       setSelected(null)
       clearSel()
@@ -1661,12 +1733,12 @@ Wealth Management & Insurance Advisory
                       <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
                     </td>
                     <td className="table-cell text-center">
-                      {p.policyPdfUrl
-                        ?<div className="flex justify-center gap-1">
-                          <a href={p.policyPdfUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100">View</a>
-                          <a href={getDownloadUrl(p.policyPdfUrl, p.policyPdfName)} download={p.policyPdfName || 'policy.pdf'} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</a>
-                        </div>
-                        :<span className="text-xs text-gray-300 dark:text-gray-600">—</span>}
+                      <PolicyPdfUpload
+                        compact
+                        policyId={p.id}
+                        existingUrl={p.policyPdfUrl}
+                        existingName={p.policyPdfName}
+                      />
                     </td>
                     <td className="table-cell">
                       <div className="flex gap-1">

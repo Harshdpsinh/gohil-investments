@@ -6,6 +6,7 @@ import { addDocMeta, deleteDocMeta } from './firestore'
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
 const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 
 function validateClientDocument(file) {
@@ -20,7 +21,9 @@ function validateClientDocument(file) {
 
 function validatePolicyPdf(file) {
   if (!file) throw new Error('No file selected.')
-  if (file.size > MAX_UPLOAD_BYTES) throw new Error('File must be smaller than 10 MB.')
+  if (file.size > MAX_POLICY_PDF_BYTES) {
+    throw new Error('Policy PDF is too large. Please upload a PDF smaller than 25 MB.')
+  }
   const isPdf = file.type === 'application/pdf' && file.name.toLowerCase().endsWith('.pdf')
   if (!isPdf) throw new Error('Only PDF files are allowed.')
 }

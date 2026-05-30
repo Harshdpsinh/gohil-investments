@@ -294,7 +294,9 @@ export function subscribeClients(callback, onError) {
 
 export async function findClientByMobileOrName(mobile, name) {
   const allS = await getDocs(clientsRef())
-  const clients = allS.docs.map(d => ({ id:d.id, ...d.data() }))
+  const clients = allS.docs
+    .map(d => ({ id:d.id, ...d.data() }))
+    .filter(c => !c.deleted)
   const clean = (mobile||'').replace(/\D/g,'').slice(-10)
   if (clean.length >= 10) {
     const m = clients.find(c => (c.mobile||'').replace(/\D/g,'').slice(-10) === clean)
@@ -468,24 +470,15 @@ export async function updatePolicy(id, data) {
 // FIX: use setDoc+merge — updateDoc throws "No document to update" when
 // local React state is stale (same root cause as the renewal error).
 export async function deletePolicy(id) {
-  return setDoc(doc(db, POLICIES, id), {
-    deleted:   true,
-    deletedAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true })
+  return deleteDoc(doc(db, POLICIES, id))
 }
 
-// ── BULK soft-delete ─────────────────────────────────────────
 export async function bulkDeletePolicies(ids) {
   const chunks = []
   for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
   for (const chunk of chunks) {
     const batch = writeBatch(db)
-    chunk.forEach(id => batch.set(doc(db, POLICIES, id), {
-      deleted:   true,
-      deletedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true }))
+    chunk.forEach(id => batch.delete(doc(db, POLICIES, id)))
     await batch.commit()
   }
 }
@@ -532,8 +525,10 @@ export async function checkDuplicate(data) {
       limit(3)
     ))
     if (!s.empty) {
-      const match = s.docs[0]
-      return { isDup: true, reason: `Same client "${clientName}" + premium ₹${premium} + insurer "${insurer}" already on record (${match.data().policyNumber})`, existing: { id: match.id, ...match.data() } }
+      const match = s.docs.find(d => !d.data().deleted)
+      if (match) {
+        return { isDup: true, reason: `Same client "${clientName}" + premium Rs.${premium} + insurer "${insurer}" already on record (${match.data().policyNumber})`, existing: { id: match.id, ...match.data() } }
+      }
     }
   }
   return { isDup: false, reason: '', existing: null }

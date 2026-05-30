@@ -549,10 +549,17 @@ export default function ClientsPage() {
     setModal(null)
   }
   const onDelete = async () => {
-    await deleteClient(selected.id)
-    toast.success('Client deleted')
-    setDelOpen(false)
-    setSelected(null)
+    try {
+      await deleteClient(selected.id)
+      toast.success('Client deleted')
+      setDelOpen(false)
+      setSelected(null)
+    } catch (err) {
+      const message = err?.code === 'permission-denied'
+        ? 'You do not have permission to delete this client. Sign in as Admin, then try again.'
+        : err?.message || 'Client could not be deleted. Please try again.'
+      toast.error(message)
+    }
   }
 
   const openGreeting = client => {
@@ -588,11 +595,17 @@ export default function ClientsPage() {
   const onBulkDelete = async () => {
     setBulkDeleting(true)
     try {
+      const count = selectedIds.size
       await bulkDeleteClients([...selectedIds])
-      toast.success(`✅ ${selectedIds.size} client(s) deleted`)
+      toast.success(`${count} client(s) deleted`)
       clearSelection()
       setBulkDelOpen(false)
-    } catch(err) { toast.error(err.message) }
+    } catch(err) {
+      const message = err?.code === 'permission-denied'
+        ? 'You do not have permission to delete these clients. Sign in as Admin, then try again.'
+        : err?.message || 'Selected clients could not be deleted. Please try again.'
+      toast.error(message)
+    }
     finally { setBulkDeleting(false) }
   }
 
