@@ -47,7 +47,7 @@ function isBirthdayThisWeek(dobStr) {
 function getPremDays(p) {
   if (!p) return null
   if (p.nextPremiumDue) {
-    const d = new Date(p.nextPremiumDue)
+    const d = parseAnyDate(p.nextPremiumDue)
     if (!isNaN(d.getTime())) return Math.ceil((d - NOW) / 86400000)
   }
   if (p.startDate) {
@@ -129,11 +129,6 @@ export default function DashboardPage() {
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
-    return
-    const msg = encodeURIComponent(
-      `Dear ${policy.clientName},\n\nYour *${policy.policyType}* policy (${policy.policyNumber}) with *${policy.insurer}* premium is due${d !== null && d >= 0 ? ` in *${d} days*` : ' — please renew urgently'}.\n\nPlease contact us for renewal.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`
-    )
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }, [clients])
 
   useEffect(() => {

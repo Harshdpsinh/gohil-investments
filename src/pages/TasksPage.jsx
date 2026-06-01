@@ -9,6 +9,7 @@ import {
 } from '../firebase/firestore'
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import DateInput from '../components/ui/DateInput'
 import { fmtDate, parseAnyDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -103,7 +104,7 @@ function TaskForm({ initial, clients, policies, onSave, onCancel }) {
             {TASK_PRIORITIES.map(p=><option key={p}>{p}</option>)}
           </select></div>
         <div><label className="form-label">Due Date *</label>
-          <input type="date" value={form.dueDate||''} onChange={e=>set('dueDate',e.target.value)} className="form-input" /></div>
+          <DateInput value={form.dueDate||''} onChange={v=>set('dueDate',v)} className="form-input" /></div>
         <div><label className="form-label">Client (optional)</label>
           <select value={form.clientId||''} onChange={onClientChange} className="form-select">
             <option value="">— No client —</option>
@@ -275,17 +276,6 @@ export default function TasksPage() {
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
-    return
-    if (!mobile) { toast.error('No mobile for ' + (task.clientName||'client') + ' — add it in Clients page'); return }
-    const typeIcon = task.type === 'Call' ? '📞' : task.type === 'Meeting' ? '🤝' : '📋'
-    const msg = encodeURIComponent(
-      `Dear ${task.clientName},\n\n${typeIcon} This is a reminder regarding: *${task.title}*\n\nPlease feel free to contact us at your earliest convenience.\n\n*Gohil Investments*
-Wealth Management & Insurance Advisory
-📞 *Harshdipsinh Gohil* — 7698997894
-📞 Pradipsinh Gohil — 9426204547
-📍 Bhavnagar, Gujarat`
-    )
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
 
   if (loading) return (

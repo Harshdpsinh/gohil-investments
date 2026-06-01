@@ -9,6 +9,7 @@ import {
 import { generateProposalPDF } from '../utils/proposalPDF'
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import DateInput from '../components/ui/DateInput'
 import { fmtDateTime } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
 
@@ -60,9 +61,12 @@ const EMPTY_FORM = {
 
 function MemberRow({ member, idx, onChange }) {
   const inp = (k, ph, w='w-32') => (
-    <input type={k === 'dob' ? 'date' : 'text'} value={member[k] || ''}
+    k === 'dob'
+      ? <DateInput value={member[k] || ''} onChange={v => onChange(idx, k, v)}
+           className={`form-input text-xs ${w}`} />
+      : <input type="text" value={member[k] || ''}
            onChange={e => onChange(idx, k, e.target.value)}
-           placeholder={k !== 'dob' ? ph : undefined}
+           placeholder={ph}
            className={`form-input text-xs ${w}`} />
   )
   return (
@@ -121,7 +125,9 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
   const inp = (k, lbl, type='text', opts={}) => (
     <div>
       <label className="form-label">{lbl}</label>
-      <input type={type} value={form[k] || ''} onChange={e => set(k, e.target.value)} className="form-input" {...opts} />
+      {type === 'date'
+        ? <DateInput value={form[k] || ''} onChange={v => set(k, v)} className="form-input" {...opts} />
+        : <input type={type} value={form[k] || ''} onChange={e => set(k, e.target.value)} className="form-input" {...opts} />}
     </div>
   )
   const sel = (k, lbl, opts) => (

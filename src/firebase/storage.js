@@ -2,12 +2,15 @@
 // PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
 // Images use /image/ endpoint. Both are publicly accessible.
 import { addDocMeta, deleteDocMeta } from './firestore'
+import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
+import app from './config'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
 const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+const firebaseStorage = getStorage(app)
 
 function validateClientDocument(file) {
   if (!file) throw new Error('No file selected.')
@@ -66,6 +69,33 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
   })
 }
 
+function firebaseUpload(file, path, onProgress = () => {}) {
+  return new Promise((resolve, reject) => {
+    const storageRef = ref(firebaseStorage, path)
+    const task = uploadBytesResumable(storageRef, file, {
+      contentType: file.type || 'application/pdf',
+      customMetadata: { originalName: file.name },
+    })
+
+    task.on(
+      'state_changed',
+      snapshot => {
+        const total = snapshot.totalBytes || file.size || 1
+        onProgress(Math.round((snapshot.bytesTransferred / total) * 100))
+      },
+      error => reject(error),
+      async snapshot => {
+        try {
+          const url = await getDownloadURL(snapshot.ref)
+          resolve({ url, name: file.name, size: file.size, type: file.type, storagePath: snapshot.ref.fullPath })
+        } catch (err) {
+          reject(err)
+        }
+      }
+    )
+  })
+}
+
 export function getViewUrl(url) {
   if (!url) return ''
   return String(url)
@@ -76,7 +106,7 @@ export function getViewUrl(url) {
 export function getPreviewUrl(url) {
   const safeUrl = getViewUrl(url)
   if (!safeUrl) return ''
-  return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(safeUrl)}`
+  return safeUrl
 }
 
 export function getDownloadUrl(url, fileName = '') {
@@ -103,6 +133,12 @@ export async function deleteClientDocument(clientId, docId) {
 
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   validatePolicyPdf(file)
-  const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress)
-  return { url: getViewUrl(meta.url), name: meta.name }
+  const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
+  try {
+    const meta = await firebaseUpload(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
+    return { url: meta.url, name: meta.name, storagePath: meta.storagePath }
+  } catch (err) {
+    console.error('Firebase Storage upload failed:', err)
+    throw new Error('Policy PDF upload failed. Please confirm Firebase Storage is enabled and storage rules are deployed.')
+  }
 }

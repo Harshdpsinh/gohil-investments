@@ -19,6 +19,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
+import DateInput    from '../components/ui/DateInput'
 import { addFrequencyInterval, computeNextPremiumDue, fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency, parseAnyDate } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
@@ -132,8 +133,8 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
     setUploading(true)
     setProgress(0)
     try {
-      const { url, name } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
-      await savePolicyPdfUrl(policyId, url, name)
+      const { url, name, storagePath } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
+      await savePolicyPdfUrl(policyId, url, name, storagePath)
       toast.success('PDF uploaded')
       onUploaded(url, name)
     } catch(err) {
@@ -528,7 +529,10 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
 
   const inp = (k,lbl,type='text',opts={}) => (
     <div><label className="form-label">{lbl}</label>
-      <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-input" {...opts} /></div>
+      {type === 'date'
+        ? <DateInput value={form[k]||''} onChange={v=>set(k,v)} className="form-input" {...opts} />
+        : <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-input" {...opts} />}
+    </div>
   )
   const sel = (k,lbl,options) => (
     <div><label className="form-label">{lbl}</label>
@@ -639,12 +643,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           {sel('status','Status',STATUS)}
           <div>
             <label className="form-label">Start Date</label>
-            <input type="date" value={form.startDate||''} onChange={e=>setStartDateAndDue(e.target.value)} className="form-input" />
+            <DateInput value={form.startDate||''} onChange={setStartDateAndDue} className="form-input" />
           </div>
           {inp('expiryDate','Policy End / Expiry Date *','date')}
           <div>
             <label className="form-label">Premium Due / Renewal Date</label>
-            <input type="date" value={form.nextPremiumDue||''} onChange={e=>set('nextPremiumDue',e.target.value)} className="form-input" />
+            <DateInput value={form.nextPremiumDue||''} onChange={v=>set('nextPremiumDue',v)} className="form-input" />
             <p className="text-xs text-gray-500 mt-1">
               Auto-calculated from start date and frequency. Change it manually if the insurer schedule is different.
             </p>
@@ -1620,20 +1624,6 @@ export default function PoliciesPage() {
       openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
-    }
-    return
-    {
-    if (!mobile) { toast.error('No mobile number on file for this client'); return }
-    const expiry  = fmtDate(policy.expiryDate)
-    const premium = policy.premium ? `₹${Number(policy.premium).toLocaleString('en-IN')}` : ''
-    const msg = encodeURIComponent(
-      `Dear ${policy.clientName},\n\nYour *${policy.policyType} Insurance* policy (${policy.insurer} - ${policy.planName || ''}) is due for renewal.\n\n📋 Policy No: ${policy.policyNumber}\n📅 Expiry Date: ${expiry}\n💰 Premium: ${premium}\n\nKindly arrange for renewal at the earliest to avoid any lapse in coverage.\n\nFor any query, please call or WhatsApp us.\n\n*Gohil Investments*
-Wealth Management & Insurance Advisory
-📞 *Harshdipsinh Gohil* — 7698997894
-📞 Pradipsinh Gohil — 9426204547
-📍 Bhavnagar, Gujarat`
-    )
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
     }
   }
 

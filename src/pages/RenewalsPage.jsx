@@ -503,25 +503,7 @@ export default function RenewalsPage() {
         toast.error(err.message)
       }
       return
-    }
-
-    // ✅ FIX R3: use correct due date per frequency
-    const dueStr = getPolicyDueDate(policy)
-    const days   = daysUntilPolicyDue(policy)
-
-    const msg = encodeURIComponent(
-      `Dear ${policy.clientName},\n\n` +
-      `Your *${policy.policyType}* policy (${policy.policyNumber}) with *${policy.insurer}* ` +
-      `is due for renewal${dueStr ? ` on *${fmtDate(dueStr)}*` : ''}` +
-      `${days !== null && days >= 0 ? ` (*${days} days remaining*)` : ' — please renew urgently'}.\n\n` +
-      `Premium: *₹${Number(policy.premium || 0).toLocaleString('en-IN')}*\n\n` +
-      `Please contact us to renew.\n\n` +
-      `*Gohil Investments*\nWealth Management & Insurance Advisory\n` +
-      `📞 *Harshdipsinh Gohil* — 7698997894\n` +
-      `📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`
-    )
-
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+    }
   }, [clients])
 
   // ─── Filter logic ────────────────────────────────────────────

@@ -106,10 +106,6 @@ export default function ClientProfilePage() {
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
-    return
-    if (!mobile) { toast.error('No mobile number — add it in Clients page'); return }
-    const msg = encodeURIComponent(`Dear ${client.name},\n\nGreetings from *Gohil Investments*!\n\nThis is a courtesy call regarding your insurance portfolio. Please feel free to reach out for any queries.\n\nThank you for your continued trust.\n\n*Gohil Investments*\nWealth Management & Insurance Advisory\n📞 *Harshdipsinh Gohil* — 7698997894\n📞 Pradipsinh Gohil — 9426204547\n📍 Bhavnagar, Gujarat`)
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
 
   if (loading) return (

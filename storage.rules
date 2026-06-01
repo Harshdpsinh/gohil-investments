@@ -1,8 +1,8 @@
 // storage.rules
 // ─────────────────────────────────────────────────────────────
 // PASTE THIS into Firebase Console → Storage → Rules tab.
-// Allows signed-in users to read/write files only under
-// the clients/ folder.  Max file size 10 MB.
+// Allows signed-in users to read/write client and policy files.
+// Client files: 10 MB. Policy PDFs: 25 MB.
 // ─────────────────────────────────────────────────────────────
 rules_version = '2';
 service firebase.storage {
@@ -12,6 +12,13 @@ service firebase.storage {
       allow write: if request.auth != null
                    && request.resource.size < 10 * 1024 * 1024
                    && request.resource.contentType.matches('application/pdf|image/.*');
+    }
+
+    match /policies/{policyId}/{allPaths=**} {
+      allow read:  if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 25 * 1024 * 1024
+                   && request.resource.contentType == 'application/pdf';
     }
 
     // Block everything else

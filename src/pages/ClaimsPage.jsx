@@ -9,6 +9,7 @@ import {
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar     from '../components/ui/SearchBar'
+import DateInput     from '../components/ui/DateInput'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -85,8 +86,10 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
   const inp = (k, label, type='text', extra={}) => (
     <div>
       <label className="form-label">{label}</label>
-      <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)}
-             className="form-input" {...extra} />
+      {type === 'date'
+        ? <DateInput value={form[k]||''} onChange={v=>set(k,v)} className="form-input" {...extra} />
+        : <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)}
+             className="form-input" {...extra} />}
     </div>
   )
 
@@ -334,16 +337,6 @@ export default function ClaimsPage() {
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
-    return
-    if (!mobile) { toast.error('No mobile for ' + (claim.clientName||'this client') + ' — add it in Clients page'); return }
-    const msg = encodeURIComponent(
-      `Dear ${claim.clientName},\n\nUpdate on your insurance claim:\n\n📋 Claim No: ${claim.claimNumber || 'N/A'}\n🏢 Insurer: ${claim.insurer}\n📊 Status: *${claim.status}*\n${claim.approvedAmount ? `💰 Approved Amount: ₹${Number(claim.approvedAmount).toLocaleString('en-IN')}` : ''}\n\nFor any queries, please contact us.\n\n*Gohil Investments*
-Wealth Management & Insurance Advisory
-📞 *Harshdipsinh Gohil* — 7698997894
-📞 Pradipsinh Gohil — 9426204547
-📍 Bhavnagar, Gujarat`
-    )
-    window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
   }
 
   if (loading) return (
