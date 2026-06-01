@@ -25,9 +25,19 @@ export function buildWhatsAppLink({ mobile, message, countryCode = DEFAULT_COUNT
   return `https://wa.me/${phone}?text=${encodeURIComponent(message || '')}`
 }
 
+export function buildWhatsAppApiLink({ mobile, message, countryCode = DEFAULT_COUNTRY_CODE }) {
+  const phone = normaliseWhatsAppNumber(mobile, countryCode)
+  return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message || '')}`
+}
+
 export function openWhatsAppLink({ mobile, message, countryCode = DEFAULT_COUNTRY_CODE }) {
   const url = buildWhatsAppLink({ mobile, message, countryCode })
   window.open(url, '_blank', 'noopener,noreferrer')
   return url
 }
 
+export function openWhatsAppApiLink({ mobile, message, countryCode = DEFAULT_COUNTRY_CODE }) {
+  const url = buildWhatsAppApiLink({ mobile, message, countryCode })
+  window.open(url, '_blank', 'noopener,noreferrer')
+  return url
+}

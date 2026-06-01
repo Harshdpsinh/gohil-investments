@@ -667,7 +667,10 @@ export default function RenewalsPage() {
                 const termRenewalDue = isTermRenewalDue(p)
 
                 return (
-                  <tr key={p.id} className="table-row">
+                  <tr
+                    key={p.id}
+                    style={days !== null && days < 0 ? { backgroundColor: '#fff1f2' } : days !== null && days <= 7 ? { backgroundColor: '#fefce8' } : undefined}
+                    className="table-row">
                     <td className="table-cell text-gray-400 text-xs">{i + 1}</td>
                     <td className="table-cell font-semibold">{p.clientName}</td>
                     <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>

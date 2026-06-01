@@ -5,6 +5,7 @@ import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
+  importPoliciesBatch,
   savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
 } from '../firebase/firestore'
@@ -26,7 +27,7 @@ import {
   LIFE_IMPORT_HEADERS,   LIFE_IMPORT_SAMPLE,   parseLifeRow,
   MOTOR_IMPORT_HEADERS,  MOTOR_IMPORT_SAMPLE,  parseMotorRow,
 } from '../utils/exportUtils'
-import { openWhatsAppLink } from '../services/whatsappService'
+import { openWhatsAppApiLink, openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
 // ── Fuzzy match (Levenshtein distance) ───────────────────────
@@ -109,6 +110,7 @@ function QuickAddClientModal({ onCreated, onClose }) {
           </div>
         </form>
       </div>
+
     </div>
   )
 }
@@ -721,6 +723,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   const [unmapped,   setUnmapped]   = useState([])
   const [importing,   setImporting]   = useState(false)
   const [preflighting,setPreflighting] = useState(false)  // scanning for dups/lapsed
+  const [importProgress, setImportProgress] = useState({ done: 0, total: 0 })
   const [errors,      setErrors]      = useState([])
   const [autoAssign, setAutoAssign] = useState(true)
   // Duplicate review state
@@ -863,8 +866,11 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   }
 
   const doImport = async (overrides, autoCreate, dupResolutions, lapseResolutions) => {
-    setImporting(true); const errs = []; let ok = 0
+    setImporting(true)
+    setImportProgress({ done: 0, total: 0 })
+    const errs = []
     const autoCreated = {}
+    const preparedPolicies = []
 
     for (const [i, r] of (pendingRows.length ? pendingRows : rows).entries()) {
       let data
@@ -873,49 +879,45 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       const pNo  = data.policyNumber
       if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
 
-      // Apply duplicate resolution
       const dupChoice = dupResolutions[pNo]
-      if (dupChoice === 'skip') { continue }
-      // 'overwrite' and 'new' both proceed to import
+      if (dupChoice === 'skip') continue
 
-      // Apply lapse resolution
       const lapseChoice = lapseResolutions[pNo]
-      if (lapseChoice?.action === 'skip') { continue }
+      if (lapseChoice?.action === 'skip') continue
       if (lapseChoice?.action === 'import') {
-        // User confirmed renewal - apply new dates
         if (lapseChoice.newStart)  data.startDate  = lapseChoice.newStart
         if (lapseChoice.newExpiry) data.expiryDate = lapseChoice.newExpiry
         data.status = 'Active'
       }
 
-      // Check if still a dup (for overwrite - delete old first)
       if (dupChoice === 'overwrite') {
-        // Mark old as Renewed-Out before importing
-        // (simplified: just import — the old one stays, user can delete manually)
         data.policyNumber = pNo + '_v2_' + Date.now().toString().slice(-4)
-        toast(`ℹ️ ${pNo} overwritten as ${data.policyNumber}`, { icon: '📋' })
+        toast(`Info: ${pNo} imported as ${data.policyNumber}`)
       }
 
       const eName = data.clientName
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
-      const ov = overrides[eName]; if (!mc && ov?.id) mc = { id: ov.id, name: ov.name }
+      const ov = overrides[eName]
+      if (!mc && ov?.id) mc = { id: ov.id, name: ov.name }
 
       if (!mc && autoCreate && eName) {
         if (autoCreated[eName.toLowerCase()]) {
           mc = autoCreated[eName.toLowerCase()]
         } else {
           try {
-            const ref = await addClient({ name: eName, mobile: data.clientMobile||'', email: '', kycStatus: 'Pending' })
-            mc = { id: ref.id, name: eName }
+            const ref = await addClient({ name: eName, mobile: data.clientMobile || '', email: data.clientEmail || '', kycStatus: 'Pending' })
+            mc = { id: ref.id, name: eName, mobile: data.clientMobile || '', email: data.clientEmail || '' }
             autoCreated[eName.toLowerCase()] = mc
-          } catch(err) { errs.push(`Row ${i+2}: Could not create client "${eName}" — ${err.message}`) }
+          } catch(err) {
+            errs.push(`Row ${i+2}: Could not create client "${eName}" - ${err.message}`)
+            continue
+          }
         }
       }
 
       data.clientId   = mc?.id   || ''
       data.clientName = mc?.name || eName
 
-      // Update existing client's mobile/email if they were blank
       if (mc?.id) {
         const needsUpdate = {}
         if (!mc.mobile && data.clientMobile) needsUpdate.mobile = data.clientMobile
@@ -925,20 +927,30 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         }
       }
 
-      try { await addPolicy(data); ok++ }
-      catch(err) { errs.push(`Row ${i+2} (${pNo}): ${err.message}`) }
+      preparedPolicies.push(data)
     }
-    setImporting(false); setErrors(errs)
-    if (ok > 0) {
-      const created = Object.keys(autoCreated).length
-      let msg = `🎉 ${ok} policies imported!`
-      if (created > 0) msg += ` ${created} new clients auto-created.`
-      toast.success(msg)
-      onImported()
-      if (!errs.length) onClose()
-      else setStep('upload')
-    } else if (errs.length) {
-      toast.error('Import failed — see errors below')
+
+    try {
+      setImportProgress({ done: 0, total: preparedPolicies.length })
+      const ok = await importPoliciesBatch(preparedPolicies, (done, total) => setImportProgress({ done, total }))
+      setErrors(errs)
+      if (ok > 0) {
+        const created = Object.keys(autoCreated).length
+        let msg = `${ok} policies imported!`
+        if (created > 0) msg += ` ${created} new clients auto-created.`
+        toast.success(msg)
+        onImported()
+        if (!errs.length) onClose()
+        else setStep('upload')
+      } else if (errs.length) {
+        toast.error('Import failed - see errors below')
+      }
+    } catch(err) {
+      setErrors([...errs, err.message || 'Import failed'])
+      toast.error('Import failed - see errors below')
+    } finally {
+      setImporting(false)
+      setImportProgress({ done: 0, total: 0 })
     }
   }
 
@@ -1159,8 +1171,22 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
             ? <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Importing…</span>
             : `✅ Import ${rows?.length || 0} ${policyType} Policies`}
         </button>
-        <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={onClose} disabled={importing || preflighting} className="btn-secondary">Cancel</button>
       </div>
+      {importing && importProgress.total > 0 && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs font-semibold text-blue-700">
+            <span>Importing {importProgress.done}/{importProgress.total} records...</span>
+            <span>{Math.round((importProgress.done / importProgress.total) * 100)}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-blue-100 overflow-hidden">
+            <div
+              className="h-full bg-blue-600 transition-all"
+              style={{ width: `${Math.round((importProgress.done / importProgress.total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1419,6 +1445,7 @@ export default function PoliciesPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [showRecycleBin, setShowRecycleBin] = useState(false)
   const [showRenewed,    setShowRenewed]    = useState(false)
+  const [whatsAppMenu,   setWhatsAppMenu]   = useState(null)
   const tableScrollRef = useRef(null)
   const topScrollRef   = useRef(null)
 
@@ -1495,12 +1522,24 @@ export default function PoliciesPage() {
   }, [])
 
   // ── WhatsApp helper ──────────────────────────────────────
-  const openWhatsApp = (policy) => {
-    // Try by clientId first, then fallback to name match for imported policies
+  const renewalAlertStyle = (policy) => {
+    const dueIn = daysUntil(policy.nextPremiumDue || policy.expiryDate)
+    if (dueIn === null) return undefined
+    if (dueIn < 0) return { backgroundColor: '#fff1f2' }
+    if (dueIn <= 7) return { backgroundColor: '#fefce8' }
+    return undefined
+  }
+
+  const getPolicyClient = (policy) => {
     let client = clients.find(c => c.id === policy.clientId)
     if (!client?.mobile && policy.clientName) {
       client = clients.find(c => c.name.toLowerCase().trim() === (policy.clientName||'').toLowerCase().trim())
     }
+    return client
+  }
+
+  const openWhatsApp = (policy) => {
+    const client = getPolicyClient(policy)
     const mobile = client?.mobile?.replace(/\D/g,'')
     if (!mobile) {
       toast.error('No mobile number on file for this client')
@@ -1539,6 +1578,21 @@ Wealth Management & Insurance Advisory
 📍 Bhavnagar, Gujarat`
     )
     window.open(`https://wa.me/91${mobile}?text=${msg}`, '_blank')
+    }
+  }
+
+  const openWhatsAppTemplate = (policy, template) => {
+    const client = getPolicyClient(policy)
+    const dueDate = fmtDate(policy.nextPremiumDue || policy.expiryDate)
+    const templates = {
+      renewal: `Dear Client, your premium for policy ${policy.policyNumber || ''} is due on ${dueDate}. Kindly process to ensure continuous coverage.`,
+      welcome: `Dear Client, thank you for choosing us. Your policy document for ${policy.policyNumber || ''} has been successfully registered in our CRM.`,
+    }
+    try {
+      openWhatsAppApiLink({ mobile: client?.mobile, message: templates[template] || templates.renewal })
+      setWhatsAppMenu(null)
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
     }
   }
 
@@ -1720,7 +1774,10 @@ Wealth Management & Insurance Advisory
                 const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.nextPremiumDue || p.expiryDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
-                  <tr key={p.id} className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''} ${isDup?'bg-orange-50 dark:bg-orange-900/10':''}`}>
+                  <tr
+                    key={p.id}
+                    style={!selectedIds.has(p.id) && !isDup ? renewalAlertStyle(p) : undefined}
+                    className={`table-row ${selectedIds.has(p.id)?'bg-blue-50 dark:bg-blue-900/20':''} ${isDup?'bg-orange-50 dark:bg-orange-900/10':''}`}>
                     <td className="table-cell">
                       <input type="checkbox" checked={selectedIds.has(p.id)} onChange={()=>toggleOne(p.id)} className="w-4 h-4 cursor-pointer" />
                     </td>
@@ -1754,7 +1811,27 @@ Wealth Management & Insurance Advisory
                       }
                     </td>
                     <td className="table-cell text-center">
-                      <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
+                      <div className="relative inline-flex items-center gap-1">
+                        <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
+                        <button
+                          type="button"
+                          onClick={() => setWhatsAppMenu(whatsAppMenu === p.id ? null : p.id)}
+                          className="px-2 py-1 text-xs rounded bg-green-50 text-green-700 hover:bg-green-100"
+                          title="WhatsApp templates"
+                        >
+                          ▾
+                        </button>
+                        {whatsAppMenu === p.id && (
+                          <div className="absolute right-0 top-full z-30 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg">
+                            <button type="button" onClick={() => openWhatsAppTemplate(p, 'renewal')} className="block w-full px-3 py-2 text-left text-xs hover:bg-gray-50">
+                              Renewal Due
+                            </button>
+                            <button type="button" onClick={() => openWhatsAppTemplate(p, 'welcome')} className="block w-full px-3 py-2 text-left text-xs hover:bg-gray-50">
+                              Welcome
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="table-cell text-center">
                       <PolicyPdfUpload

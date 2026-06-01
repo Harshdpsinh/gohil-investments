@@ -90,11 +90,25 @@ export async function updateClient(id, data) {
 }
 
 async function deleteRefsInChunks(refs) {
-  for (let i = 0; i < refs.length; i += 400) {
+  const uniqueRefs = [...new Map(refs.map(ref => [ref.path, ref])).values()]
+  for (let i = 0; i < uniqueRefs.length; i += 400) {
     const batch = writeBatch(db)
-    refs.slice(i, i + 400).forEach(ref => batch.delete(ref))
+    uniqueRefs.slice(i, i + 400).forEach(ref => batch.delete(ref))
     await batch.commit()
   }
+}
+
+async function policyCascadeRefs(policyId) {
+  if (!policyId) return []
+  const [claimsByPolicy, tasksByPolicy] = await Promise.all([
+    getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId))),
+    getDocs(query(collection(db, TASKS),  where('policyId', '==', policyId))),
+  ])
+  return [
+    ...claimsByPolicy.docs.map(d => d.ref),
+    ...tasksByPolicy.docs.map(d => d.ref),
+    doc(db, POLICIES, policyId),
+  ]
 }
 
 /**
@@ -159,8 +173,10 @@ export async function deleteClient(id) {
     getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
     getDocs(collection(db, CLIENTS, id, DOCS_META)),
   ])
+  const policyLinkedRefs = (await Promise.all(pols.docs.map(d => policyCascadeRefs(d.id)))).flat()
 
   await deleteRefsInChunks([
+    ...policyLinkedRefs,
     ...pols.docs.map(d => d.ref),
     ...cls.docs.map(d => d.ref),
     ...tsk.docs.map(d => d.ref),
@@ -178,7 +194,9 @@ export async function bulkDeleteClients(ids) {
       getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
       getDocs(collection(db, CLIENTS, id, DOCS_META)),
     ])
+    const policyLinkedRefs = (await Promise.all(pols.docs.map(d => policyCascadeRefs(d.id)))).flat()
     allRefs.push(
+      ...policyLinkedRefs,
       ...pols.docs.map(d => d.ref),
       ...cls.docs.map(d => d.ref),
       ...tsk.docs.map(d => d.ref),
@@ -439,6 +457,41 @@ export async function addPolicy(data) {
     updatedAt:      serverTimestamp()
   }))
 }
+
+export async function importPoliciesBatch(rows, onProgress = () => {}) {
+  const prepared = []
+  const seenPolicyNumbers = new Set()
+  for (const row of rows) {
+    const payload = normalisePolicyPayload(row)
+    assertPolicyDateOrder(payload.startDate, payload.expiryDate)
+    const policyKey = String(payload.policyNumber || '').trim().toLowerCase()
+    if (seenPolicyNumbers.has(policyKey)) throw new Error(`Policy number "${payload.policyNumber}" appears more than once in this import.`)
+    seenPolicyNumbers.add(policyKey)
+    await assertUniquePolicyNumber(payload.policyNumber)
+    prepared.push({
+      ...payload,
+      parentPolicyId: payload.parentPolicyId || null,
+      policyYear:     payload.policyYear     || 1,
+      nextPremiumDue: payload.nextPremiumDue || _nextDueStr(payload.startDate, payload.frequency) || null,
+      deleted:        false,
+      deletedAt:      null,
+      renewedAt:      null,
+      createdAt:      serverTimestamp(),
+      updatedAt:      serverTimestamp(),
+    })
+  }
+
+  let imported = 0
+  for (let i = 0; i < prepared.length; i += 400) {
+    const batch = writeBatch(db)
+    const chunk = prepared.slice(i, i + 400)
+    chunk.forEach(payload => batch.set(doc(policiesRef()), cleanFirestoreData(payload)))
+    await batch.commit()
+    imported += chunk.length
+    onProgress(imported, prepared.length)
+  }
+  return imported
+}
 export async function getPolicy(id) {
   const s = await getDoc(doc(db,POLICIES,id))
   return s.exists() ? { id:s.id, ...s.data() } : null
@@ -470,17 +523,12 @@ export async function updatePolicy(id, data) {
 // FIX: use setDoc+merge — updateDoc throws "No document to update" when
 // local React state is stale (same root cause as the renewal error).
 export async function deletePolicy(id) {
-  return deleteDoc(doc(db, POLICIES, id))
+  return deleteRefsInChunks(await policyCascadeRefs(id))
 }
 
 export async function bulkDeletePolicies(ids) {
-  const chunks = []
-  for (let i = 0; i < ids.length; i += 400) chunks.push(ids.slice(i, i + 400))
-  for (const chunk of chunks) {
-    const batch = writeBatch(db)
-    chunk.forEach(id => batch.delete(doc(db, POLICIES, id)))
-    await batch.commit()
-  }
+  const refs = (await Promise.all(ids.map(id => policyCascadeRefs(id)))).flat()
+  return deleteRefsInChunks(refs)
 }
 
 // ── RECYCLE BIN: fetch all soft-deleted policies ──────────────

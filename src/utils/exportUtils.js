@@ -192,7 +192,42 @@ export function normaliseDate(val) {
 
 const yesNo = val => String(val||'').trim().toLowerCase() === 'yes'
 const str   = val => String(val||'').trim()
-const num   = val => str(val)
+const num   = val => str(val).replace(/[₹,\s]/g, '')
+
+function normHeader(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[₹()]/g, '')
+    .replace(/rs\.?|rupees?/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function col(row, names) {
+  const wanted = names.map(normHeader)
+  for (const [key, value] of Object.entries(row || {})) {
+    if (wanted.includes(normHeader(key))) return value
+  }
+  return ''
+}
+
+const premiumValue = row => col(row, [
+  'Premium (₹)', 'Premium (Rs)', 'Premium Rs', 'Premium',
+  'Annual Premium', 'Premium Amount', 'Amount'
+])
+const sumInsuredValue = row => col(row, [
+  'Sum Insured (₹)', 'Sum Insured (Rs)', 'Sum Insured',
+  'Sum Insured Amount', 'Coverage Amount'
+])
+const sumAssuredValue = row => col(row, [
+  'Sum Assured (₹)', 'Sum Assured (Rs)', 'Sum Assured',
+  'Sum Assured Amount', 'Cover Amount'
+])
+const idvValue = row => col(row, ['IDV (₹)', 'IDV (Rs)', 'IDV', 'Insured Declared Value'])
+const frequencyValue = row => col(row, [
+  'Frequency', 'Premium Frequency', 'Payment Frequency',
+  'Payment Mode', 'Premium Mode', 'Mode', 'Renewal Frequency',
+  'Installment Frequency', 'Instalment Frequency'
+])
 
 // ── Column definitions (for export tables) ───────────────────
 export const CLIENT_COLS = [
@@ -239,9 +274,9 @@ export const CLIENT_IMPORT_SAMPLE = [
 export const HEALTH_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
+  'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Health-specific
-  'Sum Insured (₹)',
+  'Sum Insured',
   'Nominee Name', 'Nominee Relation',
   'FY Commission %', 'RY Commission %',
   // Members
@@ -289,13 +324,13 @@ export function parseHealthRow(r) {
     clientEmail:     str(r['Client Email']),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
-    premium:         num(r['Premium (₹)']),
-    frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
+    premium:         num(premiumValue(r)),
+    frequency:       normaliseFrequency(str(frequencyValue(r))) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
     expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date']),
     nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
-    sumInsured:      num(r['Sum Insured (₹)']),
+    sumInsured:      num(sumInsuredValue(r)),
     nominee:         str(r['Nominee Name']),
     nomineeRelation: str(r['Nominee Relation']),
     fyCommission:    num(r['FY Commission %']),
@@ -311,9 +346,9 @@ export function parseHealthRow(r) {
 export const LIFE_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
+  'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Life-specific
-  'Sum Assured (₹)', 'Policy Sub-type',
+  'Sum Assured', 'Policy Sub-type',
   'PPT (years)', 'Policy Term (years)', 'Maturity Date',
   'Nominee Name', 'Nominee Relation',
   'FY Commission %', 'RY Commission %',
@@ -342,13 +377,13 @@ export function parseLifeRow(r) {
     clientEmail:     str(r['Client Email']),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
-    premium:         num(r['Premium (₹)']),
-    frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
+    premium:         num(premiumValue(r)),
+    frequency:       normaliseFrequency(str(frequencyValue(r))) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
     expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date'] || r['Maturity Date']),
     nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
-    sumAssured:      num(r['Sum Assured (₹)']),
+    sumAssured:      num(sumAssuredValue(r)),
     policySubType:   str(r['Policy Sub-type']) || 'Term',
     ppt:             num(r['PPT (years)']),
     policyTerm:      num(r['Policy Term (years)']),
@@ -367,9 +402,9 @@ export function parseLifeRow(r) {
 export const MOTOR_IMPORT_HEADERS = [
   // Base
   'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
-  'Premium (₹)', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
+  'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Motor-specific
-  'Vehicle Type', 'Registration No', 'IDV (₹)', 'NCB %',
+  'Vehicle Type', 'Registration No', 'IDV', 'NCB %',
   'Nominee Name', 'Nominee Relation',
   'FY Commission %', 'RY Commission %',
   'Notes',
@@ -396,15 +431,15 @@ export function parseMotorRow(r) {
     clientEmail:     str(r['Client Email']),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
-    premium:         num(r['Premium (₹)']),
-    frequency:       normaliseFrequency(str(r['Frequency'])) || 'Yearly',
+    premium:         num(premiumValue(r)),
+    frequency:       normaliseFrequency(str(frequencyValue(r))) || 'Yearly',
     startDate:       normaliseDate(r['Start Date']),
     expiryDate:      normaliseDate(r['Policy End Date'] || r['Expiry Date']),
     nextPremiumDue:  normaliseDate(r['Premium Due Date'] || r['Renewal Date']),
     status:          str(r['Status']) || 'Active',
     vehicleType:     str(r['Vehicle Type']) || '4W',
     registrationNo:  str(r['Registration No']),
-    idv:             num(r['IDV (₹)']),
+    idv:             num(idvValue(r)),
     ncbPct:          str(r['NCB %']) || '0',
     nominee:         str(r['Nominee Name']),
     nomineeRelation: str(r['Nominee Relation']),

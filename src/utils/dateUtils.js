@@ -71,11 +71,14 @@ export const currentMonthName = () => format(new Date(), 'MMMM yyyy')
 // ── Frequency normaliser ──────────────────────────────────────
 // Maps any user-typed frequency to one of 4 standard values
 export function normaliseFrequency(val) {
-  const v = (val||'').toLowerCase().trim()
-  if (['half','6 month','semi','bi-annual','biannual','half year'].some(x=>v.includes(x))) return 'Half-Yearly'
-  if (['quarter','3 month','qtr'].some(x=>v.includes(x))) return 'Quarterly'
-  if (['month','monthly','1 month','per month'].some(x=>v.includes(x))) return 'Monthly'
-  if (['yearly','year','annual','annually','per year','p.a.','pa','1 year','12 months'].some(x=>v.includes(x))) return 'Yearly'
+  const raw = String(val || '').toLowerCase().trim()
+  const v = raw.replace(/[^a-z0-9]+/g, ' ')
+  const compact = v.replace(/\s+/g, '')
+  if (['single', 'one time', 'onetime', 'one-time'].some(x => raw.includes(x))) return 'Yearly'
+  if (['half','6 month','six month','semi','bi annual','biannual','half year','halfyearly','halfyr','hly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Half-Yearly'
+  if (['quarter','3 month','three month','qtr','qtly','qly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Quarterly'
+  if (['month','monthly','1 month','one month','per month','mly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Monthly'
+  if (['yearly','year','annual','annually','anual','annul','yalry','yearley','yrly','per year','p a','pa','1 year','one year','12 month','twelve month'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Yearly'
   return 'Yearly'  // safe default
 }
 
