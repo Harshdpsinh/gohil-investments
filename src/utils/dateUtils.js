@@ -15,7 +15,7 @@ export function parseAnyDate(val) {
   // dd/MM/yyyy
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   if (dmy) {
-    const d = new Date(`${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`)
+    const d = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]))
     return isValid(d) ? d : null
   }
   // ISO / yyyy-MM-dd
@@ -44,7 +44,7 @@ export const fmtDateTime = (val) => {
 export const daysUntil = (val) => {
   const d = parseAnyDate(val)
   if (!d) return null
-  return differenceInDays(d, new Date())
+  return differenceInDays(startOfDay(d), startOfDay(new Date()))
 }
 
 export const fmtCurrency = (val) => {
@@ -75,10 +75,26 @@ export function normaliseFrequency(val) {
   const v = raw.replace(/[^a-z0-9]+/g, ' ')
   const compact = v.replace(/\s+/g, '')
   if (['single', 'one time', 'onetime', 'one-time'].some(x => raw.includes(x))) return 'Yearly'
-  if (['half','6 month','six month','semi','bi annual','biannual','half year','halfyearly','halfyr','hly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Half-Yearly'
-  if (['quarter','3 month','three month','qtr','qtly','qly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Quarterly'
-  if (['month','monthly','1 month','one month','per month','mly'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Monthly'
-  if (['yearly','year','annual','annually','anual','annul','yalry','yearley','yrly','per year','p a','pa','1 year','one year','12 month','twelve month'].some(x => v.includes(x) || compact.includes(x.replace(/\s+/g, '')))) return 'Yearly'
+
+  if (
+    ['halfyearly','halfyear','halfyr','hly','semiannual','semiannually','biannual','biannually'].includes(compact) ||
+    ['half yearly','half year','6 month','six month','semi annual','bi annual'].some(x => v.includes(x))
+  ) return 'Half-Yearly'
+
+  if (
+    ['quarterly','quarter','qtr','qtly','qly'].includes(compact) ||
+    ['3 month','three month'].some(x => v.includes(x))
+  ) return 'Quarterly'
+
+  if (
+    ['monthly','month','mly'].includes(compact) ||
+    ['1 month','one month','per month'].some(x => v.includes(x))
+  ) return 'Monthly'
+
+  if (
+    ['yearly','year','annual','annually','anual','annul','yalry','yearley','yrly','pa'].includes(compact) ||
+    ['per year','p a','1 year','one year','12 month','twelve month'].some(x => v.includes(x))
+  ) return 'Yearly'
   return 'Yearly'  // safe default
 }
 
@@ -105,6 +121,12 @@ export function addFrequencyInterval(date, frequency) {
   const d = parseAnyDate(date)
   if (!d) return null
   return addMonths(d, frequencyMonths(frequency))
+}
+
+export function getNextInstallmentDue(policy) {
+  const due = parseAnyDate(getDueDate(policy))
+  if (!due) return ''
+  return toInputDate(addFrequencyInterval(due, policy?.frequency || 'Yearly'))
 }
 
 // ── Compute next premium due date ─────────────────────────────
@@ -134,15 +156,24 @@ export function daysUntilPremium(startDate, frequency) {
 
 export function getDueDate(policy) {
   if (!policy) return ''
+  const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+  const expiry = parseAnyDate(policy.expiryDate)
   const storedDue = toInputDate(policy.nextPremiumDue)
-  if (storedDue) return storedDue
+  if (storedDue) {
+    const due = parseAnyDate(storedDue)
+    if (!isLifePolicy && due && expiry && due > expiry) return toInputDate(expiry)
+    return storedDue
+  }
   const computedDue = computeNextPremiumDue(policy.startDate, policy.frequency)
-  if (computedDue) return toInputDate(computedDue)
+  if (computedDue) {
+    if (!isLifePolicy && expiry && computedDue > expiry) return toInputDate(expiry)
+    return toInputDate(computedDue)
+  }
   return toInputDate(policy.expiryDate)
 }
 
 export function daysUntilPolicyDue(policy) {
   const due = parseAnyDate(getDueDate(policy))
   if (!due) return null
-  return differenceInDays(due, new Date())
+  return differenceInDays(startOfDay(due), startOfDay(new Date()))
 }

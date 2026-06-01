@@ -5,11 +5,11 @@ import { useState, useMemo } from 'react'
 import { usePolicies } from '../hooks/usePolicies'
 import { useNavigate } from 'react-router-dom'
 import {
-  parseISO, isValid, format, startOfMonth, endOfMonth,
+  format, startOfMonth, endOfMonth,
   eachDayOfInterval, getDay, isSameDay, isSameMonth,
   addMonths, subMonths
 } from 'date-fns'
-import { fmtCurrency, daysUntilPremium, fmtDate } from '../utils/dateUtils'
+import { fmtCurrency, fmtDate, getDueDate as getPolicyDueDate, parseAnyDate } from '../utils/dateUtils'
 
 const TYPE_COLORS = {
   Health: 'bg-blue-500',
@@ -32,34 +32,7 @@ const TYPE_DOT = {
 // Uses nextPremiumDue for non-yearly, expiryDate for yearly.
 // Returns a Date or null.
 function getCalendarDate(p) {
-  const freq = (p.frequency || 'Yearly').toLowerCase()
-  const isYearly = freq === 'yearly'
-
-  if (!isYearly && p.nextPremiumDue) {
-    const d = new Date(p.nextPremiumDue)
-    if (!isNaN(d.getTime())) return d
-  }
-
-  if (p.expiryDate) {
-    // Try as ISO string
-    try {
-      const d = parseISO(p.expiryDate)
-      if (isValid(d)) return d
-    } catch { /* ignore */ }
-    // Try as plain Date
-    const d = new Date(p.expiryDate)
-    if (!isNaN(d.getTime())) return d
-  }
-
-  // Fallback: compute from startDate + frequency
-  if (p.startDate) {
-    const daysLeft = daysUntilPremium(p.startDate, p.frequency)
-    if (daysLeft !== null) {
-      return new Date(Date.now() + daysLeft * 86400000)
-    }
-  }
-
-  return null
+  return parseAnyDate(getPolicyDueDate(p))
 }
 
 export default function CalendarPage() {

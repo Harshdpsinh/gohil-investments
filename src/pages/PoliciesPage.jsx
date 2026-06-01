@@ -9,7 +9,7 @@ import {
   savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
 } from '../firebase/firestore'
-import { getDownloadUrl, uploadPolicyPdf } from '../firebase/storage'
+import { getDownloadUrl, getPreviewUrl, uploadPolicyPdf } from '../firebase/storage'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
@@ -19,7 +19,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
-import { fmtDate, fmtCurrency, daysUntil, renewalStatus, toInputDate, normaliseFrequency } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
   downloadTemplate, parseImportFile, normaliseDate,
@@ -172,7 +172,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
         </button>
         {existingUrl && (
           <>
-            <a href={existingUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-100">View</a>
+            <a href={getPreviewUrl(existingUrl)} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-100">View</a>
             <a href={getDownloadUrl(existingUrl, existingName)} download={existingName || 'policy.pdf'} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</a>
           </>
         )}
@@ -185,7 +185,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
       <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">Policy Document (PDF)</p>
       {existingUrl && (
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-          <a href={existingUrl} target="_blank" rel="noopener noreferrer"
+          <a href={getPreviewUrl(existingUrl)} target="_blank" rel="noopener noreferrer"
              className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate">{existingName || 'View PDF'}</a>
           <a href={getDownloadUrl(existingUrl, existingName)} download={existingName || 'policy.pdf'}
              className="text-xs text-blue-600 font-semibold hover:underline">Download</a>
@@ -1523,7 +1523,7 @@ export default function PoliciesPage() {
 
   // ── WhatsApp helper ──────────────────────────────────────
   const renewalAlertStyle = (policy) => {
-    const dueIn = daysUntil(policy.nextPremiumDue || policy.expiryDate)
+    const dueIn = daysUntil(getPolicyDueDate(policy))
     if (dueIn === null) return undefined
     if (dueIn < 0) return { backgroundColor: '#fff1f2' }
     if (dueIn <= 7) return { backgroundColor: '#fefce8' }
@@ -1545,7 +1545,7 @@ export default function PoliciesPage() {
       toast.error('No mobile number on file for this client')
       return
     }
-    const dueDate = fmtDate(policy.nextPremiumDue || policy.expiryDate)
+    const dueDate = fmtDate(getPolicyDueDate(policy))
     const expiry  = fmtDate(policy.expiryDate)
     const premium = policy.premium ? fmtCurrency(policy.premium) : ''
     const safeMsg =
@@ -1583,7 +1583,7 @@ Wealth Management & Insurance Advisory
 
   const openWhatsAppTemplate = (policy, template) => {
     const client = getPolicyClient(policy)
-    const dueDate = fmtDate(policy.nextPremiumDue || policy.expiryDate)
+    const dueDate = fmtDate(getPolicyDueDate(policy))
     const templates = {
       renewal: `Dear Client, your premium for policy ${policy.policyNumber || ''} is due on ${dueDate}. Kindly process to ensure continuous coverage.`,
       welcome: `Dear Client, thank you for choosing us. Your policy document for ${policy.policyNumber || ''} has been successfully registered in our CRM.`,
@@ -1771,7 +1771,8 @@ Wealth Management & Insurance Advisory
               :displayPolicies.map(p=>{
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
                 const isDup = duplicatePolicyIds.has(p.id)
-                const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(p.nextPremiumDue || p.expiryDate)
+                const dueDate = getPolicyDueDate(p)
+                const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(dueDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
                   <tr
@@ -1796,10 +1797,10 @@ Wealth Management & Insurance Advisory
                     <td className="table-cell text-xs">{p.insurer}</td>
                     <td className="table-cell">{fmtCurrency(p.premium)}</td>
                     <td className="table-cell font-semibold text-blue-700 dark:text-blue-400 text-xs">
-                      {p.nextPremiumDue ? fmtDate(p.nextPremiumDue) : fmtDate(p.expiryDate)}
+                      {fmtDate(dueDate)}
                     </td>
                     <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
-                    <td className="table-cell">{daysUntil(p.nextPremiumDue||p.expiryDate)!==null?`${daysUntil(p.nextPremiumDue||p.expiryDate)}d`:'—'}</td>
+                    <td className="table-cell">{daysUntil(dueDate)!==null?`${daysUntil(dueDate)}d`:'—'}</td>
                     <td className="table-cell text-xs text-center text-gray-500 dark:text-gray-400">{p.policyYear?`Y${p.policyYear}`:'Y1'}</td>
                     <td className="table-cell"><span className={bm[st.color]||'badge-gray'}>{st.label}</span></td>
                     <td className="table-cell text-xs text-center text-blue-600 dark:text-blue-400 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>

@@ -66,14 +66,28 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
   })
 }
 
-export function getDownloadUrl(url, fileName = '') {
+export function getViewUrl(url) {
   if (!url) return ''
-  if (!url.includes('/upload/')) return url
+  return String(url)
+    .replace('/raw/upload/fl_attachment/', '/raw/upload/')
+    .replace(/\/raw\/upload\/fl_attachment:[^/]+\//, '/raw/upload/')
+}
+
+export function getPreviewUrl(url) {
+  const safeUrl = getViewUrl(url)
+  if (!safeUrl) return ''
+  return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(safeUrl)}`
+}
+
+export function getDownloadUrl(url, fileName = '') {
+  const safeUrl = getViewUrl(url)
+  if (!safeUrl) return ''
   const safeFileName = String(fileName || 'document.pdf')
     .replace(/[^\w.\-() ]+/g, '')
     .trim()
     .replace(/\s+/g, '_') || 'document.pdf'
-  return url.replace('/upload/', `/upload/fl_attachment:${encodeURIComponent(safeFileName)}/`)
+  const separator = safeUrl.includes('?') ? '&' : '?'
+  return `${safeUrl}${separator}dl=${encodeURIComponent(safeFileName)}`
 }
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
@@ -90,5 +104,5 @@ export async function deleteClientDocument(clientId, docId) {
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   validatePolicyPdf(file)
   const meta = await cloudinaryUpload(file, `gohil_investments/policies/${policyId}`, onProgress)
-  return { url: meta.url, name: meta.name }
+  return { url: getViewUrl(meta.url), name: meta.name }
 }

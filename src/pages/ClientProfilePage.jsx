@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getClient, getAllClaims, getAllTasks } from '../firebase/firestore'
 import { usePolicies } from '../hooks/usePolicies'
-import { fmtDate, fmtCurrency, daysUntil, renewalStatus } from '../utils/dateUtils'
+import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -243,13 +243,14 @@ export default function ClientProfilePage() {
           <div className="table-container">
             <table className="min-w-full">
               <thead><tr>
-                {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Expiry', 'Days', 'Status'].map(h => (
+                {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status'].map(h => (
                   <th key={h} className="table-header">{h}</th>
                 ))}
               </tr></thead>
               <tbody className="bg-white dark:bg-gray-800">
                 {clientPolicies.map(p => {
-                  const st = renewalStatus(p.expiryDate)
+                  const dueDate = getPolicyDueDate(p)
+                  const st = renewalStatus(dueDate)
                   const coverage = p.sumInsured || p.sumAssured || p.idv || '—'
                   const bm = { green: 'badge-green', yellow: 'badge-yellow', red: 'badge-red', blue: 'badge-blue', gray: 'badge-gray' }
                   return (

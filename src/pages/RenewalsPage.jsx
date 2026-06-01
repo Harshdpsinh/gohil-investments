@@ -11,7 +11,7 @@ import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
   markPremiumPaid,
 } from '../firebase/firestore'
-import { fmtDate, fmtCurrency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { addFrequencyInterval, fmtDate, fmtCurrency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -81,7 +81,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
     ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
     : toInputDate(new Date())
   const defaultExpiry = defaultStart
-    ? toInputDate(new Date(new Date(defaultStart).getTime() + 365 * 86400000))
+    ? toInputDate(addFrequencyInterval(defaultStart, policy.frequency || 'Yearly'))
     : ''
 
   // ── "Same company" or "Switch company" — explicit toggle ──

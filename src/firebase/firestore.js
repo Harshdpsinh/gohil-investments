@@ -5,7 +5,7 @@ import {
   onSnapshot, writeBatch, setDoc, limit, runTransaction
 } from 'firebase/firestore'
 import { db } from './config'
-import { addFrequencyInterval, computeNextPremiumDue, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
+import { addFrequencyInterval, computeNextPremiumDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
 
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
@@ -336,7 +336,16 @@ const POLICY_FREQUENCIES = ['Yearly','Half-Yearly','Quarterly','Monthly']
 // computeNextPremiumDue is now imported from '../utils/dateUtils' above.
 // Call sites use: computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
 function _nextDueStr(startDate, frequency) {
-  return computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
+  return toInputDate(computeNextPremiumDue(startDate, frequency)) || null
+}
+
+function _policyDueStr(policy) {
+  const due = computeNextPremiumDue(policy.startDate, policy.frequency)
+  if (!due) return null
+  const expiry = parseAnyDate(policy.expiryDate)
+  const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+  if (!isLifePolicy && expiry && due > expiry) return toInputDate(expiry)
+  return toInputDate(due)
 }
 
 function cleanFirestoreData(data) {
@@ -446,7 +455,7 @@ export async function addPolicy(data) {
   const payload = normalisePolicyPayload(data)
   assertPolicyDateOrder(payload.startDate, payload.expiryDate)
   await assertUniquePolicyNumber(payload.policyNumber)
-  const nextPremiumDue = payload.nextPremiumDue || _nextDueStr(payload.startDate, payload.frequency)
+  const nextPremiumDue = payload.nextPremiumDue || _policyDueStr(payload)
   return addDoc(policiesRef(), cleanFirestoreData({
     ...payload,
     parentPolicyId: payload.parentPolicyId || null,
@@ -472,7 +481,7 @@ export async function importPoliciesBatch(rows, onProgress = () => {}) {
       ...payload,
       parentPolicyId: payload.parentPolicyId || null,
       policyYear:     payload.policyYear     || 1,
-      nextPremiumDue: payload.nextPremiumDue || _nextDueStr(payload.startDate, payload.frequency) || null,
+      nextPremiumDue: payload.nextPremiumDue || _policyDueStr(payload) || null,
       deleted:        false,
       deletedAt:      null,
       renewedAt:      null,
@@ -513,7 +522,7 @@ export async function updatePolicy(id, data) {
     if (!existing.nextPremiumDue) {
       const start = payload.startDate || existing.startDate
       const freq  = payload.frequency || existing.frequency
-      update.nextPremiumDue = _nextDueStr(start, freq) || null
+      update.nextPremiumDue = _policyDueStr({ ...existing, ...payload, startDate: start, frequency: freq }) || null
     }
   }
   return updateDoc(doc(db,POLICIES,id), update)
@@ -658,7 +667,7 @@ export async function saveRenewal(oldPolicyId, newData) {
       status: 'Active',
     })
     assertPolicyDateOrder(policyPayload.startDate, policyPayload.expiryDate)
-    const newNextPremiumDue = _nextDueStr(policyPayload.startDate, policyPayload.frequency)
+    const newNextPremiumDue = policyPayload.nextPremiumDue || _policyDueStr(policyPayload)
 
     tx.update(oldRef, {
       status:                'Renewed-Out',
@@ -702,7 +711,7 @@ export async function markPremiumPaid(policyId) {
       throw new Error('This policy has already been renewed. Refresh the page before updating premium dues.')
     }
 
-    const currentDue = policy.nextPremiumDue || _nextDueStr(policy.startDate, policy.frequency)
+    const currentDue = getPolicyDueDate(policy) || policy.nextPremiumDue || _policyDueStr(policy)
     if (!currentDue) throw new Error('Could not calculate this policy premium due date.')
 
     const nextInstallmentDue = addFrequencyInterval(currentDue, policy.frequency)
