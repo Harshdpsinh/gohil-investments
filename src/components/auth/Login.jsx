@@ -8,10 +8,11 @@ import toast           from 'react-hot-toast'
 let lastAttempt = 0
 
 export default function Login() {
-  const { signIn, user } = useAuth()
+  const { signIn, resetPassword, user } = useAuth()
   const navigate         = useNavigate()
   const [form,    setForm]    = useState({ email: '', password: '' })
   const [loading, setLoading] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
 
   if (user) return <Navigate to="/dashboard" replace />
@@ -31,6 +32,27 @@ export default function Login() {
     } catch (err) {
       toast.error(err.code === 'auth/invalid-credential' ? 'Invalid email or password.' : err.message)
     } finally { setLoading(false) }
+  }
+
+  const onForgotPassword = async () => {
+    const email = form.email.trim()
+    if (!email) {
+      toast.error('Enter your email address first, then click Forgot password.')
+      return
+    }
+    setResetting(true)
+    try {
+      await resetPassword(email)
+      toast.success('Password reset email sent. Please check your inbox.')
+    } catch (err) {
+      const msg =
+        err.code === 'auth/invalid-email' ? 'Enter a valid email address.' :
+        err.code === 'auth/too-many-requests' ? 'Too many reset attempts. Please wait and try again.' :
+        'Could not send reset email. Please check the email address and try again.'
+      toast.error(msg)
+    } finally {
+      setResetting(false)
+    }
   }
 
   return (
@@ -75,6 +97,14 @@ export default function Login() {
             <button type="submit" disabled={loading}
                     className="btn-primary w-full justify-center py-2.5 text-base">
               {loading ? <><span className="animate-spin">⏳</span> Signing in…</> : '→  Sign In'}
+            </button>
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              disabled={loading || resetting}
+              className="w-full text-sm font-semibold text-blue-700 hover:text-blue-900 disabled:opacity-50"
+            >
+              {resetting ? 'Sending reset email...' : 'Forgot password?'}
             </button>
           </form>
           <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6">

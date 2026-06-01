@@ -5,6 +5,7 @@ import {
   signOut as fbSignOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   getAuth,
 } from 'firebase/auth'
 import { initializeApp, getApp, getApps } from 'firebase/app'
@@ -68,6 +69,18 @@ export function AuthProvider({ children }) {
     return fbSignOut(auth)
   }
 
+  async function resetPassword(email) {
+    const cleanEmail = String(email || '').trim().toLowerCase()
+    if (!cleanEmail) throw new Error('Enter your email address first.')
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error('Enter a valid email address.')
+    }
+    return sendPasswordResetEmail(auth, cleanEmail, {
+      url: `${window.location.origin}/login`,
+      handleCodeInApp: false,
+    })
+  }
+
   async function createStaffAccount(email, password, name, requestedRole = 'staff') {
     if (role !== 'admin') {
       throw new Error('Only admins can create staff accounts.')
@@ -108,7 +121,7 @@ export function AuthProvider({ children }) {
   const isAdmin = role === 'admin'
 
   return (
-    <AuthContext.Provider value={{ user, role, isAdmin, loading, signIn, signOut, createStaffAccount }}>
+    <AuthContext.Provider value={{ user, role, isAdmin, loading, signIn, signOut, resetPassword, createStaffAccount }}>
       {children}
     </AuthContext.Provider>
   )
