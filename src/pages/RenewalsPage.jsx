@@ -11,7 +11,7 @@ import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
   markPremiumPaid,
 } from '../firebase/firestore'
-import { addFrequencyInterval, fmtDate, fmtCurrency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { addFrequencyInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -305,6 +305,117 @@ function RenewModal({ policy, onConfirm, onClose }) {
 // ─────────────────────────────────────────────────────────────
 // POLICY TYPE TABS — ✅ FIX R6: all types included
 // ─────────────────────────────────────────────────────────────
+function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
+  const currentDue = getPolicyDueDate(policy)
+  const initialFrequency = normaliseFrequency(policy.frequency || 'Yearly')
+  const [frequency, setFrequency] = useState(initialFrequency)
+  const [nextDue, setNextDue] = useState(() => toInputDate(addFrequencyInterval(currentDue, initialFrequency)))
+
+  const setFrequencyAndDue = (value) => {
+    const cleanFrequency = normaliseFrequency(value)
+    setFrequency(cleanFrequency)
+    setNextDue(toInputDate(addFrequencyInterval(currentDue, cleanFrequency)))
+  }
+
+  const handleSubmit = () => {
+    const due = parseAnyDate(nextDue)
+    if (!due) {
+      toast.error('Please select a valid next premium due date.')
+      return
+    }
+
+    const expiry = parseAnyDate(policy.expiryDate)
+    const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+    if (!isLifePolicy && expiry && due > expiry) {
+      toast.error('For non-life policies, next premium due cannot be after expiry. Please use Renew.')
+      return
+    }
+
+    onConfirm(policy, {
+      frequency,
+      currentDue,
+      nextPremiumDue: toInputDate(due),
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={saving ? undefined : onClose} />
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Verify Premium Due</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Confirm the next due date before saving.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="text-gray-400 hover:text-gray-600 disabled:opacity-50 text-2xl leading-none"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="bg-blue-50 dark:bg-blue-900/30 rounded-xl p-3 text-sm">
+          <p className="font-semibold text-blue-800 dark:text-blue-200">{policy.clientName}</p>
+          <p className="text-blue-600 dark:text-blue-400 text-xs mt-0.5">
+            {policy.policyNumber || '-'} · {policy.policyType || 'Policy'} · Current due: {fmtDate(currentDue)}
+          </p>
+        </div>
+
+        <div>
+          <label className="form-label">Premium Frequency</label>
+          <select
+            value={frequency}
+            onChange={e => setFrequencyAndDue(e.target.value)}
+            className="form-input"
+            disabled={saving}
+          >
+            <option value="Yearly">Yearly</option>
+            <option value="Half-Yearly">Half-Yearly</option>
+            <option value="Quarterly">Quarterly</option>
+            <option value="Monthly">Monthly</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="form-label">Next Premium Due / Renewal Date</label>
+          <input
+            type="date"
+            value={nextDue}
+            onChange={e => setNextDue(e.target.value)}
+            className="form-input"
+            disabled={saving}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Auto-calculated from frequency. You can manually correct it before saving.
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="btn-secondary text-sm disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving || !nextDue}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center gap-2"
+          >
+            {saving && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+            Save Premium Paid
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const POLICY_TABS = ['ALL', 'Health', 'Life', 'Motor', 'Home', 'Travel', 'Other']
 
 // ─────────────────────────────────────────────────────────────
@@ -323,6 +434,7 @@ export default function RenewalsPage() {
 
   // ✅ FIX R10: confirmation state instead of firing immediately
   const [renewModal,   setRenewModal]   = useState(null)  // holds policy being renewed
+  const [premiumPaidModal, setPremiumPaidModal] = useState(null)
   const [saving,       setSaving]       = useState(false)
   const submittingRef  = useRef(false)
 
@@ -527,14 +639,15 @@ export default function RenewalsPage() {
     }
   }, [renewModal])
 
-  const handlePremiumPaid = useCallback(async (policy) => {
+  const handlePremiumPaid = useCallback(async (policy, options = {}) => {
     if (submittingRef.current || !policy?.id) return
     submittingRef.current = true
     setSaving(true)
 
     try {
-      await markPremiumPaid(policy.id)
+      await markPremiumPaid(policy.id, options)
       toast.success(`Premium marked paid for ${policy.clientName}. Next due date updated.`)
+      setPremiumPaidModal(null)
     } catch (e) {
       toast.error(renewalErrorMessage(e))
     } finally {
@@ -703,7 +816,7 @@ export default function RenewalsPage() {
                       </button>
                     </td>
                     <td className="table-cell">
-                      <button onClick={() => termRenewalDue ? setRenewModal(p) : handlePremiumPaid(p)}
+                      <button onClick={() => termRenewalDue ? setRenewModal(p) : setPremiumPaidModal(p)}
                               disabled={saving}
                               className={`${termRenewalDue ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'} disabled:opacity-50 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors`}>
                         {termRenewalDue ? 'Renew' : 'Mark Paid'}
@@ -723,6 +836,14 @@ export default function RenewalsPage() {
           policy={renewModal}
           onConfirm={handleRenewConfirm}
           onClose={() => { if (!saving) setRenewModal(null) }}
+        />
+      )}
+      {premiumPaidModal && (
+        <PremiumPaidModal
+          policy={premiumPaidModal}
+          saving={saving}
+          onConfirm={handlePremiumPaid}
+          onClose={() => { if (!saving) setPremiumPaidModal(null) }}
         />
       )}
     </div>

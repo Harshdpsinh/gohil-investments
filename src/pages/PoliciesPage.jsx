@@ -19,7 +19,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
-import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency } from '../utils/dateUtils'
+import { addFrequencyInterval, computeNextPremiumDue, fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency, parseAnyDate } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
   downloadTemplate, parseImportFile, normaliseDate,
@@ -476,6 +476,35 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
 
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
+  const calculateNextDue = (startDate, frequency) => {
+    const start = parseAnyDate(startDate)
+    if (!start) return ''
+    const cleanFrequency = normaliseFrequency(frequency || 'Yearly')
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const startDay = new Date(start)
+    startDay.setHours(0, 0, 0, 0)
+    if (startDay >= today) return toInputDate(addFrequencyInterval(startDay, cleanFrequency))
+    return toInputDate(computeNextPremiumDue(startDay, cleanFrequency))
+  }
+
+  const setFrequencyAndDue = (value) => {
+    const cleanFrequency = normaliseFrequency(value)
+    setForm(p => ({
+      ...p,
+      frequency: cleanFrequency,
+      nextPremiumDue: calculateNextDue(p.startDate, cleanFrequency) || p.nextPremiumDue || '',
+    }))
+  }
+
+  const setStartDateAndDue = (value) => {
+    setForm(p => ({
+      ...p,
+      startDate: value,
+      nextPremiumDue: calculateNextDue(value, p.frequency) || p.nextPremiumDue || '',
+    }))
+  }
+
   // When type changes, merge in new type defaults without wiping entered data
   const onTypeChange = newType => {
     const extras = getTypeDefaults(newType)
@@ -521,6 +550,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     }
     if (form.nextPremiumDue && Number.isNaN(new Date(form.nextPremiumDue).getTime())) {
       toast.error('Premium due / renewal date must be valid'); return
+    }
+    const due = parseAnyDate(form.nextPremiumDue)
+    const expiry = parseAnyDate(form.expiryDate)
+    const isLifePolicy = String(form.policyType || '').trim().toLowerCase() === 'life'
+    if (!isLifePolicy && due && expiry && due > expiry) {
+      toast.error('For non-life policies, premium due cannot be after policy expiry. Please renew the policy instead.'); return
     }
     if (!form.premium || Number(form.premium) <= 0) {
       toast.error('Premium must be greater than zero'); return
@@ -595,13 +630,34 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           {inp('premium','Annual Premium (₹)','number')}
           {/* sumAssured only for non-Health/Motor (they have their own) */}
           {!['Health','Life','Motor'].includes(form.policyType) && inp('sumAssured','Sum Insured/Assured (₹)','number')}
-          {sel('frequency','Payment Frequency',FREQS)}
+          <div>
+            <label className="form-label">Payment Frequency</label>
+            <select value={form.frequency || 'Yearly'} onChange={e=>setFrequencyAndDue(e.target.value)} className="form-select">
+              {FREQS.map(o=><option key={o}>{o}</option>)}
+            </select>
+          </div>
           {sel('status','Status',STATUS)}
-          {inp('startDate','Start Date','date')}
+          <div>
+            <label className="form-label">Start Date</label>
+            <input type="date" value={form.startDate||''} onChange={e=>setStartDateAndDue(e.target.value)} className="form-input" />
+          </div>
           {inp('expiryDate','Policy End / Expiry Date *','date')}
-          {inp('nextPremiumDue','Premium Due / Renewal Date','date')}
+          <div>
+            <label className="form-label">Premium Due / Renewal Date</label>
+            <input type="date" value={form.nextPremiumDue||''} onChange={e=>set('nextPremiumDue',e.target.value)} className="form-input" />
+            <p className="text-xs text-gray-500 mt-1">
+              Auto-calculated from start date and frequency. Change it manually if the insurer schedule is different.
+            </p>
+          </div>
           {inp('nominee','Nominee Name')}
           {inp('nomineeRelation','Nominee Relation')}
+        </div>
+
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3 text-sm">
+          <p className="font-semibold text-emerald-800 dark:text-emerald-200">Premium due confirmation</p>
+          <p className="text-emerald-700 dark:text-emerald-300 text-xs mt-1">
+            {form.policyType || 'Policy'} · {normaliseFrequency(form.frequency || 'Yearly')} · Next due: {fmtDate(form.nextPremiumDue)}
+          </p>
         </div>
 
         {/* Type-specific sections */}

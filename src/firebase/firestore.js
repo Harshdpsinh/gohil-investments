@@ -699,7 +699,7 @@ export async function saveRenewal(oldPolicyId, newData) {
   })
 }
 
-export async function markPremiumPaid(policyId) {
+export async function markPremiumPaid(policyId, options = {}) {
   const policyRef = doc(db, POLICIES, policyId)
 
   return runTransaction(db, async tx => {
@@ -711,22 +711,30 @@ export async function markPremiumPaid(policyId) {
       throw new Error('This policy has already been renewed. Refresh the page before updating premium dues.')
     }
 
-    const currentDue = getPolicyDueDate(policy) || policy.nextPremiumDue || _policyDueStr(policy)
+    const currentDue = toInputDate(options.currentDue) || getPolicyDueDate(policy) || policy.nextPremiumDue || _policyDueStr(policy)
     if (!currentDue) throw new Error('Could not calculate this policy premium due date.')
 
-    const nextInstallmentDue = addFrequencyInterval(currentDue, policy.frequency)
+    const nextFrequency = options.frequency !== undefined
+      ? normaliseFrequency(options.frequency)
+      : normaliseFrequency(policy.frequency)
+
+    const manualNextDue = toInputDate(options.nextPremiumDue)
+    const nextInstallmentDue = manualNextDue
+      ? parseAnyDate(manualNextDue)
+      : addFrequencyInterval(currentDue, nextFrequency)
     if (!nextInstallmentDue) throw new Error('Could not calculate next premium due date.')
 
     const expiry = parseAnyDate(policy.expiryDate)
     const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
-    const cappedDue = !isLifePolicy && expiry && nextInstallmentDue > expiry
-      ? expiry
-      : nextInstallmentDue
+    if (!isLifePolicy && expiry && nextInstallmentDue > expiry) {
+      throw new Error('Premium due date cannot be after policy expiry for non-life policies. Use Renew instead.')
+    }
 
     tx.update(policyRef, {
+      frequency: nextFrequency,
       lastPremiumPaidAt: serverTimestamp(),
       lastPremiumPaidDueDate: currentDue,
-      nextPremiumDue: toInputDate(cappedDue),
+      nextPremiumDue: toInputDate(nextInstallmentDue),
       updatedAt: serverTimestamp(),
     })
 
