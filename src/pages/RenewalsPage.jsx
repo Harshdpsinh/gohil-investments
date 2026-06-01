@@ -15,6 +15,7 @@ import { addFrequencyInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAn
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import DateInput from '../components/ui/DateInput'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
@@ -76,12 +77,13 @@ const RENEW_INSURERS = [
 ]
 
 function RenewModal({ policy, onConfirm, onClose }) {
+  const originalFrequency = normaliseFrequency(policy.frequency || 'Yearly')
   const oldExpiry = getPolicyDueDate(policy) || ''
   const defaultStart = oldExpiry
     ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
     : toInputDate(new Date())
   const defaultExpiry = defaultStart
-    ? toInputDate(addFrequencyInterval(defaultStart, policy.frequency || 'Yearly'))
+    ? toInputDate(addFrequencyInterval(defaultStart, originalFrequency))
     : ''
 
   // ── "Same company" or "Switch company" — explicit toggle ──
@@ -92,6 +94,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
     insurer:      policy.insurer || '',
     planName:     policy.planName || '',
     premium:      policy.premium || '',
+    frequency:    originalFrequency,
     startDate:    defaultStart,
     expiryDate:   defaultExpiry,
     fyCommission: policy.fyCommission || '',
@@ -100,6 +103,26 @@ function RenewModal({ policy, onConfirm, onClose }) {
   })
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
+
+  const recalcExpiry = (startDate, frequency) =>
+    toInputDate(addFrequencyInterval(startDate, normaliseFrequency(frequency || 'Yearly')))
+
+  const setFrequencyAndExpiry = (value) => {
+    const cleanFrequency = normaliseFrequency(value)
+    setForm(p => ({
+      ...p,
+      frequency: cleanFrequency,
+      expiryDate: recalcExpiry(p.startDate, cleanFrequency) || p.expiryDate,
+    }))
+  }
+
+  const setStartAndExpiry = (value) => {
+    setForm(p => ({
+      ...p,
+      startDate: value,
+      expiryDate: recalcExpiry(value, p.frequency) || p.expiryDate,
+    }))
+  }
 
   // When user clicks "Same Company" reset insurer/plan back to original
   const handleCompanyToggle = (same) => {
@@ -263,13 +286,22 @@ function RenewModal({ policy, onConfirm, onClose }) {
                    className="form-input" required />
           </div>
           <div>
+            <label className="form-label">Premium Frequency</label>
+            <select value={form.frequency} onChange={e => setFrequencyAndExpiry(e.target.value)} className="form-input">
+              <option value="Yearly">Yearly</option>
+              <option value="Half-Yearly">Half-Yearly</option>
+              <option value="Quarterly">Quarterly</option>
+              <option value="Monthly">Monthly</option>
+            </select>
+          </div>
+          <div>
             <label className="form-label">New Start Date *</label>
-            <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)}
+            <DateInput value={form.startDate} onChange={setStartAndExpiry}
                    className="form-input" required />
           </div>
           <div>
             <label className="form-label">New Expiry Date *</label>
-            <input type="date" value={form.expiryDate} onChange={e => set('expiryDate', e.target.value)}
+            <DateInput value={form.expiryDate} onChange={v => set('expiryDate', v)}
                    className="form-input" required />
           </div>
           <div>
@@ -288,6 +320,13 @@ function RenewModal({ policy, onConfirm, onClose }) {
           <label className="form-label">Notes</label>
           <textarea rows={2} value={form.notes} onChange={e => set('notes', e.target.value)}
                     className="form-input" placeholder="e.g. Sum insured increased to 10L" />
+        </div>
+
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3 text-xs">
+          <p className="font-semibold text-emerald-800 dark:text-emerald-200">Renewal change request</p>
+          <p className="text-emerald-700 dark:text-emerald-300 mt-1">
+            Frequency: {originalFrequency} -&gt; {form.frequency} · New term: {fmtDate(form.startDate)} to {fmtDate(form.expiryDate)}
+          </p>
         </div>
 
         <div className="flex gap-3 pt-2">
@@ -382,13 +421,7 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
 
         <div>
           <label className="form-label">Next Premium Due / Renewal Date</label>
-          <input
-            type="date"
-            value={nextDue}
-            onChange={e => setNextDue(e.target.value)}
-            className="form-input"
-            disabled={saving}
-          />
+          <DateInput value={nextDue} onChange={setNextDue} className="form-input" disabled={saving} />
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Auto-calculated from frequency. You can manually correct it before saving.
           </p>
@@ -503,19 +536,22 @@ export default function RenewalsPage() {
         const dueStr = getPolicyDueDate(p)
         if (!dueStr) return false
 
-        const dueDate = new Date(dueStr)
+        const dueDate = parseAnyDate(dueStr)
         if (isNaN(dueDate.getTime())) return false
 
         // Date range filter
-        if (dateFrom && dueDate < new Date(dateFrom)) return false
-        if (dateTo   && dueDate > new Date(dateTo))   return false
+        const fromDate = parseAnyDate(dateFrom)
+        const toDate = parseAnyDate(dateTo)
+        if (fromDate && dueDate < fromDate) return false
+        if (toDate && dueDate > toDate) return false
 
         // Day window filter
         const d = daysUntilPolicyDue(p)
         // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
-        if (dayWindow === -1) {
+        const hasManualDateRange = !!(fromDate || toDate)
+        if (!hasManualDateRange && dayWindow === -1) {
           if (d === null || d >= 0) return false
-        } else {
+        } else if (!hasManualDateRange) {
           if (d === null || d < 0 || d > dayWindow) return false
         }
 
@@ -600,6 +636,7 @@ export default function RenewalsPage() {
 
         // Renewal-form overrides
         premium:      renewForm.premium,
+        frequency:    renewForm.frequency || policy.frequency || 'Yearly',
         startDate:    renewForm.startDate,
         expiryDate:   renewForm.expiryDate,
         fyCommission: renewForm.fyCommission,
@@ -736,12 +773,12 @@ export default function RenewalsPage() {
         {/* Date range */}
         <div className="flex items-center gap-2 ml-2">
           <span className="text-xs text-gray-400">From:</span>
-          <input type="date" value={dateFrom}
-                 onChange={e => setDateFrom(e.target.value)}
+          <DateInput value={dateFrom}
+                 onChange={setDateFrom}
                  className="form-input text-xs py-1 px-2 w-36" />
           <span className="text-xs text-gray-400">To:</span>
-          <input type="date" value={dateTo}
-                 onChange={e => setDateTo(e.target.value)}
+          <DateInput value={dateTo}
+                 onChange={setDateTo}
                  className="form-input text-xs py-1 px-2 w-36" />
           {(dateFrom || dateTo) && (
             <button onClick={() => { setDateFrom(''); setDateTo('') }}
