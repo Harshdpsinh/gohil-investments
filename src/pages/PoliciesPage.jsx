@@ -7,9 +7,9 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
   importPoliciesBatch,
-  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, cascadeUpdateClient,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
-  subscribeProposals, updateProposal,
+  subscribeProposals, updateProposal, findClientByMobileOrName,
 } from '../firebase/firestore'
 import { getDownloadUrl, getPreviewUrl, uploadPolicyPdf } from '../firebase/storage'
 import {
@@ -1073,8 +1073,14 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
       const eName = data.clientName
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
+      if (!mc && (data.clientMobile || eName)) {
+        try { mc = await findClientByMobileOrName(data.clientMobile, eName) } catch {}
+      }
       const ov = overrides[eName]
-      if (!mc && ov?.id) mc = { id: ov.id, name: ov.name }
+      if (!mc && ov?.id) {
+        const mapped = clients.find(c => c.id === ov.id)
+        mc = mapped || { id: ov.id, name: ov.name }
+      }
 
       if (!mc && autoCreate && eName) {
         if (autoCreated[eName.toLowerCase()]) {
@@ -1093,13 +1099,18 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
       data.clientId   = mc?.id   || ''
       data.clientName = mc?.name || eName
+      data.clientMobile = data.clientMobile || mc?.mobile || ''
+      data.clientEmail  = data.clientEmail  || mc?.email  || ''
 
       if (mc?.id) {
         const needsUpdate = {}
         if (!mc.mobile && data.clientMobile) needsUpdate.mobile = data.clientMobile
         if (!mc.email  && data.clientEmail)  needsUpdate.email  = data.clientEmail
         if (Object.keys(needsUpdate).length > 0) {
-          try { await updateClient(mc.id, needsUpdate) } catch {}
+          try {
+            await cascadeUpdateClient(mc.id, needsUpdate)
+            mc = { ...mc, ...needsUpdate }
+          } catch {}
         }
       }
 
@@ -1964,6 +1975,8 @@ export default function PoliciesPage() {
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
                 const isDup = duplicatePolicyIds.has(p.id)
                 const dueDate = getPolicyDueDate(p)
+                const linkedClient = getPolicyClient(p)
+                const phone = p.clientMobile || linkedClient?.mobile || ''
                 const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(dueDate)
                 const bm={green:'badge-green',yellow:'badge-yellow',red:'badge-red',blue:'badge-blue',gray:'badge-gray'}
                 return(
@@ -1983,7 +1996,7 @@ export default function PoliciesPage() {
                     </td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
                     <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
-                      {p.clientMobile || <span className="text-gray-300 dark:text-gray-600">—</span>}
+                      {phone || <span className="text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                     <td className="table-cell text-xs">{p.insurer}</td>

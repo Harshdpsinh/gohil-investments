@@ -214,6 +214,27 @@ const premiumValue = row => col(row, [
   'Premium (₹)', 'Premium (Rs)', 'Premium Rs', 'Premium',
   'Annual Premium', 'Premium Amount', 'Amount'
 ])
+const clientNameValue = row => col(row, [
+  'Client Name', 'Customer Name', 'Policy Holder', 'Policyholder',
+  'Insured Name', 'Name'
+])
+const clientMobileValue = row => col(row, [
+  'Client Mobile', 'Client Phone', 'Client Phone Number',
+  'Customer Mobile', 'Customer Phone', 'Mobile', 'Mobile Number',
+  'Phone', 'Phone Number', 'Contact', 'Contact Number', 'WhatsApp', 'Whatsapp Number'
+])
+const clientEmailValue = row => col(row, [
+  'Client Email', 'Customer Email', 'Email', 'Email ID', 'Email Address'
+])
+const cleanMobile = value => {
+  const text = str(value)
+  if (!text) return ''
+  const digits = text.replace(/\D/g, '')
+  if (!digits) return ''
+  if (digits.startsWith('91') && digits.length > 10) return digits.slice(-10)
+  if (digits.startsWith('0') && digits.length === 11) return digits.slice(1)
+  return digits.length >= 10 ? digits.slice(-10) : digits
+}
 const sumInsuredValue = row => col(row, [
   'Sum Insured (₹)', 'Sum Insured (Rs)', 'Sum Insured',
   'Sum Insured Amount', 'Coverage Amount'
@@ -319,9 +340,9 @@ export function parseHealthRow(r) {
   return {
     policyType:      'Health',
     policyNumber:    str(r['Policy Number']),
-    clientName:      str(r['Client Name']),
-    clientMobile:    str(r['Client Mobile']),
-    clientEmail:     str(r['Client Email']),
+    clientName:      str(clientNameValue(r)),
+    clientMobile:    cleanMobile(clientMobileValue(r)),
+    clientEmail:     str(clientEmailValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),
@@ -372,9 +393,9 @@ export function parseLifeRow(r) {
   return {
     policyType:      'Life',
     policyNumber:    str(r['Policy Number']),
-    clientName:      str(r['Client Name']),
-    clientMobile:    str(r['Client Mobile']),
-    clientEmail:     str(r['Client Email']),
+    clientName:      str(clientNameValue(r)),
+    clientMobile:    cleanMobile(clientMobileValue(r)),
+    clientEmail:     str(clientEmailValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),
@@ -426,9 +447,9 @@ export function parseMotorRow(r) {
   return {
     policyType:      'Motor',
     policyNumber:    str(r['Policy Number']),
-    clientName:      str(r['Client Name']),
-    clientMobile:    str(r['Client Mobile']),
-    clientEmail:     str(r['Client Email']),
+    clientName:      str(clientNameValue(r)),
+    clientMobile:    cleanMobile(clientMobileValue(r)),
+    clientEmail:     str(clientEmailValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),
