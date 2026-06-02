@@ -380,6 +380,14 @@ function normalisePolicyPayload(data, { partial = false } = {}) {
     if (!next.clientId) throw new Error('Client is required.')
   }
   if (next.clientName !== undefined) next.clientName = String(next.clientName || '').trim()
+  if (next.clientMobile !== undefined) {
+    assertOptionalMobile(next.clientMobile)
+    next.clientMobile = String(next.clientMobile || '').trim()
+  }
+  if (next.clientEmail !== undefined) {
+    assertOptionalEmail(next.clientEmail)
+    next.clientEmail = String(next.clientEmail || '').trim().toLowerCase()
+  }
   if (!partial && next.policyType === undefined) next.policyType = 'Health'
   if (!partial && next.status === undefined) next.status = 'Active'
   if (!partial && next.frequency === undefined) next.frequency = 'Yearly'
@@ -562,7 +570,7 @@ export async function permanentDeletePolicy(id) {
 }
 
 export async function checkDuplicate(data) {
-  const { policyNumber, clientName, premium, insurer, registrationNo } = data
+  const { policyNumber, registrationNo } = data
 
   if (policyNumber?.trim()) {
     const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(5)))
@@ -573,20 +581,6 @@ export async function checkDuplicate(data) {
     const s = await getDocs(query(policiesRef(), where('registrationNo', '==', registrationNo.trim()), limit(5)))
     const match = s.docs.find(d => !d.data().deleted)
     if (match) return { isDup: true, reason: `Registration number "${registrationNo}" already exists`, existing: { id: match.id, ...match.data() } }
-  }
-  if (clientName?.trim() && premium && insurer?.trim()) {
-    const s = await getDocs(query(policiesRef(),
-      where('clientName', '==', clientName.trim()),
-      where('premium',    '==', premium),
-      where('insurer',    '==', insurer.trim()),
-      limit(3)
-    ))
-    if (!s.empty) {
-      const match = s.docs.find(d => !d.data().deleted)
-      if (match) {
-        return { isDup: true, reason: `Same client "${clientName}" + premium Rs.${premium} + insurer "${insurer}" already on record (${match.data().policyNumber})`, existing: { id: match.id, ...match.data() } }
-      }
-    }
   }
   return { isDup: false, reason: '', existing: null }
 }

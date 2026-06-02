@@ -777,7 +777,7 @@ export default function RenewalsPage() {
         <table className="min-w-full">
           <thead>
             <tr>
-              {['#', 'Client', 'Policy No', 'Type', 'Insurer', 'Due Date', 'Days', 'Premium ₹', 'Status', 'WhatsApp', 'Action'].map(h => (
+              {['#', 'Client', 'Phone', 'Policy No', 'Type', 'Insurer', 'Due Date', 'Days', 'Premium', 'Status', 'WhatsApp', 'Action'].map(h => (
                 <th key={h} className="table-header">{h}</th>
               ))}
             </tr>
@@ -785,7 +785,7 @@ export default function RenewalsPage() {
           <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-100 dark:divide-gray-700">
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                <td colSpan={12} className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <p className="text-2xl mb-2">🎉</p>
                   <p className="font-medium">No renewals in this window</p>
                   <p className="text-xs mt-1">Try a different day window or tab</p>
@@ -797,6 +797,8 @@ export default function RenewalsPage() {
                 const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
                 const dueStr = getPolicyDueDate(p)
                 const termRenewalDue = isTermRenewalDue(p)
+                const client = clients.find(c => c.id === p.clientId)
+                const phone = p.clientMobile || client?.mobile || ''
 
                 return (
                   <tr
@@ -805,6 +807,9 @@ export default function RenewalsPage() {
                     className="table-row">
                     <td className="table-cell text-gray-400 text-xs">{i + 1}</td>
                     <td className="table-cell font-semibold">{p.clientName}</td>
+                    <td className="table-cell text-xs font-medium">
+                      {phone || <span className="text-orange-500">Missing</span>}
+                    </td>
                     <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                     <td className="table-cell">
                       <span className="badge-blue text-xs">{p.policyType || 'Health'}</span>

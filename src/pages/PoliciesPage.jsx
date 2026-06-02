@@ -467,7 +467,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
       dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
       return fixed
     }
-    return fixDates({ ...typeExtras, ...base })
+    return fixDates({
+      ...typeExtras,
+      ...base,
+      _clientMobile: base.clientMobile || base._clientMobile || '',
+      _clientEmail: base.clientEmail || base._clientEmail || '',
+    })
   })
   const [saving, setSaving]         = useState(false)
   const [showQA, setShowQA]         = useState(false)
@@ -571,8 +576,11 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
       toast.error('RY commission must be between 0 and 100'); return
     }
     setSaving(true)
-    // Strip UI-only fields before saving to Firestore
+    const selectedClient = localClients.find(c => c.id === form.clientId)
+    // Strip UI-only fields, then save a denormalized contact snapshot for renewal rows.
     const { _clientMobile: _cm, _clientEmail: _ce, ...cleanForm } = form
+    cleanForm.clientMobile = selectedClient?.mobile || _cm || form.clientMobile || ''
+    cleanForm.clientEmail = selectedClient?.email || _ce || form.clientEmail || ''
     // Normalise frequency before saving
     if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
     try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
@@ -585,7 +593,11 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
       <form onSubmit={onSubmit} className="space-y-4">
         {/* Base fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {inp('policyNumber','Policy Number *','text',{required:true,placeholder:'ICL-2024-001'})}
+          {inp('policyNumber','Policy Number *','text',{
+            required:true,
+            placeholder:'ICL-2024-001',
+            onBlur: e => onPolicyNumberChange?.(e.target.value),
+          })}
           <div>
             <label className="form-label">Client *</label>
             <div className="flex gap-2 items-center">
@@ -1520,9 +1532,9 @@ export default function PoliciesPage() {
   }, [policies, search, typeFilter, showRenewed])
 
   // ── Duplicate detector ───────────────────────────────────────
-  // Detects duplicates across ALL policies (not just filtered) by:
-  // 1. Same policy number (exact, case-insensitive)
-  // 2. Same clientId + insurer + policyType (same client, same cover)
+  // Detects true duplicates across ALL policies (not just filtered).
+  // Same client can legitimately hold multiple policies with the same insurer/type,
+  // so we only flag exact policy-number duplicates and exact motor registration duplicates.
   const [showDupsOnly, setShowDupsOnly] = useState(false)
 
   const duplicatePolicyIds = useMemo(() => {
@@ -1540,15 +1552,15 @@ export default function PoliciesPage() {
       if (ids.length > 1) ids.forEach(id => dupIds.add(id))
     })
 
-    // 2. Group by clientId + insurer + policyType (same client/cover duplicates)
-    const byCover = {}
+    // 2. Group by motor registration number
+    const byRegistration = {}
     policies.forEach(p => {
-      if (!p.clientId || !p.insurer || !p.policyType) return
-      const key = `${p.clientId}|${(p.insurer||'').toLowerCase()}|${p.policyType}`
-      if (!byCover[key]) byCover[key] = []
-      byCover[key].push(p.id)
+      const key = (p.registrationNo || '').trim().toLowerCase()
+      if (!key) return
+      if (!byRegistration[key]) byRegistration[key] = []
+      byRegistration[key].push(p.id)
     })
-    Object.values(byCover).forEach(ids => {
+    Object.values(byRegistration).forEach(ids => {
       if (ids.length > 1) ids.forEach(id => dupIds.add(id))
     })
 
