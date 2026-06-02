@@ -221,7 +221,9 @@ const clientNameValue = row => col(row, [
 const clientMobileValue = row => col(row, [
   'Client Mobile', 'Client Phone', 'Client Phone Number',
   'Customer Mobile', 'Customer Phone', 'Mobile', 'Mobile Number',
-  'Phone', 'Phone Number', 'Contact', 'Contact Number', 'WhatsApp', 'Whatsapp Number'
+  'Mobile No', 'Mobile No.', 'Mob No', 'Mob No.', 'Phone', 'Phone Number',
+  'Phone No', 'Phone No.', 'Contact', 'Contact Number', 'Contact No',
+  'Contact No.', 'WhatsApp', 'Whatsapp Number', 'Whatsapp No', 'WhatsApp No.'
 ])
 const clientEmailValue = row => col(row, [
   'Client Email', 'Customer Email', 'Email', 'Email ID', 'Email Address'

@@ -1055,22 +1055,6 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       const pNo  = data.policyNumber
       if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
 
-      const dupChoice = dupResolutions[pNo]
-      if (dupChoice === 'skip') continue
-
-      const lapseChoice = lapseResolutions[pNo]
-      if (lapseChoice?.action === 'skip') continue
-      if (lapseChoice?.action === 'import') {
-        if (lapseChoice.newStart)  data.startDate  = lapseChoice.newStart
-        if (lapseChoice.newExpiry) data.expiryDate = lapseChoice.newExpiry
-        data.status = 'Active'
-      }
-
-      if (dupChoice === 'overwrite') {
-        data.policyNumber = pNo + '_v2_' + Date.now().toString().slice(-4)
-        toast(`Info: ${pNo} imported as ${data.policyNumber}`)
-      }
-
       const eName = data.clientName
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
       if (!mc && (data.clientMobile || eName)) {
@@ -1104,14 +1088,36 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
       if (mc?.id) {
         const needsUpdate = {}
-        if (!mc.mobile && data.clientMobile) needsUpdate.mobile = data.clientMobile
-        if (!mc.email  && data.clientEmail)  needsUpdate.email  = data.clientEmail
+        const existingMobile = String(mc.mobile || '').replace(/\D/g, '').slice(-10)
+        const importedMobile = String(data.clientMobile || '').replace(/\D/g, '').slice(-10)
+        if (importedMobile && existingMobile !== importedMobile) needsUpdate.mobile = data.clientMobile
+        if (data.clientEmail && String(mc.email || '').trim().toLowerCase() !== String(data.clientEmail).trim().toLowerCase()) needsUpdate.email = data.clientEmail
         if (Object.keys(needsUpdate).length > 0) {
           try {
             await cascadeUpdateClient(mc.id, needsUpdate)
             mc = { ...mc, ...needsUpdate }
-          } catch {}
+          } catch(err) {
+            errs.push(`Row ${i+2}: Could not update mobile/email for "${data.clientName}" - ${err.message}`)
+          }
         }
+      }
+      data.clientMobile = data.clientMobile || mc?.mobile || ''
+      data.clientEmail = data.clientEmail || mc?.email || ''
+
+      const dupChoice = dupResolutions[pNo]
+      if (dupChoice === 'skip') continue
+
+      const lapseChoice = lapseResolutions[pNo]
+      if (lapseChoice?.action === 'skip') continue
+      if (lapseChoice?.action === 'import') {
+        if (lapseChoice.newStart)  data.startDate  = lapseChoice.newStart
+        if (lapseChoice.newExpiry) data.expiryDate = lapseChoice.newExpiry
+        data.status = 'Active'
+      }
+
+      if (dupChoice === 'overwrite') {
+        data.policyNumber = pNo + '_v2_' + Date.now().toString().slice(-4)
+        toast(`Info: ${pNo} imported as ${data.policyNumber}`)
       }
 
       preparedPolicies.push(data)
