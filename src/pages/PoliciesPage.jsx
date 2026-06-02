@@ -22,7 +22,7 @@ import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
 import DateInput    from '../components/ui/DateInput'
-import { addFrequencyInterval, computeNextPremiumDue, fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency, parseAnyDate } from '../utils/dateUtils'
+import { addPolicyCoverageInterval, computeNextPolicyDue, fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency, parseAnyDate } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
   downloadTemplate, parseImportFile, normaliseDate,
@@ -73,6 +73,7 @@ const ADDONS = [
 const BASE_EMPTY = {
   policyNumber:'', clientId:'', clientName:'', policyType:'Health',
   insurer:'', planName:'', premium:'', sumAssured:'', frequency:'Yearly',
+  isMultiYearPolicy:false, coverageTermYears:1,
   startDate:'', expiryDate:'', nextPremiumDue:'', status:'Active',
   nominee:'', nomineeRelation:'',
   fyCommission:'', ryCommission:'', notes:''
@@ -528,16 +529,18 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
 
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
-  const calculateNextDue = (startDate, frequency) => {
-    const start = parseAnyDate(startDate)
+  const calculateNextDue = (policy) => {
+    const start = parseAnyDate(policy.startDate)
     if (!start) return ''
-    const cleanFrequency = normaliseFrequency(frequency || 'Yearly')
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const startDay = new Date(start)
-    startDay.setHours(0, 0, 0, 0)
-    if (startDay >= today) return toInputDate(addFrequencyInterval(startDay, cleanFrequency))
-    return toInputDate(computeNextPremiumDue(startDay, cleanFrequency))
+    return toInputDate(computeNextPolicyDue({
+      ...policy,
+      frequency: normaliseFrequency(policy.frequency || 'Yearly'),
+    }))
+  }
+
+  const calculateExpiry = (policy) => {
+    if (!policy.isMultiYearPolicy || Number(policy.coverageTermYears || 1) <= 1) return policy.expiryDate || ''
+    return toInputDate(addPolicyCoverageInterval(policy.startDate, policy))
   }
 
   const setFrequencyAndDue = (value) => {
@@ -545,22 +548,50 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     setForm(p => ({
       ...p,
       frequency: cleanFrequency,
-      nextPremiumDue: calculateNextDue(p.startDate, cleanFrequency) || p.nextPremiumDue || '',
+      nextPremiumDue: calculateNextDue({ ...p, frequency: cleanFrequency }) || p.nextPremiumDue || '',
     }))
   }
 
   const setStartDateAndDue = (value) => {
-    setForm(p => ({
-      ...p,
-      startDate: value,
-      nextPremiumDue: calculateNextDue(value, p.frequency) || p.nextPremiumDue || '',
-    }))
+    setForm(p => {
+      const next = { ...p, startDate: value }
+      const expiryDate = calculateExpiry(next) || p.expiryDate || ''
+      return {
+        ...next,
+        expiryDate,
+        nextPremiumDue: calculateNextDue({ ...next, expiryDate }) || p.nextPremiumDue || '',
+      }
+    })
+  }
+
+  const setCoverageTerm = (years) => {
+    const coverageTermYears = Number(years || 1)
+    setForm(p => {
+      const next = {
+        ...p,
+        coverageTermYears,
+        isMultiYearPolicy: coverageTermYears > 1,
+        frequency: coverageTermYears > 1 ? 'Yearly' : normaliseFrequency(p.frequency || 'Yearly'),
+      }
+      const expiryDate = calculateExpiry(next) || p.expiryDate || ''
+      return {
+        ...next,
+        expiryDate,
+        nextPremiumDue: calculateNextDue({ ...next, expiryDate }) || p.nextPremiumDue || '',
+      }
+    })
   }
 
   // When type changes, merge in new type defaults without wiping entered data
   const onTypeChange = newType => {
     const extras = getTypeDefaults(newType)
-    setForm(p => ({ ...extras, ...p, policyType: newType }))
+    setForm(p => ({
+      ...extras,
+      ...p,
+      policyType: newType,
+      isMultiYearPolicy: newType === 'Life' ? false : p.isMultiYearPolicy,
+      coverageTermYears: newType === 'Life' ? 1 : (p.coverageTermYears || 1),
+    }))
   }
 
   const onClientChange = e => {
@@ -609,6 +640,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     const due = parseAnyDate(form.nextPremiumDue)
     const expiry = parseAnyDate(form.expiryDate)
     const isLifePolicy = String(form.policyType || '').trim().toLowerCase() === 'life'
+    if (!isLifePolicy && form.isMultiYearPolicy) {
+      const years = Number(form.coverageTermYears || 1)
+      if (!Number.isInteger(years) || years < 2 || years > 5) {
+        toast.error('Multi-year policy term must be between 2 and 5 years.'); return
+      }
+    }
     if (!isLifePolicy && due && expiry && due > expiry) {
       toast.error('For non-life policies, premium due cannot be after policy expiry. Please renew the policy instead.'); return
     }
@@ -629,6 +666,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     cleanForm.clientEmail = selectedClient?.email || _ce || form.clientEmail || ''
     // Normalise frequency before saving
     if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
+    cleanForm.coverageTermYears = Number(cleanForm.coverageTermYears || 1)
+    cleanForm.isMultiYearPolicy = !isLifePolicy && cleanForm.coverageTermYears > 1
     try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
     finally { setSaving(false) }
   }
@@ -698,6 +737,25 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
               {FREQS.map(o=><option key={o}>{o}</option>)}
             </select>
           </div>
+          {String(form.policyType || '').toLowerCase() !== 'life' && (
+            <div>
+              <label className="form-label">Policy Coverage Term</label>
+              <select
+                value={String(form.isMultiYearPolicy ? form.coverageTermYears || 2 : 1)}
+                onChange={e => setCoverageTerm(e.target.value)}
+                className="form-select"
+              >
+                <option value="1">Single year</option>
+                <option value="2">Multi-year - 2 years</option>
+                <option value="3">Multi-year - 3 years</option>
+                <option value="4">Multi-year - 4 years</option>
+                <option value="5">Multi-year - 5 years</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Use this when one payment covers multiple years. Renewal will appear after this term.
+              </p>
+            </div>
+          )}
           {sel('status','Status',STATUS)}
           <div>
             <label className="form-label">Start Date</label>

@@ -123,6 +123,42 @@ export function addFrequencyInterval(date, frequency) {
   return addMonths(d, frequencyMonths(frequency))
 }
 
+export function coverageTermYears(policy) {
+  const raw = Number(policy?.coverageTermYears || policy?.policyCoverageYears || 1)
+  if (!Number.isFinite(raw)) return 1
+  return Math.min(5, Math.max(1, Math.round(raw)))
+}
+
+export function isMultiYearPolicy(policy) {
+  if (!policy) return false
+  const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+  return !isLifePolicy && Boolean(policy.isMultiYearPolicy) && coverageTermYears(policy) > 1
+}
+
+export function addPolicyCoverageInterval(date, policy) {
+  const d = parseAnyDate(date)
+  if (!d) return null
+  return addMonths(d, coverageTermYears(policy) * 12)
+}
+
+export function computeNextPolicyDue(policy) {
+  if (!policy) return null
+  if (isMultiYearPolicy(policy)) {
+    const start = parseAnyDate(policy.startDate)
+    if (!start) return null
+    const today = startOfDay(new Date())
+    const months = coverageTermYears(policy) * 12
+    let next = startOfDay(start)
+    let intervals = 0
+    while (next < today && intervals < 100) {
+      intervals += 1
+      next = startOfDay(addMonths(start, intervals * months))
+    }
+    return next
+  }
+  return computeNextPremiumDue(policy.startDate, policy.frequency)
+}
+
 export function getNextInstallmentDue(policy) {
   const due = parseAnyDate(getDueDate(policy))
   if (!due) return ''
@@ -164,7 +200,7 @@ export function getDueDate(policy) {
     if (!isLifePolicy && due && expiry && due > expiry) return toInputDate(expiry)
     return storedDue
   }
-  const computedDue = computeNextPremiumDue(policy.startDate, policy.frequency)
+  const computedDue = computeNextPolicyDue(policy)
   if (computedDue) {
     if (!isLifePolicy && expiry && computedDue > expiry) return toInputDate(expiry)
     return toInputDate(computedDue)

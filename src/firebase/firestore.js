@@ -5,7 +5,7 @@ import {
   onSnapshot, writeBatch, setDoc, limit, runTransaction
 } from 'firebase/firestore'
 import { db } from './config'
-import { addFrequencyInterval, computeNextPremiumDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
+import { addFrequencyInterval, computeNextPolicyDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
 
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
@@ -367,14 +367,12 @@ const POLICY_TYPES = ['Health','Life','Motor','Home','Travel','Marine','Fire','O
 const POLICY_STATUSES = ['Active','Lapsed','Cancelled','Matured','Renewed-Out']
 const POLICY_FREQUENCIES = ['Yearly','Half-Yearly','Quarterly','Monthly']
 
-// computeNextPremiumDue is now imported from '../utils/dateUtils' above.
-// Call sites use: computeNextPremiumDue(startDate, frequency)?.toISOString().split('T')[0] ?? null
 function _nextDueStr(startDate, frequency) {
-  return toInputDate(computeNextPremiumDue(startDate, frequency)) || null
+  return toInputDate(computeNextPolicyDue({ startDate, frequency })) || null
 }
 
 function _policyDueStr(policy) {
-  const due = computeNextPremiumDue(policy.startDate, policy.frequency)
+  const due = computeNextPolicyDue(policy)
   if (!due) return null
   const expiry = parseAnyDate(policy.expiryDate)
   const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
@@ -430,6 +428,17 @@ function normalisePolicyPayload(data, { partial = false } = {}) {
   if (next.frequency !== undefined) {
     next.frequency = normaliseFrequency(next.frequency)
     assertInList(next.frequency, POLICY_FREQUENCIES, 'Premium frequency')
+  }
+  if (next.isMultiYearPolicy !== undefined) {
+    next.isMultiYearPolicy = Boolean(next.isMultiYearPolicy)
+  }
+  if (next.coverageTermYears !== undefined && next.coverageTermYears !== '') {
+    const years = Number(next.coverageTermYears)
+    if (!Number.isInteger(years) || years < 1 || years > 5) {
+      throw new Error('Coverage term must be between 1 and 5 years.')
+    }
+    next.coverageTermYears = years
+    next.isMultiYearPolicy = years > 1
   }
   if (next.insurer !== undefined && next.insurer !== null) next.insurer = String(next.insurer).trim()
   if (!partial && !next.insurer) throw new Error('Insurer is required.')

@@ -11,7 +11,7 @@ import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
   markPremiumPaid,
 } from '../firebase/firestore'
-import { addFrequencyInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
+import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -78,12 +78,17 @@ const RENEW_INSURERS = [
 
 function RenewModal({ policy, onConfirm, onClose }) {
   const originalFrequency = normaliseFrequency(policy.frequency || 'Yearly')
+  const originalCoverageTermYears = Number(policy.coverageTermYears || 1)
+  const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
   const oldExpiry = getPolicyDueDate(policy) || ''
   const defaultStart = oldExpiry
     ? toInputDate(new Date(new Date(oldExpiry).getTime() + 86400000))
     : toInputDate(new Date())
+  const defaultCoverageTermYears = !isLifePolicy && originalCoverageTermYears > 1 ? originalCoverageTermYears : 1
   const defaultExpiry = defaultStart
-    ? toInputDate(addFrequencyInterval(defaultStart, originalFrequency))
+    ? toInputDate(defaultCoverageTermYears > 1
+      ? addPolicyCoverageInterval(defaultStart, { coverageTermYears: defaultCoverageTermYears })
+      : addFrequencyInterval(defaultStart, originalFrequency))
     : ''
 
   // ── "Same company" or "Switch company" — explicit toggle ──
@@ -95,6 +100,8 @@ function RenewModal({ policy, onConfirm, onClose }) {
     planName:     policy.planName || '',
     premium:      policy.premium || '',
     frequency:    originalFrequency,
+    coverageTermYears: defaultCoverageTermYears,
+    isMultiYearPolicy: defaultCoverageTermYears > 1,
     startDate:    defaultStart,
     expiryDate:   defaultExpiry,
     fyCommission: policy.fyCommission || '',
@@ -104,15 +111,28 @@ function RenewModal({ policy, onConfirm, onClose }) {
   const [saving, setSaving] = useState(false)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
-  const recalcExpiry = (startDate, frequency) =>
-    toInputDate(addFrequencyInterval(startDate, normaliseFrequency(frequency || 'Yearly')))
+  const recalcExpiry = (startDate, frequency, coverageTermYears = 1) =>
+    toInputDate(Number(coverageTermYears) > 1
+      ? addPolicyCoverageInterval(startDate, { coverageTermYears })
+      : addFrequencyInterval(startDate, normaliseFrequency(frequency || 'Yearly')))
 
   const setFrequencyAndExpiry = (value) => {
     const cleanFrequency = normaliseFrequency(value)
     setForm(p => ({
       ...p,
       frequency: cleanFrequency,
-      expiryDate: recalcExpiry(p.startDate, cleanFrequency) || p.expiryDate,
+      expiryDate: recalcExpiry(p.startDate, cleanFrequency, p.coverageTermYears) || p.expiryDate,
+    }))
+  }
+
+  const setCoverageTermAndExpiry = (value) => {
+    const years = Number(value || 1)
+    setForm(p => ({
+      ...p,
+      coverageTermYears: years,
+      isMultiYearPolicy: years > 1,
+      frequency: years > 1 ? 'Yearly' : p.frequency,
+      expiryDate: recalcExpiry(p.startDate, years > 1 ? 'Yearly' : p.frequency, years) || p.expiryDate,
     }))
   }
 
@@ -120,7 +140,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
     setForm(p => ({
       ...p,
       startDate: value,
-      expiryDate: recalcExpiry(value, p.frequency) || p.expiryDate,
+      expiryDate: recalcExpiry(value, p.frequency, p.coverageTermYears) || p.expiryDate,
     }))
   }
 
@@ -156,6 +176,12 @@ function RenewModal({ policy, onConfirm, onClose }) {
     }
     if (!companySame && !form.insurer.trim()) {
       toast.error('Please select the new insurance company'); return
+    }
+    if (!isLifePolicy && form.isMultiYearPolicy) {
+      const years = Number(form.coverageTermYears || 1)
+      if (!Number.isInteger(years) || years < 2 || years > 5) {
+        toast.error('Multi-year renewal term must be between 2 and 5 years'); return
+      }
     }
     setSaving(true)
     try { await onConfirm({ ...form, companySame }) }
@@ -294,6 +320,18 @@ function RenewModal({ policy, onConfirm, onClose }) {
               <option value="Monthly">Monthly</option>
             </select>
           </div>
+          {!isLifePolicy && (
+            <div>
+              <label className="form-label">Renewal Coverage Term</label>
+              <select value={String(form.coverageTermYears || 1)} onChange={e => setCoverageTermAndExpiry(e.target.value)} className="form-input">
+                <option value="1">Single year</option>
+                <option value="2">Multi-year - 2 years</option>
+                <option value="3">Multi-year - 3 years</option>
+                <option value="4">Multi-year - 4 years</option>
+                <option value="5">Multi-year - 5 years</option>
+              </select>
+            </div>
+          )}
           <div>
             <label className="form-label">New Start Date *</label>
             <DateInput value={form.startDate} onChange={setStartAndExpiry}
@@ -619,6 +657,8 @@ export default function RenewalsPage() {
         // Renewal-form overrides
         premium:      renewForm.premium,
         frequency:    renewForm.frequency || policy.frequency || 'Yearly',
+        coverageTermYears: Number(renewForm.coverageTermYears || 1),
+        isMultiYearPolicy: Boolean(renewForm.isMultiYearPolicy),
         startDate:    renewForm.startDate,
         expiryDate:   renewForm.expiryDate,
         fyCommission: renewForm.fyCommission,
