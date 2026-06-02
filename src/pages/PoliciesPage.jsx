@@ -1,5 +1,6 @@
 // src/pages/PoliciesPage.jsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { useAuth }     from '../hooks/useAuth'
@@ -8,6 +9,7 @@ import {
   importPoliciesBatch,
   savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, updateClient,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
+  subscribeProposals, updateProposal,
 } from '../firebase/firestore'
 import { getDownloadUrl, getPreviewUrl, uploadPolicyPdf } from '../firebase/storage'
 import {
@@ -74,6 +76,50 @@ const BASE_EMPTY = {
   startDate:'', expiryDate:'', nextPremiumDue:'', status:'Active',
   nominee:'', nomineeRelation:'',
   fyCommission:'', ryCommission:'', notes:''
+}
+
+function proposalToPolicyInitial(proposal, clients = []) {
+  if (!proposal) return null
+  const client = clients.find(c => c.id === proposal.clientId)
+  const policyType = TYPES.includes(proposal.policyType) ? proposal.policyType : 'Health'
+  const mobile = proposal.mobile || client?.mobile || ''
+  const email = proposal.email || client?.email || ''
+  const base = {
+    ...BASE_EMPTY,
+    ...getTypeDefaults(policyType),
+    policyType,
+    clientId: proposal.clientId || '',
+    clientName: proposal.clientName || proposal.proposerName || client?.name || '',
+    clientMobile: mobile,
+    clientEmail: email,
+    _clientMobile: mobile,
+    _clientEmail: email,
+    insurer: proposal.insurer || '',
+    planName: proposal.planName || '',
+    premium: proposal.premium || '',
+    frequency: normaliseFrequency(proposal.frequency || 'Yearly'),
+    sumAssured: proposal.sumAssured || '',
+    sumInsured: proposal.sumAssured || proposal.sumInsured || '',
+    nominee: proposal.nomineeName || '',
+    nomineeRelation: proposal.nomineeRelation || '',
+    policyTerm: proposal.policyTerm || '',
+    proposalId: proposal.id || '',
+    source: 'proposal',
+    notes: proposal.notes ? `Converted from proposal: ${proposal.notes}` : 'Converted from proposal',
+  }
+  if (policyType === 'Health') {
+    base.members = proposal.members?.length ? proposal.members : base.members
+    base.planType = proposal.planType || base.planType || ''
+    base.pastOperation = proposal.pastOperation || ''
+    base.existingIllness = proposal.existingIllness || ''
+  }
+  if (policyType === 'Life') {
+    base.height = proposal.height || ''
+    base.weight = proposal.weight || ''
+    base.motherName = proposal.motherName || ''
+    base.familyIllness = proposal.familyIllness || ''
+  }
+  return base
 }
 
 // ── Quick Add Client overlay ──────────────────────────────────
@@ -1506,6 +1552,7 @@ export default function PoliciesPage() {
   const { clients }           = useClients()
   const { policies, loading } = usePolicies()
   const { isAdmin }           = useAuth()
+  const location              = useLocation()
   const [search,      setSearch]      = useState('')
   const [typeFilter,  setTypeFilter]  = useState('All')
   const [modal,       setModal]       = useState(null)
@@ -1518,6 +1565,9 @@ export default function PoliciesPage() {
   const [showRecycleBin, setShowRecycleBin] = useState(false)
   const [showRenewed,    setShowRenewed]    = useState(false)
   const [whatsAppMenu,   setWhatsAppMenu]   = useState(null)
+  const [proposals,      setProposals]      = useState([])
+  const [proposalPrefill,setProposalPrefill]= useState(null)
+  const consumedProposalRef = useRef(null)
   const tableScrollRef = useRef(null)
   const topScrollRef   = useRef(null)
 
@@ -1587,6 +1637,24 @@ export default function PoliciesPage() {
 
   // ── Duplicate detector ───────────────────────────────────
   const [dupWarning, setDupWarning] = useState('')
+
+  useEffect(() => {
+    const unsub = subscribeProposals(
+      data => setProposals(data),
+      err => toast.error('Could not load proposals for policy auto-fill: ' + (err.message || 'Unknown error'))
+    )
+    return () => unsub()
+  }, [])
+
+  useEffect(() => {
+    const proposal = location.state?.proposalToPolicy
+    if (!proposal?.id || consumedProposalRef.current === proposal.id) return
+    consumedProposalRef.current = proposal.id
+    setProposalPrefill(proposalToPolicyInitial(proposal, clients))
+    setDupWarning('')
+    resetDeleteState()
+    setModal('add')
+  }, [location.state, clients])
   const checkDup = useCallback(async (policyNumber) => {
     if (!policyNumber?.trim()) { setDupWarning(''); return }
     const exists = await checkDuplicatePolicyNumber(policyNumber)
@@ -1698,8 +1766,16 @@ export default function PoliciesPage() {
   const onAdd    = async form => {
     try {
       await addPolicy(form)
+      if (form.proposalId) {
+        await updateProposal(form.proposalId, {
+          status: 'Converted',
+          convertedPolicyNumber: form.policyNumber || '',
+          convertedAt: new Date().toISOString(),
+        })
+      }
       toast.success('Policy added!')
       setModal(null)
+      setProposalPrefill(null)
     } catch(err) {
       toast.error('Failed to add policy: ' + (err.message || 'Unknown error'))
     }
@@ -1752,7 +1828,7 @@ export default function PoliciesPage() {
             className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
             title="Renewed-Out policies are hidden by default"
           >{showRenewed ? '🔄 Hide Renewed' : '🔄 Show Renewed'}</button>
-          <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setModal('add')}}>+ Add Policy</button>
+          <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setProposalPrefill(null);setModal('add')}}>+ Add Policy</button>
         </div>
       </div>
 
@@ -1908,8 +1984,37 @@ export default function PoliciesPage() {
           </tbody>
         </table>
       </div>
-      <Modal open={modal==='add'} onClose={()=>setModal(null)} title="Add New Policy" size="xl">
-        <PolicyForm clients={clients} onSave={onAdd} onCancel={()=>setModal(null)} onPolicyNumberChange={checkDup} dupWarning={dupWarning} />
+      <Modal open={modal==='add'} onClose={()=>{setModal(null);setProposalPrefill(null)}} title="Add New Policy" size="xl">
+        {proposals.length > 0 && (
+          <div className="mb-4 p-3 rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30">
+            <label className="form-label">Auto-fill from proposal</label>
+            <select
+              className="form-select mt-1"
+              value={proposalPrefill?.proposalId || ''}
+              onChange={e => {
+                const proposal = proposals.find(p => p.id === e.target.value)
+                setProposalPrefill(proposal ? proposalToPolicyInitial(proposal, clients) : null)
+                setDupWarning('')
+              }}
+            >
+              <option value="">Manual policy entry</option>
+              {proposals.map(p => (
+                <option key={p.id} value={p.id}>
+                  {(p.status === 'Converted' ? '[Converted] ' : '')}{p.proposerName || p.clientName || 'Proposal'} - {p.policyType || 'Policy'} - {p.insurer || 'No insurer'}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <PolicyForm
+          key={proposalPrefill?.proposalId || 'manual-policy'}
+          initial={proposalPrefill || undefined}
+          clients={clients}
+          onSave={onAdd}
+          onCancel={()=>{setModal(null);setProposalPrefill(null)}}
+          onPolicyNumberChange={checkDup}
+          dupWarning={dupWarning}
+        />
       </Modal>
       <Modal open={modal==='edit'} onClose={()=>setModal(null)} title="Edit Policy" size="xl">
         {selected&&<PolicyForm initial={selected} clients={clients} onSave={onEdit} onCancel={()=>setModal(null)} onPolicyNumberChange={()=>{}} dupWarning="" />}

@@ -111,6 +111,40 @@ async function policyCascadeRefs(policyId) {
   ]
 }
 
+async function cascadeUpdatePolicyLinks(policyId, policyData = {}) {
+  if (!policyId) return
+  const linkedUpdate = {}
+  const copyFields = [
+    'policyNumber',
+    'policyType',
+    'insurer',
+    'clientId',
+    'clientName',
+    'clientMobile',
+    'clientEmail',
+  ]
+  copyFields.forEach(field => {
+    if (policyData[field] !== undefined) linkedUpdate[field] = policyData[field]
+  })
+  if (Object.keys(linkedUpdate).length === 0) return
+
+  linkedUpdate.updatedAt = serverTimestamp()
+  const [claimsByPolicy, tasksByPolicy] = await Promise.all([
+    getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId))),
+    getDocs(query(collection(db, TASKS),  where('policyId', '==', policyId))),
+  ])
+  const refs = [
+    ...claimsByPolicy.docs.map(d => d.ref),
+    ...tasksByPolicy.docs.map(d => d.ref),
+  ]
+
+  for (let i = 0; i < refs.length; i += 400) {
+    const batch = writeBatch(db)
+    refs.slice(i, i + 400).forEach(ref => batch.update(ref, linkedUpdate))
+    await batch.commit()
+  }
+}
+
 /**
  * cascadeUpdateClient(id, data)
  * Updates the client record AND propagates name/mobile/email changes
@@ -533,7 +567,8 @@ export async function updatePolicy(id, data) {
       update.nextPremiumDue = _policyDueStr({ ...existing, ...payload, startDate: start, frequency: freq }) || null
     }
   }
-  return updateDoc(doc(db,POLICIES,id), update)
+  await updateDoc(doc(db,POLICIES,id), update)
+  await cascadeUpdatePolicyLinks(id, update)
 }
 // ── SOFT DELETE — marks policy as deleted instead of removing it.
 //    Accounted deletes can always be undone from the Recycle Bin.

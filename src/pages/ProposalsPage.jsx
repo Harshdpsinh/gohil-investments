@@ -1,9 +1,10 @@
 // src/pages/ProposalsPage.jsx
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useClients }       from '../hooks/useClients'
 import { useAuth }          from '../hooks/useAuth'
 import {
-  addProposal, subscribeProposals, deleteProposal,
+  addProposal, updateProposal, subscribeProposals, deleteProposal,
   addClient, updateClient, findClientByMobileOrName
 } from '../firebase/firestore'
 import { generateProposalPDF } from '../utils/proposalPDF'
@@ -100,7 +101,11 @@ function UpsertBadge({ status }) {
 }
 
 function ProposalForm({ clients, initial, onSave, onCancel }) {
-  const [form, setForm]     = useState(initial || EMPTY_FORM)
+  const [form, setForm]     = useState(() => ({
+    ...EMPTY_FORM,
+    ...(initial || {}),
+    members: initial?.members?.length ? initial.members : EMPTY_FORM.members,
+  }))
   const [saving, setSaving] = useState(false)
   const [upsertStatus, setUpsertStatus] = useState(null)
 
@@ -359,6 +364,7 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
 export default function ProposalsPage() {
   const { clients }               = useClients()
   const { isAdmin }               = useAuth()
+  const navigate                  = useNavigate()
   const [proposals, setProposals] = useState([])
   const [loading, setLoading]     = useState(true)
   const [modal,    setModal]      = useState(null)
@@ -389,6 +395,19 @@ export default function ProposalsPage() {
     } catch (err) {
       toast.error(err.message || 'Could not save proposal. Please try again.')
     }
+  }
+  const onEdit = async form => {
+    try {
+      await updateProposal(selected.id, form)
+      toast.success('Proposal updated!')
+      setModal(null)
+      setSelected(null)
+    } catch (err) {
+      toast.error(err.message || 'Could not update proposal. Please try again.')
+    }
+  }
+  const convertToPolicy = proposal => {
+    navigate('/policies', { state: { proposalToPolicy: proposal } })
   }
   const onDelete = async () => {
     try {
@@ -421,19 +440,25 @@ export default function ProposalsPage() {
             <table className="min-w-full">
               <thead>
                 <tr>
-                  {['Proposer','Type','Insurer','Plan','Premium','Client Linked','Created'].map(h => (
+                  {['Proposer','Type','Insurer','Plan','Premium','Client Linked','Status','Created'].map(h => (
                     <th key={h} className="table-header">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-gray-800">
                 {proposals.length === 0
-                  ? <tr><td colSpan={7} className="text-center py-12 text-gray-400">No proposals yet.</td></tr>
+                  ? <tr><td colSpan={8} className="text-center py-12 text-gray-400">No proposals yet.</td></tr>
                   : proposals.map(p => (
                     <tr key={p.id} className="table-row">
                       <td className="table-cell">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold">{p.proposerName}</span>
+                          <button onClick={() => { setSelected(p); setModal('edit') }}
+                                  className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">Edit</button>
+                          <button onClick={() => convertToPolicy(p)}
+                                  className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">
+                            Add Policy
+                          </button>
                           <button onClick={() => generateProposalPDF(p)}
                                   className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">PDF</button>
                           {isAdmin && (
@@ -452,6 +477,11 @@ export default function ProposalsPage() {
                           : <span className="text-xs text-gray-400">?</span>
                         }
                       </td>
+                      <td className="table-cell">
+                        <span className={p.status === 'Converted' ? 'badge-green' : 'badge-blue'}>
+                          {p.status || 'Draft'}
+                        </span>
+                      </td>
                       <td className="table-cell text-xs text-gray-400">{fmtDateTime(p.createdAt)}</td>
                     </tr>
                   ))}
@@ -463,6 +493,16 @@ export default function ProposalsPage() {
 
       <Modal open={modal === 'add'} onClose={() => setModal(null)} title="New Insurance Proposal" size="xl">
         <ProposalForm clients={clients} onSave={onAdd} onCancel={() => setModal(null)} />
+      </Modal>
+      <Modal open={modal === 'edit'} onClose={() => setModal(null)} title="Edit Insurance Proposal" size="xl">
+        {selected && (
+          <ProposalForm
+            clients={clients}
+            initial={selected}
+            onSave={onEdit}
+            onCancel={() => setModal(null)}
+          />
+        )}
       </Modal>
       <ConfirmDialog
         open={delOpen} onClose={() => setDelOpen(false)} onConfirm={onDelete}
