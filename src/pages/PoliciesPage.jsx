@@ -174,7 +174,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
     const file = e.target.files[0]
     if (!file) return
     if (!policyId) {
-      toast.error('Save the policy before attaching a PDF.')
+      toast.error('First save the policy, then use Upload PDF from the policy row or edit screen.')
       return
     }
 
@@ -186,7 +186,12 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
       toast.success('PDF uploaded')
       onUploaded(url, name)
     } catch(err) {
-      toast.error(err.message || 'PDF upload failed')
+      const message = err?.code === 'storage/unauthorized'
+        ? 'PDF upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
+        : err?.code === 'storage/quota-exceeded'
+          ? 'Firebase Storage quota is full. Free space or upgrade the plan.'
+          : err?.message || 'PDF upload failed. Please try again.'
+      toast.error(message)
     } finally {
       setUploading(false)
       setProgress(null)
@@ -196,7 +201,7 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
 
   if (!policyId) return (
     <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-3 text-xs text-gray-400 text-center">
-      Save policy first, then attach PDF.
+      Save policy first, then attach PDF from the policy row.
     </div>
   )
 
@@ -901,6 +906,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   const [importing,   setImporting]   = useState(false)
   const [preflighting,setPreflighting] = useState(false)  // scanning for dups/lapsed
   const [importProgress, setImportProgress] = useState({ done: 0, total: 0 })
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
   const [errors,      setErrors]      = useState([])
   const [autoAssign, setAutoAssign] = useState(true)
   // Duplicate review state
@@ -1014,12 +1020,19 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   }
 
   const afterDupReview = () => {
+    if (reviewSubmitting || importing) return
+    setReviewSubmitting(true)
     const today = new Date()
     const lapses = []
     for (const [i, r] of pendingRows.entries()) {
       let data
       try { data = parseRow(r) }
-      catch (err) { setErrors([`Row ${i + 2}: ${err.message}`]); toast.error(err.message); return }
+      catch (err) {
+        setErrors([`Row ${i + 2}: ${err.message}`])
+        toast.error(err.message)
+        setReviewSubmitting(false)
+        return
+      }
       const pNo  = data.policyNumber
       if (!pNo) continue
       const isDup = dupRows.some(d => d.pNo === pNo)
@@ -1029,6 +1042,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         if (!exp) {
           setErrors([`Row ${i + 2}: Policy End Date is invalid.`])
           toast.error(`Row ${i + 2}: Policy End Date is invalid.`)
+          setReviewSubmitting(false)
           return
         }
         const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
@@ -1039,12 +1053,15 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       setLapseRows(lapses)
       setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
       setStep('lapse_review')
+      setReviewSubmitting(false)
     } else {
+      toast.loading('Import is working. Please wait...', { id: 'policy-import-working' })
       doImport(pendingOverrides, pendingAutoCreate, dupChoices, {})
     }
   }
 
   const doImport = async (overrides, autoCreate, dupResolutions, lapseResolutions) => {
+    toast.loading('Import is working. Please wait...', { id: 'policy-import-working' })
     setImporting(true)
     setImportProgress({ done: 0, total: 0 })
     const errs = []
@@ -1138,18 +1155,19 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         const created = Object.keys(autoCreated).length
         let msg = `${ok} policies imported!`
         if (created > 0) msg += ` ${created} new clients auto-created.`
-        toast.success(msg)
+        toast.success(msg, { id: 'policy-import-working' })
         onImported()
         if (!errs.length) onClose()
         else setStep('upload')
       } else if (errs.length) {
-        toast.error('Import failed - see errors below')
+        toast.error('Import failed - see errors below', { id: 'policy-import-working' })
       }
     } catch(err) {
       setErrors([...errs, err.message || 'Import failed'])
-      toast.error('Import failed - see errors below')
+      toast.error('Import failed - see errors below', { id: 'policy-import-working' })
     } finally {
       setImporting(false)
+      setReviewSubmitting(false)
       setImportProgress({ done: 0, total: 0 })
     }
   }
@@ -1188,8 +1206,9 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
                   { val:'new',       label:'➕ Import as completely new entry', cls: choice==='new'       ? 'bg-green-600 text-white' : 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 border border-green-300 dark:border-green-600' },
                 ].map(({ val, label, cls }) => (
                   <button key={val} type="button"
+                    disabled={reviewSubmitting || importing}
                     onClick={() => setDupChoices(p => ({ ...p, [pNo]: val }))}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${cls}`}>
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${cls}`}>
                     {label}
                   </button>
                 ))}
@@ -1199,8 +1218,10 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         })}
       </div>
       <div className="flex gap-3">
-        <button onClick={afterDupReview} className="btn-primary">✅ Confirm & Continue</button>
-        <button onClick={() => setStep('upload')} className="btn-secondary">← Back</button>
+        <button onClick={afterDupReview} disabled={reviewSubmitting || importing} className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed">
+          {reviewSubmitting || importing ? `Working... ${importProgress.total ? `${importProgress.done}/${importProgress.total}` : ''}` : 'Confirm & Continue'}
+        </button>
+        <button onClick={() => setStep('upload')} disabled={reviewSubmitting || importing} className="btn-secondary disabled:opacity-60">Back</button>
       </div>
     </div>
   )
@@ -1229,11 +1250,11 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
                 {data.clientName} · {data.insurer} · Expired <span className="text-red-600 dark:text-red-400 font-semibold">{daysAgo} days ago</span>
               </p>
               <div className="flex gap-2 mb-3">
-                <button type="button" onClick={() => setChoice({ action: 'skip' })}
+                <button type="button" disabled={reviewSubmitting || importing} onClick={() => setChoice({ action: 'skip' })}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${choice.action==='skip' ? 'bg-gray-600 text-white' : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300'}`}>
                   ⏭ Skip — do not import
                 </button>
-                <button type="button" onClick={() => setChoice({ action: 'import' })}
+                <button type="button" disabled={reviewSubmitting || importing} onClick={() => setChoice({ action: 'import' })}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg ${choice.action==='import' ? 'bg-green-600 text-white' : 'bg-white dark:bg-gray-700 border border-green-300 dark:border-green-600 text-green-600 dark:text-green-400'}`}>
                   ✅ Yes — it has been renewed
                 </button>
@@ -1244,12 +1265,14 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
                     <label className="form-label">New Start Date *</label>
                     <input type="date" value={choice.newStart||''}
                            onChange={e => setChoice({ newStart: e.target.value })}
+                           disabled={reviewSubmitting || importing}
                            className="form-input text-sm" />
                   </div>
                   <div>
                     <label className="form-label">New Expiry Date *</label>
                     <input type="date" value={choice.newExpiry||''}
                            onChange={e => setChoice({ newExpiry: e.target.value })}
+                           disabled={reviewSubmitting || importing}
                            className="form-input text-sm" />
                   </div>
                 </div>
@@ -1260,7 +1283,6 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       </div>
       <div className="flex gap-3">
         <button onClick={() => {
-          // Validate: all 'import' choices must have both dates
           const invalid = lapseRows.filter(({ pNo }) => {
             const ch = lapseChoices[pNo]
             return ch?.action === 'import' && (!ch.newStart || !ch.newExpiry)
@@ -1269,11 +1291,12 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
             toast.error(`Please enter new start & expiry dates for ${invalid.length} policy/policies`)
             return
           }
+          setReviewSubmitting(true)
           doImport(pendingOverrides, pendingAutoCreate, dupChoices, lapseChoices)
-        }} className="btn-primary">
-          ✅ Confirm & Import
+        }} disabled={reviewSubmitting || importing} className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed">
+          {reviewSubmitting || importing ? `Working... ${importProgress.total ? `${importProgress.done}/${importProgress.total}` : ''}` : 'Confirm & Import'}
         </button>
-        <button onClick={() => setStep('upload')} className="btn-secondary">← Back</button>
+        <button onClick={() => setStep('upload')} disabled={reviewSubmitting || importing} className="btn-secondary disabled:opacity-60">Back</button>
       </div>
     </div>
   )

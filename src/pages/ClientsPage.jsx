@@ -153,7 +153,14 @@ function DocumentManager({ clientId }) {
       await uploadClientDocument(clientId, file, setProgress)
       toast.success(`${file.name} uploaded`)
       await load()
-    } catch(err) { toast.error(err.message) }
+    } catch(err) {
+      const message = err?.code === 'storage/unauthorized'
+        ? 'Document upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
+        : err?.code === 'storage/quota-exceeded'
+          ? 'Firebase Storage quota is full. Free space or upgrade the plan.'
+          : err.message || 'Document upload failed. Please try again.'
+      toast.error(message)
+    }
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = '' }
   }
 
