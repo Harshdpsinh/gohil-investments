@@ -2,7 +2,7 @@
 // PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
 // Images use /image/ endpoint. Both are publicly accessible.
 import { addDocMeta, deleteDocMeta } from './firestore'
-import { getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
+import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app from './config'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -140,5 +140,15 @@ export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   } catch (err) {
     console.error('Firebase Storage upload failed:', err)
     throw new Error('Policy PDF upload failed. Please confirm Firebase Storage is enabled and storage rules are deployed.')
+  }
+}
+
+export async function deletePolicyPdfByPath(storagePath) {
+  if (!storagePath) return
+  try {
+    await deleteObject(ref(firebaseStorage, storagePath))
+  } catch (err) {
+    if (err?.code === 'storage/object-not-found') return
+    throw new Error('Could not delete policy PDF from storage. Please try again.')
   }
 }

@@ -550,8 +550,8 @@ export default function RenewalsPage() {
 
     return policies
       .filter(p => {
-        // Exclude already-renewed policies
-        if ((p.status || '').trim() === 'Renewed-Out') return false
+        // Exclude policies that should not be actionable in the renewal queue.
+        if (['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())) return false
 
         const dueStr = getPolicyDueDate(p)
         if (!dueStr) return false

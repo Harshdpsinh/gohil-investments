@@ -170,7 +170,11 @@ export function parseImportFile(file) {
 // ── Date normaliser ───────────────────────────────────────────
 export function normaliseDate(val) {
   if (!val) return ''
-  if (val instanceof Date) return format(val, 'yyyy-MM-dd')
+  if (val instanceof Date) {
+    const year = val.getFullYear()
+    if (year < 1900 || year > 2100) throw new Error(`Date "${format(val, 'dd/MM/yyyy')}" must be between 1900 and 2100.`)
+    return format(val, 'yyyy-MM-dd')
+  }
   const s   = String(val).trim()
   const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   if (!dmy) {
@@ -186,6 +190,9 @@ export function normaliseDate(val) {
     parsed.getDate() !== day
   ) {
     throw new Error(`Date "${s}" is not a valid calendar date.`)
+  }
+  if (year < 1900 || year > 2100) {
+    throw new Error(`Date "${s}" must be between 1900 and 2100.`)
   }
   return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
 }

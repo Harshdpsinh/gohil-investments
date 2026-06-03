@@ -610,7 +610,7 @@ export async function restorePolicy(id) {
 
 // ── PERMANENT DELETE: only when explicitly chosen in Recycle Bin ──
 export async function permanentDeletePolicy(id) {
-  return deleteDoc(doc(db, POLICIES, id))
+  return deleteRefsInChunks(await policyCascadeRefs(id))
 }
 
 export async function checkDuplicate(data) {

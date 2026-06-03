@@ -11,7 +11,7 @@ import {
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
   subscribeProposals, updateProposal, findClientByMobileOrName,
 } from '../firebase/firestore'
-import { getDownloadUrl, getPreviewUrl, uploadPolicyPdf } from '../firebase/storage'
+import { deletePolicyPdfByPath, getDownloadUrl, getPreviewUrl, uploadPolicyPdf } from '../firebase/storage'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
@@ -983,11 +983,10 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
 
       // Check lapsed (expiry more than 30 days in the past)
       if (data.expiryDate && !dupResult.isDup) {
-        try {
-          const exp  = new Date(data.expiryDate)
-          const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
-          if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
-        } catch {}
+        const exp  = parseAnyDate(data.expiryDate)
+        if (!exp) throw new Error(`Row ${i + 2}: Policy End Date is invalid.`)
+        const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
+        if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
       }
     }
 
@@ -1025,11 +1024,14 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       const isDup = dupRows.some(d => d.pNo === pNo)
       if (isDup) continue  // already handled
       if (data.expiryDate) {
-        try {
-          const exp = new Date(data.expiryDate)
-          const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
-          if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
-        } catch {}
+        const exp = parseAnyDate(data.expiryDate)
+        if (!exp) {
+          setErrors([`Row ${i + 2}: Policy End Date is invalid.`])
+          toast.error(`Row ${i + 2}: Policy End Date is invalid.`)
+          return
+        }
+        const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
+        if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
       }
     }
     if (lapses.length > 0) {
@@ -1058,7 +1060,11 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       const eName = data.clientName
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
       if (!mc && (data.clientMobile || eName)) {
-        try { mc = await findClientByMobileOrName(data.clientMobile, eName) } catch {}
+        try {
+          mc = await findClientByMobileOrName(data.clientMobile, eName)
+        } catch (err) {
+          errs.push(`Row ${i + 2}: Could not match client "${eName}" - ${err.message}`)
+        }
       }
       const ov = overrides[eName]
       if (!mc && ov?.id) {
@@ -1479,6 +1485,8 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     if (!permDel) return
     setPermDeling(true)
     try {
+      const policy = deleted.find(p => p.id === permDel)
+      await deletePolicyPdfByPath(policy?.policyPdfStoragePath)
       await permanentDeletePolicy(permDel)
       toast.success('Policy permanently deleted')
       setDeleted(prev => prev.filter(p => p.id !== permDel))
@@ -1495,7 +1503,10 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     if (!window.confirm(`Permanently delete ${deleted.length} old deleted polic${deleted.length === 1 ? 'y' : 'ies'}? This cannot be undone.`)) return
     setEmptying(true)
     try {
-      await Promise.all(deleted.map(p => permanentDeletePolicy(p.id)))
+      await Promise.all(deleted.map(async p => {
+        await deletePolicyPdfByPath(p.policyPdfStoragePath)
+        await permanentDeletePolicy(p.id)
+      }))
       toast.success('Recycle bin emptied')
       setDeleted([])
     } catch(err) {
@@ -1829,6 +1840,8 @@ export default function PoliciesPage() {
     setBulkDeleting(true)
     try {
       const count = ids.length
+      const selectedPolicies = policies.filter(p => selectedIds.has(p.id))
+      await Promise.all(selectedPolicies.map(p => deletePolicyPdfByPath(p.policyPdfStoragePath)))
       await bulkDeletePolicies(ids)
       toast.success(`${count} policies deleted permanently`)
       clearSel()
@@ -1871,6 +1884,7 @@ export default function PoliciesPage() {
       return
     }
     try {
+      await deletePolicyPdfByPath(selected.policyPdfStoragePath)
       await deletePolicy(selected.id)
       toast.success('Policy deleted permanently')
       setDelOpen(false)
