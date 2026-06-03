@@ -9,7 +9,7 @@ import {
   bulkDeleteClients, getDocMeta,
   mergeClients, bulkMergeClients
 } from '../firebase/firestore'
-import { uploadClientDocument, deleteClientDocument } from '../firebase/storage'
+import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath } from '../firebase/storage'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -28,6 +28,7 @@ const EMPTY = {
 }
 const KYC_OPTIONS = ['Pending','In Progress','Complete']
 const GENDERS     = ['Male','Female','Other']
+const PAGE_SIZE   = 50
 
 function birthdayDays(dob) {
   if (!dob) return null
@@ -501,6 +502,7 @@ export default function ClientsPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [greetingClient, setGreetingClient] = useState(null)
   const [greetingMsg,    setGreetingMsg]    = useState('')
+  const [page,           setPage]           = useState(1)
 
   // Pre-compute per-client data
   const clientData = useMemo(() =>
@@ -526,6 +528,18 @@ export default function ClientsPage() {
     })
   }, [clientData, search, kycFilter, showGapsOnly])
 
+  useEffect(() => { setPage(1) }, [search, kycFilter, showGapsOnly])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pagedClients = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage]
+  )
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage)
+  }, [page, safePage])
+
   useEffect(() => {
     const editClientId = location.state?.editClientId
     if (!editClientId || loading) return
@@ -548,8 +562,13 @@ export default function ClientsPage() {
     toast.success('Client updated — changes reflected everywhere!')
     setModal(null)
   }
+  const deleteClientStorageDocs = async (clientId) => {
+    const docs = await getDocMeta(clientId)
+    await Promise.all(docs.map(d => deleteStorageObjectByPath(d.storagePath)))
+  }
   const onDelete = async () => {
     try {
+      await deleteClientStorageDocs(selected.id)
       await deleteClient(selected.id)
       toast.success('Client deleted')
       setDelOpen(false)
@@ -581,9 +600,9 @@ export default function ClientsPage() {
     }
   }
 
-  const allFilteredIds = filtered.map(c => c.id)
+  const allFilteredIds = pagedClients.map(c => c.id)
   const allSelected    = allFilteredIds.length > 0 && allFilteredIds.every(id => selectedIds.has(id))
-  const someSelected   = allFilteredIds.some(id => selectedIds.has(id))
+  const someSelected   = selectedIds.size > 0
 
   const toggleOne = id => setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
   const toggleAll = () => {
@@ -596,6 +615,7 @@ export default function ClientsPage() {
     setBulkDeleting(true)
     try {
       const count = selectedIds.size
+      await Promise.all([...selectedIds].map(id => deleteClientStorageDocs(id)))
       await bulkDeleteClients([...selectedIds])
       toast.success(`${count} client(s) deleted`)
       clearSelection()
@@ -689,6 +709,19 @@ export default function ClientsPage() {
         </div>
       )}
 
+      {filtered.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs">
+          <span className="text-gray-500 dark:text-gray-400">
+            Showing {(safePage - 1) * PAGE_SIZE + 1}-{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} clients
+          </span>
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary text-xs" disabled={safePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Previous</button>
+            <span className="text-gray-600 dark:text-gray-300 font-semibold">Page {safePage} / {totalPages}</span>
+            <button className="btn-secondary text-xs" disabled={safePage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next</button>
+          </div>
+        </div>
+      )}
+
       {/* Side-scrollable table */}
       <div className="table-container">
         <table className="min-w-full" style={{ minWidth: '900px' }}>
@@ -706,7 +739,7 @@ export default function ClientsPage() {
           <tbody className="bg-white dark:bg-gray-800">
             {filtered.length === 0
               ? <tr><td colSpan={9} className="text-center text-gray-400 dark:text-gray-500 py-10">No clients found</td></tr>
-              : filtered.map(c => (
+              : pagedClients.map(c => (
                 <tr key={c.id} className={`table-row ${selectedIds.has(c.id)?'bg-blue-50 dark:bg-blue-900/20':c._bday!==null?'bg-pink-50/40 dark:bg-pink-900/10':''}`}>
                   <td className="table-cell">
                     <input type="checkbox" checked={selectedIds.has(c.id)}

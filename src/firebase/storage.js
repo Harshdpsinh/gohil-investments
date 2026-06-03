@@ -1,7 +1,7 @@
 // src/firebase/storage.js
 // PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
 // Images use /image/ endpoint. Both are publicly accessible.
-import { addDocMeta, deleteDocMeta } from './firestore'
+import { addDocMeta, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app from './config'
 
@@ -122,12 +122,16 @@ export function getDownloadUrl(url, fileName = '') {
 
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
   validateClientDocument(file)
-  const meta  = await cloudinaryUpload(file, `gohil_investments/clients/${clientId}`, onProgress)
+  const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'client_document'
+  const meta = await firebaseUpload(file, `clients/${clientId}/${Date.now()}_${safeName}`, onProgress)
   await addDocMeta(clientId, meta)
   return meta
 }
 
 export async function deleteClientDocument(clientId, docId) {
+  const docs = await getDocMeta(clientId)
+  const meta = docs.find(d => d.id === docId)
+  if (meta?.storagePath) await deleteStorageObjectByPath(meta.storagePath)
   await deleteDocMeta(clientId, docId)
 }
 
@@ -143,12 +147,14 @@ export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   }
 }
 
-export async function deletePolicyPdfByPath(storagePath) {
+export async function deleteStorageObjectByPath(storagePath) {
   if (!storagePath) return
   try {
     await deleteObject(ref(firebaseStorage, storagePath))
   } catch (err) {
     if (err?.code === 'storage/object-not-found') return
-    throw new Error('Could not delete policy PDF from storage. Please try again.')
+    throw new Error('Could not delete file from storage. Please try again.')
   }
 }
+
+export const deletePolicyPdfByPath = deleteStorageObjectByPath

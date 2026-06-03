@@ -63,6 +63,7 @@ function fuzzyMatch(input, candidates, threshold = 0.75) {
 const TYPES  = ['Health','Life','Motor','Home','Travel','Marine','Fire','Other']
 const FREQS  = ['Yearly','Half-Yearly','Quarterly','Monthly']
 const STATUS = ['Active','Lapsed','Cancelled','Matured','Renewed-Out']
+const POLICY_PAGE_SIZE = 50
 const ADDONS = [
   ['zeroDep','Zero Dep'],['engineProtect','Engine Protect'],['rsa','RSA'],
   ['keyReplace','Key Replace'],['consumables','Consumables'],
@@ -1653,6 +1654,7 @@ export default function PoliciesPage() {
   const [whatsAppMenu,   setWhatsAppMenu]   = useState(null)
   const [proposals,      setProposals]      = useState([])
   const [proposalPrefill,setProposalPrefill]= useState(null)
+  const [page,           setPage]           = useState(1)
   const consumedProposalRef = useRef(null)
   const tableScrollRef = useRef(null)
   const topScrollRef   = useRef(null)
@@ -1712,6 +1714,18 @@ export default function PoliciesPage() {
     () => showDupsOnly ? filtered.filter(p => duplicatePolicyIds.has(p.id)) : filtered,
     [filtered, showDupsOnly, duplicatePolicyIds]
   )
+
+  useEffect(() => { setPage(1) }, [search, typeFilter, showRenewed, showDupsOnly])
+
+  const totalPages = Math.max(1, Math.ceil(displayPolicies.length / POLICY_PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pagedPolicies = useMemo(
+    () => displayPolicies.slice((safePage - 1) * POLICY_PAGE_SIZE, safePage * POLICY_PAGE_SIZE),
+    [displayPolicies, safePage]
+  )
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage)
+  }, [page, safePage])
 
   useEffect(() => {
     const visibleIds = new Set(displayPolicies.map(p => p.id))
@@ -1809,7 +1823,7 @@ export default function PoliciesPage() {
   }
 
   // ── Bulk select ──────────────────────────────────────────
-  const allVisibleIds  = displayPolicies.map(p => p.id)
+  const allVisibleIds  = pagedPolicies.map(p => p.id)
   const allSelected    = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedIds.has(id))
   const someSelected   = allVisibleIds.some(id => selectedIds.has(id))
   const toggleOne  = id => setSelectedIds(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
@@ -1964,6 +1978,18 @@ export default function PoliciesPage() {
           <button type="button" onClick={clearSel} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 text-red-600 text-xs font-semibold rounded-lg">✕ Clear</button>
         </div>
       )}
+      {displayPolicies.length > POLICY_PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs">
+          <span className="text-gray-500 dark:text-gray-400">
+            Showing {(safePage - 1) * POLICY_PAGE_SIZE + 1}-{Math.min(safePage * POLICY_PAGE_SIZE, displayPolicies.length)} of {displayPolicies.length} policies
+          </span>
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn-secondary text-xs" disabled={safePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Previous</button>
+            <span className="text-gray-600 dark:text-gray-300 font-semibold">Page {safePage} / {totalPages}</span>
+            <button type="button" className="btn-secondary text-xs" disabled={safePage >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next</button>
+          </div>
+        </div>
+      )}
       {/* Top scrollbar — mirrors the table's horizontal scroll so user
           doesn't have to scroll all the way to the bottom to see right columns */}
       <div
@@ -1991,7 +2017,7 @@ export default function PoliciesPage() {
           <tbody className="bg-white dark:bg-gray-800">
             {displayPolicies.length===0
               ?<tr><td colSpan={17} className="text-center text-gray-400 dark:text-gray-500 py-10">No policies found</td></tr>
-              :displayPolicies.map(p=>{
+              :pagedPolicies.map(p=>{
                 const isRenewedOut = (p.status||'').trim() === 'Renewed-Out'
                 const isDup = duplicatePolicyIds.has(p.id)
                 const dueDate = getPolicyDueDate(p)
