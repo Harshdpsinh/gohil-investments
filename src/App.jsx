@@ -15,6 +15,7 @@ import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
 import TasksPage             from './pages/TasksPage'
 import CalendarPage          from './pages/CalendarPage'
+import BackupPage            from './pages/BackupPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -50,6 +51,7 @@ export default function App() {
                 <Route path="/tasks"               element={<TasksPage />} />
                 <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/admin-users"         element={<AdminUsersPage />} />
+                <Route path="/backup"              element={<BackupPage />} />
                 <Route path="*"                   element={<Navigate to="/dashboard" replace />} />
               </Routes>
             </Layout>

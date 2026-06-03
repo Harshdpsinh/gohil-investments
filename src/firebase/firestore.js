@@ -2,7 +2,7 @@
 import {
   collection, doc, addDoc, getDoc, getDocs, updateDoc,
   deleteDoc, query, where, orderBy, serverTimestamp,
-  onSnapshot, writeBatch, setDoc, limit, runTransaction
+  onSnapshot, writeBatch, setDoc, limit, runTransaction, Timestamp
 } from 'firebase/firestore'
 import { db } from './config'
 import { addFrequencyInterval, computeNextPolicyDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
@@ -14,6 +14,115 @@ const DOCS_META = 'documents'
 const USERS     = 'users'
 const CLAIMS    = 'claims'
 const TASKS     = 'tasks'
+const BACKUP_COLLECTIONS = [CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS]
+
+function serialiseBackupValue(value) {
+  if (value === null || value === undefined) return value
+  if (typeof value?.toDate === 'function' && typeof value.seconds === 'number') {
+    return { __backupType: 'timestamp', iso: value.toDate().toISOString() }
+  }
+  if (value instanceof Date) {
+    return { __backupType: 'timestamp', iso: value.toISOString() }
+  }
+  if (Array.isArray(value)) return value.map(serialiseBackupValue)
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, serialiseBackupValue(v)]))
+  }
+  return value
+}
+
+function deserialiseBackupValue(value) {
+  if (value === null || value === undefined) return value
+  if (value?.__backupType === 'timestamp' && value.iso) {
+    const date = new Date(value.iso)
+    return Number.isNaN(date.getTime()) ? null : Timestamp.fromDate(date)
+  }
+  if (Array.isArray(value)) return value.map(deserialiseBackupValue)
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, deserialiseBackupValue(v)]))
+  }
+  return value
+}
+
+async function commitBackupWritesInChunks(writes, onProgress = () => {}) {
+  let done = 0
+  for (let i = 0; i < writes.length; i += 400) {
+    const batch = writeBatch(db)
+    const chunk = writes.slice(i, i + 400)
+    chunk.forEach(({ ref, data }) => batch.set(ref, data, { merge: true }))
+    await batch.commit()
+    done += chunk.length
+    onProgress(done, writes.length)
+  }
+}
+
+export async function createCRMBackup() {
+  const collections = {}
+  const totals = {}
+
+  for (const name of BACKUP_COLLECTIONS) {
+    const snap = await getDocs(collection(db, name))
+    collections[name] = snap.docs.map(d => ({
+      id: d.id,
+      data: serialiseBackupValue(d.data()),
+    }))
+    totals[name] = snap.size
+  }
+
+  const clientDocuments = []
+  for (const client of collections[CLIENTS] || []) {
+    const snap = await getDocs(collection(db, CLIENTS, client.id, DOCS_META))
+    snap.docs.forEach(d => {
+      clientDocuments.push({
+        clientId: client.id,
+        id: d.id,
+        data: serialiseBackupValue(d.data()),
+      })
+    })
+  }
+  totals.clientDocuments = clientDocuments.length
+
+  return {
+    app: 'gohil-investments-crm',
+    version: 1,
+    createdAt: new Date().toISOString(),
+    totals,
+    collections,
+    subcollections: {
+      clientDocuments,
+    },
+  }
+}
+
+export async function restoreCRMBackup(backup, onProgress = () => {}) {
+  if (!backup || backup.app !== 'gohil-investments-crm' || !backup.collections) {
+    throw new Error('This backup file is not a valid Gohil Investments CRM backup.')
+  }
+
+  const writes = []
+  for (const name of BACKUP_COLLECTIONS) {
+    const records = backup.collections[name] || []
+    records.forEach(record => {
+      if (!record?.id || !record.data) return
+      writes.push({
+        ref: doc(db, name, record.id),
+        data: deserialiseBackupValue(record.data),
+      })
+    })
+  }
+
+  ;(backup.subcollections?.clientDocuments || []).forEach(record => {
+    if (!record?.clientId || !record?.id || !record.data) return
+    writes.push({
+      ref: doc(db, CLIENTS, record.clientId, DOCS_META, record.id),
+      data: deserialiseBackupValue(record.data),
+    })
+  })
+
+  if (writes.length === 0) throw new Error('Backup file does not contain any records to restore.')
+  await commitBackupWritesInChunks(writes, onProgress)
+  return writes.length
+}
 
 // ── USER ROLES ────────────────────────────────────────────────
 export async function getUserRole(uid) {

@@ -21,6 +21,7 @@ export default function Sidebar({ mobile, onClose }) {
     ...(isAdmin ? [
       { to:'/commission',  icon:'💰', label:'Commission'  },
       { to:'/admin-users', icon:'🔑', label:'Manage Staff' },
+      { to:'/backup',      icon:'BK', label:'Backup'       },
     ] : []),
   ]
 
@@ -94,3 +95,4 @@ export default function Sidebar({ mobile, onClose }) {
     </aside>
   )
 }
+
