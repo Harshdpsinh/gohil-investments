@@ -9,6 +9,7 @@ const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
+const UPLOAD_TIMEOUT_MS = 120000
 const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
 const firebaseStorage = getStorage(app)
 
@@ -72,10 +73,23 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
 function firebaseUpload(file, path, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     const storageRef = ref(firebaseStorage, path)
+    let settled = false
     const task = uploadBytesResumable(storageRef, file, {
       contentType: file.type || 'application/pdf',
       customMetadata: { originalName: file.name },
     })
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn(value)
+    }
+    const timer = setTimeout(() => {
+      try { task.cancel() } catch {}
+      const err = new Error('Upload is taking too long. Please check internet connection and try a smaller PDF.')
+      err.code = 'storage/timeout'
+      finish(reject, err)
+    }, UPLOAD_TIMEOUT_MS)
 
     task.on(
       'state_changed',
@@ -83,13 +97,13 @@ function firebaseUpload(file, path, onProgress = () => {}) {
         const total = snapshot.totalBytes || file.size || 1
         onProgress(Math.round((snapshot.bytesTransferred / total) * 100))
       },
-      error => reject(error),
+      error => finish(reject, error),
       async snapshot => {
         try {
           const url = await getDownloadURL(snapshot.ref)
-          resolve({ url, name: file.name, size: file.size, type: file.type, storagePath: snapshot.ref.fullPath })
+          finish(resolve, { url, name: file.name, size: file.size, type: file.type, storagePath: snapshot.ref.fullPath })
         } catch (err) {
-          reject(err)
+          finish(reject, err)
         }
       }
     )
@@ -138,13 +152,8 @@ export async function deleteClientDocument(clientId, docId) {
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   validatePolicyPdf(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
-  try {
-    const meta = await firebaseUpload(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
-    return { url: meta.url, name: meta.name, storagePath: meta.storagePath }
-  } catch (err) {
-    console.error('Firebase Storage upload failed:', err)
-    throw new Error('Policy PDF upload failed. Please confirm Firebase Storage is enabled and storage rules are deployed.')
-  }
+  const meta = await firebaseUpload(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
+  return { url: meta.url, name: meta.name, storagePath: meta.storagePath }
 }
 
 export async function deleteStorageObjectByPath(storagePath) {

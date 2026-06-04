@@ -14,6 +14,11 @@ const DOCS_META = 'documents'
 const USERS     = 'users'
 const CLAIMS    = 'claims'
 const TASKS     = 'tasks'
+const CLIENT_FIELDS = [
+  'name', 'mobile', 'email', 'pan', 'aadhar', 'dob', 'gender',
+  'address', 'city', 'state', 'occupation', 'employment', 'income',
+  'qualification', 'designation', 'kycStatus', 'notes',
+]
 const BACKUP_COLLECTIONS = [CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS]
 
 function serialiseBackupValue(value) {
@@ -144,7 +149,11 @@ const CLIENT_KYC_OPTIONS = ['Pending', 'In Progress', 'Complete']
 const CLIENT_GENDER_OPTIONS = ['Male', 'Female', 'Other']
 
 function normaliseClientPayload(data, { partial = false } = {}) {
-  const next = { ...data }
+  const next = Object.fromEntries(
+    CLIENT_FIELDS
+      .filter(field => Object.prototype.hasOwnProperty.call(data || {}, field))
+      .map(field => [field, data[field]])
+  )
 
   if (!partial || next.name !== undefined) next.name = assertString(next.name, 'Client name', 120)
   if (next.email !== undefined) {
@@ -481,11 +490,11 @@ function _nextDueStr(startDate, frequency) {
 }
 
 function _policyDueStr(policy) {
-  const due = computeNextPolicyDue(policy)
-  if (!due) return null
   const expiry = parseAnyDate(policy.expiryDate)
   const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
-  if (!isLifePolicy && expiry && due > expiry) return toInputDate(expiry)
+  if (!isLifePolicy && expiry) return toInputDate(expiry)
+  const due = computeNextPolicyDue(policy)
+  if (!due) return null
   return toInputDate(due)
 }
 

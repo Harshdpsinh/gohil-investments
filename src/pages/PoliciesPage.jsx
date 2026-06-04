@@ -190,7 +190,11 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
         ? 'PDF upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
         : err?.code === 'storage/quota-exceeded'
           ? 'Firebase Storage quota is full. Free space or upgrade the plan.'
-          : err?.message || 'PDF upload failed. Please try again.'
+          : err?.code === 'storage/timeout'
+            ? 'PDF upload is taking too long. Check internet, try a smaller PDF, or upload from a newer browser.'
+            : err?.code === 'storage/canceled'
+              ? 'PDF upload was cancelled because it took too long. Please try again.'
+              : err?.message || 'PDF upload failed. Please try again.'
       toast.error(message)
     } finally {
       setUploading(false)
@@ -536,6 +540,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
   const calculateNextDue = (policy) => {
+    const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+    if (!isLifePolicy && policy.expiryDate) return toInputDate(policy.expiryDate) || policy.expiryDate || ''
     const start = parseAnyDate(policy.startDate)
     if (!start) return ''
     return toInputDate(computeNextPolicyDue({
@@ -570,6 +576,19 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     })
   }
 
+  const setExpiryDateAndDue = (value) => {
+    setForm(p => {
+      const next = { ...p, expiryDate: value }
+      const isLifePolicy = String(next.policyType || '').trim().toLowerCase() === 'life'
+      return {
+        ...next,
+        nextPremiumDue: isLifePolicy
+          ? (calculateNextDue(next) || p.nextPremiumDue || '')
+          : (toInputDate(value) || value || ''),
+      }
+    })
+  }
+
   const setCoverageTerm = (years) => {
     const coverageTermYears = Number(years || 1)
     setForm(p => {
@@ -591,13 +610,21 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
   // When type changes, merge in new type defaults without wiping entered data
   const onTypeChange = newType => {
     const extras = getTypeDefaults(newType)
-    setForm(p => ({
-      ...extras,
-      ...p,
-      policyType: newType,
-      isMultiYearPolicy: newType === 'Life' ? false : p.isMultiYearPolicy,
-      coverageTermYears: newType === 'Life' ? 1 : (p.coverageTermYears || 1),
-    }))
+    setForm(p => {
+      const next = {
+        ...extras,
+        ...p,
+        policyType: newType,
+        isMultiYearPolicy: newType === 'Life' ? false : p.isMultiYearPolicy,
+        coverageTermYears: newType === 'Life' ? 1 : (p.coverageTermYears || 1),
+      }
+      return {
+        ...next,
+        nextPremiumDue: String(newType || '').toLowerCase() === 'life'
+          ? (calculateNextDue(next) || p.nextPremiumDue || '')
+          : (toInputDate(next.expiryDate) || next.expiryDate || ''),
+      }
+    })
   }
 
   const onClientChange = e => {
@@ -674,6 +701,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     if (cleanForm.frequency) cleanForm.frequency = normaliseFrequency(cleanForm.frequency)
     cleanForm.coverageTermYears = Number(cleanForm.coverageTermYears || 1)
     cleanForm.isMultiYearPolicy = !isLifePolicy && cleanForm.coverageTermYears > 1
+    if (!isLifePolicy) cleanForm.nextPremiumDue = toInputDate(cleanForm.expiryDate) || cleanForm.expiryDate
     try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
     finally { setSaving(false) }
   }
@@ -767,7 +795,10 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
             <label className="form-label">Start Date</label>
             <DateInput value={form.startDate||''} onChange={setStartDateAndDue} className="form-input" />
           </div>
-          {inp('expiryDate','Policy End / Expiry Date *','date')}
+          <div>
+            <label className="form-label">Policy End / Expiry Date *</label>
+            <DateInput value={form.expiryDate||''} onChange={setExpiryDateAndDue} className="form-input" />
+          </div>
           <div>
             <label className="form-label">Premium Due / Renewal Date</label>
             <DateInput value={form.nextPremiumDue||''} onChange={v=>set('nextPremiumDue',v)} className="form-input" />

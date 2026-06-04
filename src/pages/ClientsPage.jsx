@@ -26,6 +26,7 @@ const EMPTY = {
   qualification:'', designation:'',
   kycStatus:'Pending', notes:''
 }
+const CLIENT_FORM_FIELDS = Object.keys(EMPTY)
 const KYC_OPTIONS = ['Pending','In Progress','Complete']
 const GENDERS     = ['Male','Female','Other']
 const PAGE_SIZE   = 50
@@ -48,7 +49,10 @@ function birthdayDays(dob) {
 
 // ── Client Form ───────────────────────────────────────────────
 function ClientForm({ initial, onSave, onCancel }) {
-  const [form,   setForm]   = useState(initial || EMPTY)
+  const [form,   setForm]   = useState(() => ({
+    ...EMPTY,
+    ...Object.fromEntries(CLIENT_FORM_FIELDS.map(field => [field, initial?.[field] ?? EMPTY[field]])),
+  }))
   const [saving, setSaving] = useState(false)
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
@@ -76,7 +80,8 @@ function ClientForm({ initial, onSave, onCancel }) {
       toast.error('Annual income cannot be negative'); return
     }
     setSaving(true)
-    try { await onSave(form) }
+    const cleanForm = Object.fromEntries(CLIENT_FORM_FIELDS.map(field => [field, form[field] ?? '']))
+    try { await onSave(cleanForm) }
     catch(err) { toast.error('Save failed: ' + (err.message || 'Unknown error')) }
     finally { setSaving(false) }
   }
@@ -158,7 +163,11 @@ function DocumentManager({ clientId }) {
         ? 'Document upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
         : err?.code === 'storage/quota-exceeded'
           ? 'Firebase Storage quota is full. Free space or upgrade the plan.'
-          : err.message || 'Document upload failed. Please try again.'
+          : err?.code === 'storage/timeout'
+            ? 'Document upload is taking too long. Check internet, try a smaller file, or upload from a newer browser.'
+            : err?.code === 'storage/canceled'
+              ? 'Document upload was cancelled because it took too long. Please try again.'
+              : err.message || 'Document upload failed. Please try again.'
       toast.error(message)
     }
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = '' }
