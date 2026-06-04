@@ -3,15 +3,25 @@
 // Images use /image/ endpoint. Both are publicly accessible.
 import { addDocMeta, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
-import app from './config'
+import app, { firebaseConfig } from './config'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
-const UPLOAD_TIMEOUT_MS = 120000
+const UPLOAD_TIMEOUT_MS = 30000
 const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
-const firebaseStorage = getStorage(app)
+const projectId = firebaseConfig.projectId
+const configuredBucket = firebaseConfig.storageBucket
+const STORAGE_BUCKETS = [...new Set([
+  configuredBucket,
+  projectId ? `${projectId}.firebasestorage.app` : '',
+  projectId ? `${projectId}.appspot.com` : '',
+].filter(Boolean).map(bucket => String(bucket).replace(/^gs:\/\//, '')))]
+
+function storageForBucket(bucket) {
+  return getStorage(app, `gs://${bucket}`)
+}
 
 function validateClientDocument(file) {
   if (!file) throw new Error('No file selected.')
@@ -70,9 +80,9 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
   })
 }
 
-function firebaseUpload(file, path, onProgress = () => {}) {
+function firebaseUpload(file, path, bucket, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
-    const storageRef = ref(firebaseStorage, path)
+    const storageRef = ref(storageForBucket(bucket), path)
     let settled = false
     const task = uploadBytesResumable(storageRef, file, {
       contentType: file.type || 'application/pdf',
@@ -101,13 +111,29 @@ function firebaseUpload(file, path, onProgress = () => {}) {
       async snapshot => {
         try {
           const url = await getDownloadURL(snapshot.ref)
-          finish(resolve, { url, name: file.name, size: file.size, type: file.type, storagePath: snapshot.ref.fullPath })
+          finish(resolve, { url, name: file.name, size: file.size, type: file.type, storagePath: snapshot.ref.fullPath, storageBucket: bucket })
         } catch (err) {
           finish(reject, err)
         }
       }
     )
   })
+}
+
+async function firebaseUploadWithFallback(file, path, onProgress = () => {}) {
+  const errors = []
+  for (const bucket of STORAGE_BUCKETS) {
+    try {
+      onProgress(0)
+      return await firebaseUpload(file, path, bucket, onProgress)
+    } catch (err) {
+      errors.push(`${bucket}: ${err?.code || err?.message || 'failed'}`)
+      if (err?.code === 'storage/quota-exceeded') throw err
+    }
+  }
+  const err = new Error(`Upload failed for all Firebase Storage buckets. Tried: ${errors.join('; ')}`)
+  err.code = errors.some(e => e.includes('storage/unauthorized')) ? 'storage/unauthorized' : 'storage/all-buckets-failed'
+  throw err
 }
 
 export function getViewUrl(url) {
@@ -137,7 +163,7 @@ export function getDownloadUrl(url, fileName = '') {
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
   validateClientDocument(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'client_document'
-  const meta = await firebaseUpload(file, `clients/${clientId}/${Date.now()}_${safeName}`, onProgress)
+  const meta = await firebaseUploadWithFallback(file, `clients/${clientId}/${Date.now()}_${safeName}`, onProgress)
   await addDocMeta(clientId, meta)
   return meta
 }
@@ -145,21 +171,22 @@ export async function uploadClientDocument(clientId, file, onProgress = () => {}
 export async function deleteClientDocument(clientId, docId) {
   const docs = await getDocMeta(clientId)
   const meta = docs.find(d => d.id === docId)
-  if (meta?.storagePath) await deleteStorageObjectByPath(meta.storagePath)
+  if (meta?.storagePath) await deleteStorageObjectByPath(meta.storagePath, meta.storageBucket)
   await deleteDocMeta(clientId, docId)
 }
 
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   validatePolicyPdf(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
-  const meta = await firebaseUpload(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
-  return { url: meta.url, name: meta.name, storagePath: meta.storagePath }
+  const meta = await firebaseUploadWithFallback(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
+  return { url: meta.url, name: meta.name, storagePath: meta.storagePath, storageBucket: meta.storageBucket }
 }
 
-export async function deleteStorageObjectByPath(storagePath) {
+export async function deleteStorageObjectByPath(storagePath, storageBucket = '') {
   if (!storagePath) return
   try {
-    await deleteObject(ref(firebaseStorage, storagePath))
+    const bucket = storageBucket || STORAGE_BUCKETS[0]
+    await deleteObject(ref(storageForBucket(bucket), storagePath))
   } catch (err) {
     if (err?.code === 'storage/object-not-found') return
     throw new Error('Could not delete file from storage. Please try again.')

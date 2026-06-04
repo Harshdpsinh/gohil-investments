@@ -181,8 +181,8 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
     setUploading(true)
     setProgress(0)
     try {
-      const { url, name, storagePath } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
-      await savePolicyPdfUrl(policyId, url, name, storagePath)
+      const { url, name, storagePath, storageBucket } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
+      await savePolicyPdfUrl(policyId, url, name, storagePath, storageBucket)
       toast.success('PDF uploaded')
       onUploaded(url, name)
     } catch(err) {
@@ -1541,7 +1541,7 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     setPermDeling(true)
     try {
       const policy = deleted.find(p => p.id === permDel)
-      await deletePolicyPdfByPath(policy?.policyPdfStoragePath)
+      await deletePolicyPdfByPath(policy?.policyPdfStoragePath, policy?.policyPdfStorageBucket)
       await permanentDeletePolicy(permDel)
       toast.success('Policy permanently deleted')
       setDeleted(prev => prev.filter(p => p.id !== permDel))
@@ -1559,7 +1559,7 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     setEmptying(true)
     try {
       await Promise.all(deleted.map(async p => {
-        await deletePolicyPdfByPath(p.policyPdfStoragePath)
+        await deletePolicyPdfByPath(p.policyPdfStoragePath, p.policyPdfStorageBucket)
         await permanentDeletePolicy(p.id)
       }))
       toast.success('Recycle bin emptied')
@@ -1909,7 +1909,7 @@ export default function PoliciesPage() {
     try {
       const count = ids.length
       const selectedPolicies = policies.filter(p => selectedIds.has(p.id))
-      await Promise.all(selectedPolicies.map(p => deletePolicyPdfByPath(p.policyPdfStoragePath)))
+      await Promise.all(selectedPolicies.map(p => deletePolicyPdfByPath(p.policyPdfStoragePath, p.policyPdfStorageBucket)))
       await bulkDeletePolicies(ids)
       toast.success(`${count} policies deleted permanently`)
       clearSel()
@@ -1952,7 +1952,7 @@ export default function PoliciesPage() {
       return
     }
     try {
-      await deletePolicyPdfByPath(selected.policyPdfStoragePath)
+      await deletePolicyPdfByPath(selected.policyPdfStoragePath, selected.policyPdfStorageBucket)
       await deletePolicy(selected.id)
       toast.success('Policy deleted permanently')
       setDelOpen(false)

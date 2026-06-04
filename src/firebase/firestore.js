@@ -763,11 +763,12 @@ export function subscribePolicies(callback, onError) {
   )
 }
 
-export async function savePolicyPdfUrl(policyId, url, name, storagePath = '') {
+export async function savePolicyPdfUrl(policyId, url, name, storagePath = '', storageBucket = '') {
   return updateDoc(doc(db,POLICIES,policyId), {
     policyPdfUrl: url,
     policyPdfName: name,
     policyPdfStoragePath: storagePath || null,
+    policyPdfStorageBucket: storageBucket || null,
     updatedAt: serverTimestamp()
   })
 }
