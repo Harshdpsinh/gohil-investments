@@ -620,12 +620,56 @@ function assertOptionalMobile(mobile) {
   }
 }
 
+function policyIsActive(policy) {
+  return !['Renewed-Out', 'Cancelled', 'Matured'].includes(String(policy?.status || 'Active').trim())
+}
+
+function policySortTime(policy) {
+  return parseAnyDate(policy?.createdAt)?.getTime()
+    || parseAnyDate(policy?.startDate)?.getTime()
+    || parseAnyDate(policy?.expiryDate)?.getTime()
+    || 0
+}
+
+async function syncClientPolicySummary(clientId, policyHint = {}) {
+  if (!clientId) return
+  const clientRef = doc(db, CLIENTS, clientId)
+  const [clientSnap, policiesSnap] = await Promise.all([
+    getDoc(clientRef),
+    getDocs(query(collection(db, POLICIES), where('clientId', '==', clientId))),
+  ])
+  if (!clientSnap.exists()) return
+
+  const policies = policiesSnap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(p => !p.deleted)
+  const active = policies.filter(policyIsActive)
+  const latest = [...active].sort((a, b) => policySortTime(b) - policySortTime(a))[0] || null
+  const client = clientSnap.data() || {}
+  const update = {
+    policyCount: policies.length,
+    activePolicyCount: active.length,
+    latestPolicyId: latest?.id || '',
+    latestPolicyNumber: latest?.policyNumber || '',
+    latestPolicyType: latest?.policyType || '',
+    latestPolicyInsurer: latest?.insurer || '',
+    latestPolicyExpiryDate: latest?.expiryDate || '',
+    latestPolicyDueDate: latest?.nextPremiumDue || '',
+    updatedAt: serverTimestamp(),
+  }
+
+  if (!client.mobile && policyHint.clientMobile) update.mobile = String(policyHint.clientMobile).trim()
+  if (!client.email && policyHint.clientEmail) update.email = String(policyHint.clientEmail).trim().toLowerCase()
+
+  await setDoc(clientRef, cleanFirestoreData(update), { merge: true })
+}
+
 export async function addPolicy(data) {
   const payload = normalisePolicyPayload(data)
   assertPolicyDateOrder(payload.startDate, payload.expiryDate)
   await assertUniquePolicyNumber(payload.policyNumber)
   const nextPremiumDue = payload.nextPremiumDue || _policyDueStr(payload)
-  return addDoc(policiesRef(), cleanFirestoreData({
+  const ref = await addDoc(policiesRef(), cleanFirestoreData({
     ...payload,
     parentPolicyId: payload.parentPolicyId || null,
     policyYear:     payload.policyYear     || 1,
@@ -634,6 +678,8 @@ export async function addPolicy(data) {
     createdAt:      serverTimestamp(),
     updatedAt:      serverTimestamp()
   }))
+  await syncClientPolicySummary(payload.clientId, payload)
+  return ref
 }
 
 export async function importPoliciesBatch(rows, onProgress = () => {}) {
@@ -668,6 +714,11 @@ export async function importPoliciesBatch(rows, onProgress = () => {}) {
     imported += chunk.length
     onProgress(imported, prepared.length)
   }
+  const clientIds = [...new Set(prepared.map(p => p.clientId).filter(Boolean))]
+  for (const clientId of clientIds) {
+    const hint = prepared.find(p => p.clientId === clientId) || {}
+    await syncClientPolicySummary(clientId, hint)
+  }
   return imported
 }
 export async function getPolicy(id) {
@@ -680,14 +731,14 @@ export async function getAllPolicies() {
 }
 export async function updatePolicy(id, data) {
   const payload = normalisePolicyPayload(data, { partial: true })
+  const existingSnap = await getDoc(doc(db, POLICIES, id))
+  const existing = existingSnap.data() || {}
   if ((data.startDate && data.expiryDate) || data.startDate || data.expiryDate) {
-    const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
     assertPolicyDateOrder(payload.startDate || existing.startDate, payload.expiryDate || existing.expiryDate)
   }
   if (payload.policyNumber !== undefined) await assertUniquePolicyNumber(payload.policyNumber, id)
   const update = { ...payload, updatedAt: serverTimestamp() }
   if (payload.nextPremiumDue === undefined && (payload.startDate || payload.frequency)) {
-    const existing = (await getDoc(doc(db,POLICIES,id))).data() || {}
     if (!existing.nextPremiumDue) {
       const start = payload.startDate || existing.startDate
       const freq  = payload.frequency || existing.frequency
@@ -696,18 +747,43 @@ export async function updatePolicy(id, data) {
   }
   await updateDoc(doc(db,POLICIES,id), update)
   await cascadeUpdatePolicyLinks(id, update)
+  const clientIds = [...new Set([existing.clientId, update.clientId].filter(Boolean))]
+  for (const clientId of clientIds) {
+    await syncClientPolicySummary(clientId, { ...existing, ...update })
+  }
 }
 // ── SOFT DELETE — marks policy as deleted instead of removing it.
 //    Accounted deletes can always be undone from the Recycle Bin.
 // FIX: use setDoc+merge — updateDoc throws "No document to update" when
 // local React state is stale (same root cause as the renewal error).
 export async function deletePolicy(id) {
-  return deleteRefsInChunks(await policyCascadeRefs(id))
+  const snap = await getDoc(doc(db, POLICIES, id))
+  const policy = snap.exists() ? { id: snap.id, ...snap.data() } : null
+  await setDoc(doc(db, POLICIES, id), {
+    deleted: true,
+    deletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+  if (policy?.clientId) await syncClientPolicySummary(policy.clientId, policy)
 }
 
 export async function bulkDeletePolicies(ids) {
-  const refs = (await Promise.all(ids.map(id => policyCascadeRefs(id)))).flat()
-  return deleteRefsInChunks(refs)
+  const policies = []
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = writeBatch(db)
+    for (const id of ids.slice(i, i + 400)) {
+      const snap = await getDoc(doc(db, POLICIES, id))
+      if (snap.exists()) policies.push({ id: snap.id, ...snap.data() })
+      batch.set(doc(db, POLICIES, id), {
+        deleted: true,
+        deletedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true })
+    }
+    await batch.commit()
+  }
+  const clientIds = [...new Set(policies.map(p => p.clientId).filter(Boolean))]
+  for (const clientId of clientIds) await syncClientPolicySummary(clientId)
 }
 
 // ── RECYCLE BIN: fetch all soft-deleted policies ──────────────
@@ -719,16 +795,20 @@ export async function getDeletedPolicies() {
 // ── RESTORE: remove the deleted flag ─────────────────────────
 // FIX: setDoc+merge — same reason as deletePolicy above.
 export async function restorePolicy(id) {
-  return setDoc(doc(db, POLICIES, id), {
+  await setDoc(doc(db, POLICIES, id), {
     deleted:   false,
     deletedAt: null,
     updatedAt: serverTimestamp(),
   }, { merge: true })
+  const policy = await getPolicy(id)
+  if (policy?.clientId) await syncClientPolicySummary(policy.clientId, policy)
 }
 
 // ── PERMANENT DELETE: only when explicitly chosen in Recycle Bin ──
 export async function permanentDeletePolicy(id) {
-  return deleteRefsInChunks(await policyCascadeRefs(id))
+  const policy = await getPolicy(id)
+  await deleteRefsInChunks(await policyCascadeRefs(id))
+  if (policy?.clientId) await syncClientPolicySummary(policy.clientId, policy)
 }
 
 export async function checkDuplicate(data) {
@@ -802,7 +882,7 @@ export async function saveRenewal(oldPolicyId, newData) {
     }
   }
 
-  return runTransaction(db, async tx => {
+  const ref = await runTransaction(db, async tx => {
     const oldSnap = await tx.get(oldRef)
     if (!oldSnap.exists()) throw new Error('Original policy not found.')
 
@@ -857,12 +937,14 @@ export async function saveRenewal(oldPolicyId, newData) {
 
     return newRef
   })
+  await syncClientPolicySummary(newData.clientId, newData)
+  return ref
 }
 
 export async function markPremiumPaid(policyId, options = {}) {
   const policyRef = doc(db, POLICIES, policyId)
 
-  return runTransaction(db, async tx => {
+  const ref = await runTransaction(db, async tx => {
     const snap = await tx.get(policyRef)
     if (!snap.exists()) throw new Error('Policy not found.')
 
@@ -900,6 +982,9 @@ export async function markPremiumPaid(policyId, options = {}) {
 
     return policyRef
   })
+  const policy = await getPolicy(policyId)
+  if (policy?.clientId) await syncClientPolicySummary(policy.clientId, policy)
+  return ref
 }
 
 export async function getPolicyChain(policyId) {

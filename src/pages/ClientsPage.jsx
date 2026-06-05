@@ -13,6 +13,7 @@ import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath }
 import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import DateInput     from '../components/ui/DateInput'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import { exportToCSV, exportToExcel, exportToPDF, CLIENT_COLS } from '../utils/exportUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -58,7 +59,10 @@ function ClientForm({ initial, onSave, onCancel }) {
 
   const inp = (k,lbl,type='text',opts={}) => (
     <div><label className="form-label">{lbl}</label>
-      <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-input" {...opts} /></div>
+      {type === 'date'
+        ? <DateInput value={form[k]||''} onChange={v=>set(k,v)} className="form-input" {...opts} />
+        : <input type={type} value={form[k]||''} onChange={e=>set(k,e.target.value)} className="form-input" {...opts} />}
+    </div>
   )
 
   const onSubmit = async e => {

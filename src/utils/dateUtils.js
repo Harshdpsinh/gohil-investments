@@ -194,6 +194,7 @@ export function getDueDate(policy) {
   if (!policy) return ''
   const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
   const expiry = parseAnyDate(policy.expiryDate)
+  if (!isLifePolicy && expiry) return toInputDate(expiry)
   const storedDue = toInputDate(policy.nextPremiumDue)
   if (storedDue) {
     const due = parseAnyDate(storedDue)

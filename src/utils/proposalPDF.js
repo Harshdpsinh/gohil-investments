@@ -6,6 +6,7 @@
 import jsPDF     from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { format } from 'date-fns'
+import { fmtDate } from './dateUtils'
 
 const BRAND = [30, 64, 175]   // blue-800
 const LIGHT = [239, 246, 255] // blue-50
@@ -71,7 +72,7 @@ export function generateProposalPDF(form) {
   sectionTitle('1.  Client / KYC Details')
   kvTable([
     ['Proposer Name', form.proposerName],
-    ['Date of Birth',  form.dob],
+    ['Date of Birth',  fmtDate(form.dob)],
     ['Mobile',         form.mobile],
     ['Email',          form.email],
     ['PAN',            form.pan],
@@ -112,7 +113,7 @@ export function generateProposalPDF(form) {
         startY: y,
         head: [['Member Name', 'Height(cm)', 'Weight(kg)', 'Birth Date', 'Diseases']],
         body: form.members.filter(m => m.name).map(m => [
-          m.name, m.height, m.weight, m.dob, m.diseases || 'Nil'
+          m.name, m.height, m.weight, fmtDate(m.dob), m.diseases || 'Nil'
         ]),
         styles: { fontSize: 8 },
         headStyles: { fillColor: BRAND, textColor: 255 },

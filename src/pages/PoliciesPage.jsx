@@ -281,7 +281,7 @@ function HealthSection({ form, set }) {
         <div><label className="form-label">Co-pay %</label>
           <input type="number" value={form.coPay||''} onChange={e=>set('coPay',e.target.value)} className="form-input" /></div>
         <div><label className="form-label">Date of First Entry</label>
-          <input type="date" value={form.dateOfFirstEntry||''} onChange={e=>set('dateOfFirstEntry',e.target.value)} className="form-input" /></div>
+          <DateInput value={form.dateOfFirstEntry||''} onChange={v=>set('dateOfFirstEntry',v)} className="form-input" /></div>
       </div>
       <div className="flex gap-6 flex-wrap">
         <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -311,7 +311,7 @@ function HealthSection({ form, set }) {
             <div key={i} className="grid grid-cols-5 gap-2 items-center">
               <input value={m.name||''} onChange={e=>{const mb=[...form.members];mb[i]={...mb[i],name:e.target.value};set('members',mb)}} placeholder="Name" className="form-input text-xs" />
               <input type="number" value={m.age||''} onChange={e=>{const mb=[...form.members];mb[i]={...mb[i],age:e.target.value};set('members',mb)}} placeholder="Age" className="form-input text-xs" />
-              <input type="date" value={m.dob||''} onChange={e=>{const mb=[...form.members];mb[i]={...mb[i],dob:e.target.value};set('members',mb)}} className="form-input text-xs" />
+              <DateInput value={m.dob||''} onChange={v=>{const mb=[...form.members];mb[i]={...mb[i],dob:v};set('members',mb)}} className="form-input text-xs" />
               <select value={m.relationship||'Self'} onChange={e=>{const mb=[...form.members];mb[i]={...mb[i],relationship:e.target.value};set('members',mb)}} className="form-select text-xs">
                 {HEALTH_RELATIONSHIPS.map(r=><option key={r}>{r}</option>)}
               </select>
@@ -345,7 +345,7 @@ function LifeSection({ form, set }) {
         <div><label className="form-label">Policy Term (yrs)</label>
           <input type="number" value={form.policyTerm||''} onChange={e=>set('policyTerm',e.target.value)} className="form-input" /></div>
         <div><label className="form-label">Maturity Date</label>
-          <input type="date" value={form.maturityDate||''} onChange={e=>set('maturityDate',e.target.value)} className="form-input" /></div>
+          <DateInput value={form.maturityDate||''} onChange={v=>set('maturityDate',v)} className="form-input" /></div>
         <div><label className="form-label">Surrender Value (₹)</label>
           <input type="number" value={form.surrenderValue||''} onChange={e=>set('surrenderValue',e.target.value)} className="form-input" /></div>
       </div>
@@ -356,7 +356,7 @@ function LifeSection({ form, set }) {
         <div><label className="form-label">Nominee Relation</label>
           <input value={form.nomineeRelation||''} onChange={e=>set('nomineeRelation',e.target.value)} className="form-input" /></div>
         <div><label className="form-label">Nominee DOB</label>
-          <input type="date" value={form.nomineeDob||''} onChange={e=>set('nomineeDob',e.target.value)} className="form-input" /></div>
+          <DateInput value={form.nomineeDob||''} onChange={v=>set('nomineeDob',v)} className="form-input" /></div>
         <div><label className="form-label">Nominee PAN</label>
           <input value={form.nomineePan||''} onChange={e=>set('nomineePan',e.target.value)} className="form-input" /></div>
         <div><label className="form-label">Appointee (if nominee is minor)</label>
@@ -1294,15 +1294,15 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
                 <div className="grid grid-cols-2 gap-3 bg-green-50 dark:bg-green-900/20 rounded-lg p-3">
                   <div>
                     <label className="form-label">New Start Date *</label>
-                    <input type="date" value={choice.newStart||''}
-                           onChange={e => setChoice({ newStart: e.target.value })}
+                    <DateInput value={choice.newStart||''}
+                           onChange={v => setChoice({ newStart: v })}
                            disabled={reviewSubmitting || importing}
                            className="form-input text-sm" />
                   </div>
                   <div>
                     <label className="form-label">New Expiry Date *</label>
-                    <input type="date" value={choice.newExpiry||''}
-                           onChange={e => setChoice({ newExpiry: e.target.value })}
+                    <DateInput value={choice.newExpiry||''}
+                           onChange={v => setChoice({ newExpiry: v })}
                            disabled={reviewSubmitting || importing}
                            className="form-input text-sm" />
                   </div>
@@ -1908,10 +1908,8 @@ export default function PoliciesPage() {
     setBulkDeleting(true)
     try {
       const count = ids.length
-      const selectedPolicies = policies.filter(p => selectedIds.has(p.id))
-      await Promise.all(selectedPolicies.map(p => deletePolicyPdfByPath(p.policyPdfStoragePath, p.policyPdfStorageBucket)))
       await bulkDeletePolicies(ids)
-      toast.success(`${count} policies deleted permanently`)
+      toast.success(`${count} policies moved to Recycle Bin`)
       clearSel()
       setBulkDelOpen(false)
     }
@@ -1952,9 +1950,8 @@ export default function PoliciesPage() {
       return
     }
     try {
-      await deletePolicyPdfByPath(selected.policyPdfStoragePath, selected.policyPdfStorageBucket)
       await deletePolicy(selected.id)
-      toast.success('Policy deleted permanently')
+      toast.success('Policy moved to Recycle Bin')
       setDelOpen(false)
       setSelected(null)
       clearSel()
@@ -2025,7 +2022,7 @@ export default function PoliciesPage() {
       {isAdmin && someSelected && (
         <div className="flex items-center gap-3 bg-red-50 dark:bg-red-900/30 border border-red-200 rounded-xl px-4 py-3">
           <span className="text-sm font-semibold text-red-700 dark:text-red-300">{selectedIds.size} policies selected</span>
-          <button type="button" onClick={onBulkDelete} disabled={bulkDeleting}
+          <button type="button" onClick={() => setBulkDelOpen(true)} disabled={bulkDeleting}
                   className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
             {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
           </button>
@@ -2194,7 +2191,7 @@ export default function PoliciesPage() {
         <ImportModal clients={clients} onClose={()=>setModal(null)} onImported={()=>{}} />
       </Modal>
       <ConfirmDialog open={delOpen && !!selected?.id} onClose={()=>setDelOpen(false)} onConfirm={onDelete}
-                     title="Delete Policy?" message={`Delete "${selected?.policyNumber}"?`} danger />
+                     title="Delete Policy?" message={`Move "${selected?.policyNumber}" to the Recycle Bin? You can restore it later.`} danger />
       <ConfirmDialog open={bulkDelOpen && selectedIds.size > 0} onClose={()=>setBulkDelOpen(false)} onConfirm={onBulkDelete}
                      title={`Delete ${selectedIds.size} Policies?`}
                      message={`Move ${selectedIds.size} selected policies to the Recycle Bin? You can restore them later.`} danger />

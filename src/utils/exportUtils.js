@@ -6,7 +6,7 @@ import autoTable      from 'jspdf-autotable'
 import { fmtDate, normaliseFrequency } from './dateUtils'
 import { format }     from 'date-fns'
 
-const ts = () => format(new Date(), 'yyyy-MM-dd')
+const ts = () => format(new Date(), 'dd-MM-yyyy')
 
 // ── Logo loaded from public folder (no base64 embedding) ────
 // Place g1.jpg in your project's /public/ folder
