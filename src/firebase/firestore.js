@@ -498,6 +498,13 @@ function _policyDueStr(policy) {
   return toInputDate(due)
 }
 
+function resolvePolicyDueStr(policy) {
+  const isLifePolicy = String(policy?.policyType || '').trim().toLowerCase() === 'life'
+  return isLifePolicy
+    ? (toInputDate(policy?.nextPremiumDue) || _policyDueStr(policy))
+    : _policyDueStr(policy)
+}
+
 function cleanFirestoreData(data) {
   return Object.fromEntries(
     Object.entries(data).filter(([, value]) => value !== undefined)
@@ -654,7 +661,7 @@ async function syncClientPolicySummary(clientId, policyHint = {}) {
     latestPolicyType: latest?.policyType || '',
     latestPolicyInsurer: latest?.insurer || '',
     latestPolicyExpiryDate: latest?.expiryDate || '',
-    latestPolicyDueDate: latest?.nextPremiumDue || '',
+    latestPolicyDueDate: latest ? (resolvePolicyDueStr(latest) || '') : '',
     updatedAt: serverTimestamp(),
   }
 
@@ -668,7 +675,7 @@ export async function addPolicy(data) {
   const payload = normalisePolicyPayload(data)
   assertPolicyDateOrder(payload.startDate, payload.expiryDate)
   await assertUniquePolicyNumber(payload.policyNumber)
-  const nextPremiumDue = payload.nextPremiumDue || _policyDueStr(payload)
+  const nextPremiumDue = resolvePolicyDueStr(payload)
   const ref = await addDoc(policiesRef(), cleanFirestoreData({
     ...payload,
     parentPolicyId: payload.parentPolicyId || null,
@@ -696,7 +703,7 @@ export async function importPoliciesBatch(rows, onProgress = () => {}) {
       ...payload,
       parentPolicyId: payload.parentPolicyId || null,
       policyYear:     payload.policyYear     || 1,
-      nextPremiumDue: payload.nextPremiumDue || _policyDueStr(payload) || null,
+      nextPremiumDue: resolvePolicyDueStr(payload) || null,
       deleted:        false,
       deletedAt:      null,
       renewedAt:      null,
@@ -738,6 +745,9 @@ export async function updatePolicy(id, data) {
   }
   if (payload.policyNumber !== undefined) await assertUniquePolicyNumber(payload.policyNumber, id)
   const update = { ...payload, updatedAt: serverTimestamp() }
+  const mergedPolicy = { ...existing, ...payload }
+  const isLifePolicy = String(mergedPolicy.policyType || '').trim().toLowerCase() === 'life'
+  if (!isLifePolicy) update.nextPremiumDue = _policyDueStr(mergedPolicy) || null
   if (payload.nextPremiumDue === undefined && (payload.startDate || payload.frequency)) {
     if (!existing.nextPremiumDue) {
       const start = payload.startDate || existing.startDate

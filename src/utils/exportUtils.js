@@ -3,7 +3,7 @@ import * as XLSX      from 'xlsx'
 import { saveAs }     from 'file-saver'
 import jsPDF          from 'jspdf'
 import autoTable      from 'jspdf-autotable'
-import { fmtDate, normaliseFrequency } from './dateUtils'
+import { fmtDate, getDueDate as getPolicyDueDate, normaliseFrequency } from './dateUtils'
 import { format }     from 'date-fns'
 
 const ts = () => format(new Date(), 'dd-MM-yyyy')
@@ -280,7 +280,7 @@ export const POLICY_COLS = [
   { header: 'Premium',         accessor: r => r.premium },
   { header: 'Start Date',      accessor: r => fmtDate(r.startDate) },
   { header: 'Policy End Date', accessor: r => fmtDate(r.expiryDate) },
-  { header: 'Premium Due Date', accessor: r => fmtDate(r.nextPremiumDue) },
+  { header: 'Premium Due Date', accessor: r => fmtDate(getPolicyDueDate(r)) },
   { header: 'Status',          accessor: r => r.status || 'Active' },
   { header: 'Frequency',       accessor: r => r.frequency },
   { header: 'FY Commission %', accessor: r => r.fyCommission || '' },

@@ -4,7 +4,7 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
-import { fmtCurrency, daysUntil, fmtDate, parseAnyDate, daysUntilPremium } from '../utils/dateUtils'
+import { fmtCurrency, fmtDate, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { useNavigate } from 'react-router-dom'
 import { subscribeTasks, subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
@@ -45,16 +45,7 @@ function isBirthdayThisWeek(dobStr) {
 }
 
 function getPremDays(p) {
-  if (!p) return null
-  if (p.nextPremiumDue) {
-    const d = parseAnyDate(p.nextPremiumDue)
-    if (!isNaN(d.getTime())) return Math.ceil((d - NOW) / 86400000)
-  }
-  if (p.startDate) {
-    const days = daysUntilPremium(p.startDate, p.frequency)
-    if (days !== null) return days
-  }
-  return daysUntil(p.expiryDate)
+  return daysUntilPolicyDue(p)
 }
 
 function StatCard({ icon, label, value, sub, color, onClick, badge }) {
