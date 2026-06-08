@@ -11,6 +11,7 @@ export default function Login() {
   const { signIn, resetPassword, user } = useAuth()
   const navigate         = useNavigate()
   const [form,    setForm]    = useState({ email: '', password: '' })
+  const [loginRole, setLoginRole] = useState('admin')
   const [loading, setLoading] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
@@ -28,6 +29,7 @@ export default function Login() {
     setLoading(true)
     try {
       await signIn(form.email, form.password)
+      toast.success(`${loginRole === 'admin' ? 'Admin' : 'Staff'} sign in successful`)
       navigate('/dashboard', { replace: true })
     } catch (err) {
       toast.error(err.code === 'auth/invalid-credential' ? 'Invalid email or password.' : err.message)
@@ -72,13 +74,41 @@ export default function Login() {
         {/* Card */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8
                         border border-transparent dark:border-gray-700">
-          <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-6">Admin Sign In</h2>
+          <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-2">
+            {loginRole === 'admin' ? 'Admin Sign In' : 'Staff Sign In'}
+          </h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-5">
+            Choose your login type. Access rights are verified from your saved account role.
+          </p>
           <form onSubmit={onSubmit} className="space-y-5">
+            <div>
+              <label className="form-label">Login As</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: 'admin', label: 'Admin', note: 'Full access' },
+                  { key: 'staff', label: 'Staff', note: 'Daily work' },
+                ].map(option => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setLoginRole(option.key)}
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                      loginRole === option.key
+                        ? 'border-blue-600 bg-blue-50 text-blue-800 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-200'
+                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <span className="block text-sm font-bold">{option.label}</span>
+                    <span className="block text-xs opacity-75">{option.note}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label className="form-label">Email Address</label>
               <input name="email" type="email" autoComplete="email" required
                      value={form.email} onChange={onChange}
-                     placeholder="admin@gohilinvestments.com" className="form-input" />
+                     placeholder={loginRole === 'admin' ? 'admin@gohilinvestments.com' : 'staff@gohilinvestments.com'} className="form-input" />
             </div>
             <div>
               <label className="form-label">Password</label>
