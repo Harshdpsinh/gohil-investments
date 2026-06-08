@@ -13,6 +13,18 @@ import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
 
 const AuthContext = createContext(null)
+const OWNER_ADMIN_EMAILS = [
+  'harshdeepgohil@gmail.com',
+  ...(import.meta.env.VITE_ADMIN_EMAILS || '').split(','),
+].map(email => String(email || '').trim().toLowerCase()).filter(Boolean)
+
+function normaliseRole(value, email = '') {
+  const cleanRole = String(value || '').trim().toLowerCase()
+  const cleanEmail = String(email || '').trim().toLowerCase()
+  if (OWNER_ADMIN_EMAILS.includes(cleanEmail)) return 'admin'
+  if (cleanRole === 'admin' || cleanRole === 'staff') return cleanRole
+  return 'staff'
+}
 
 // Wraps a promise with a timeout — if Firestore is blocked by
 // Brave Shields or a firewall, we fall back instead of hanging forever.
@@ -35,22 +47,23 @@ export function AuthProvider({ children }) {
         try {
           const profile = await withTimeout(getUserRole(u.uid), 5000)
           if (profile) {
-            setRole(profile.role || 'staff')   // FIX #1: default to staff, never admin
+            setRole(normaliseRole(profile.role, u.email))
           } else {
             console.warn('First login or role fetch failed – creating default staff role')
+            const defaultRole = normaliseRole('', u.email)
             try {
               await withTimeout(
-                setUserRole(u.uid, { email: u.email, role: 'staff', name: u.email?.split('@')[0] || 'Staff' }),
+                setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || (defaultRole === 'admin' ? 'Admin' : 'Staff') }),
                 3000
               )
             } catch (err) {
               console.error('Failed to create default role:', err)
             }
-            setRole('staff')   // FIX #1: never silently escalate to admin
+            setRole(defaultRole)
           }
         } catch (err) {
           console.error('Role fetch error:', err)
-          setRole('staff')   // FIX #1: fail safe to staff
+          setRole(normaliseRole('', u.email))
         }
       } else {
         setRole(null)
@@ -91,7 +104,7 @@ export function AuthProvider({ children }) {
     if (!cleanEmail) throw new Error('Email is required.')
     if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
 
-    const safeRole = requestedRole === 'admin' ? 'admin' : 'staff'
+    const safeRole = normaliseRole(requestedRole)
     const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
       ? getApp('staffAccountCreation')
       : initializeApp(firebaseConfig, 'staffAccountCreation')
@@ -118,7 +131,7 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const isAdmin = role === 'admin'
+  const isAdmin = normaliseRole(role, user?.email) === 'admin'
 
   return (
     <AuthContext.Provider value={{ user, role, isAdmin, loading, signIn, signOut, resetPassword, createStaffAccount }}>
