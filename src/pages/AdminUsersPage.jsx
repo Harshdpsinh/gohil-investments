@@ -136,11 +136,11 @@ export default function AdminUsersPage() {
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="bg-green-50 border border-green-200 rounded-lg p-3">
               <p className="font-semibold text-green-700 mb-1">✅ Staff can:</p>
-              <p className="text-green-700">View dashboard, Add clients, Add policies, Add proposals, Send WhatsApp, View renewals, Upload documents, Export data</p>
+              <p className="text-green-700">View dashboard, Add clients, Add policies, Import policies, Add proposals, Send WhatsApp, View renewals, Upload documents, Export data</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-semibold text-blue-700 mb-1">🔑 Admin can do all above plus:</p>
-              <p className="text-blue-700">Delete clients, Delete policies, View commission calculator, Manage user accounts, Import bulk data</p>
+              <p className="text-blue-700">Delete clients, Delete policies, View commission calculator, Manage user accounts</p>
             </div>
           </div>
         </div>

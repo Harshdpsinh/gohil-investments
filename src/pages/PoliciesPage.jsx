@@ -1974,7 +1974,7 @@ export default function PoliciesPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">{policies.length} total</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {isAdmin&&<button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setModal('import')}}>⬆ Import</button>}
+          <button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setModal('import')}}>⬆ Import</button>
           {isAdmin && <button type="button" className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>{resetDeleteState();setShowRecycleBin(true)}}>🗑️ Recycle Bin</button>}
           <button
             type="button"
