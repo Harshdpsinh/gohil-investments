@@ -244,7 +244,7 @@ function DocumentManager({ clientId }) {
 
 // ── CliMer — Client Merger UI ─────────────────────────────────
 function CliMerModal({ clients, onClose, onMerged }) {
-  const [mode,        setMode]        = useState('suggest') // 'suggest' | 'single' | 'bulk'
+  const [mode,        setMode]        = useState('suggest') // 'suggest' | 'single' | 'bulk' | 'family'
   const [masterId,    setMasterId]    = useState('')
   const [dupId,       setDupId]       = useState('')
   const [dupIds,      setDupIds]      = useState([])
@@ -295,6 +295,38 @@ function CliMerModal({ clients, onClose, onMerged }) {
     )
   }
 
+  const makeFamilyId = (members) => {
+    const base = (members[0]?.name || 'family').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24)
+    return `fam-${base || 'unit'}-${Date.now().toString().slice(-6)}`
+  }
+
+  const linkAsFamily = async (memberIds, familyName = '') => {
+    const members = memberIds.map(id => clients.find(c => c.id === id)).filter(Boolean)
+    if (members.length < 2) {
+      toast.error('Select at least two clients to make a family.')
+      return
+    }
+    const existingFamily = members.find(c => c.familyId || c.familyName)
+    const safeFamilyId = existingFamily?.familyId || makeFamilyId(members)
+    const safeFamilyName = (familyName || existingFamily?.familyName || `${members[0].name} Family`).trim()
+
+    setMerging(true)
+    try {
+      await Promise.all(members.map(member => cascadeUpdateClient(member.id, {
+        familyId: safeFamilyId,
+        familyName: safeFamilyName,
+        familyRole: member.familyRole || '',
+      })))
+      toast.success(`Family linked: ${members.length} clients. Policies stayed unchanged.`)
+      setDupIds([])
+      onMerged()
+    } catch (err) {
+      toast.error('Family link failed: ' + (err.message || 'Unknown error'))
+    } finally {
+      setMerging(false)
+    }
+  }
+
   const quickMerge = async (dupClientId, masterClientId) => {
     setMerging(true)
     try {
@@ -303,6 +335,10 @@ function CliMerModal({ clients, onClose, onMerged }) {
       onMerged()
     } catch(err) { toast.error('Merge failed: ' + err.message) }
     finally { setMerging(false) }
+  }
+
+  const quickFamilyLink = async (aId, bId) => {
+    await linkAsFamily([aId, bId])
   }
 
   const doSingleMerge = async () => {
@@ -341,8 +377,13 @@ function CliMerModal({ clients, onClose, onMerged }) {
   return (
     <div className="space-y-5">
       {/* Mode tabs */}
-      <div className="flex gap-2 flex-wrap">
-        {[['suggest',`🔍 Suggested (${suggestedPairs.length})`],['single','🔀 Single Merge'],['bulk','🔀 Bulk Merge']].map(([m,l]) => (
+            <div className="flex gap-2 flex-wrap">
+        {[
+          ['suggest', `Suggested (${suggestedPairs.length})`],
+          ['family', 'Family Link (safe)'],
+          ['single', 'Single Merge'],
+          ['bulk', 'Bulk Merge'],
+        ].map(([m,l]) => (
           <button key={m} onClick={() => { setMode(m); setResults(null) }}
                   className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${mode===m?'bg-blue-600 text-white':'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
             {l}
@@ -353,7 +394,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
       {/* Info banner */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
         <p className="font-semibold">How CliMer works:</p>
-        <p className="mt-1">All policies, claims, tasks, and documents from the <strong>duplicate</strong> client are moved to the <strong>master</strong> client. The duplicate is then permanently deleted. This cannot be undone.</p>
+        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves data into one master client and deletes the duplicate, so use merge only for true duplicate records.</p>
       </div>
 
       {/* ── SUGGESTED DUPLICATES TAB ── */}
@@ -400,8 +441,38 @@ function CliMerModal({ clients, onClose, onMerged }) {
         </>
       )}
 
-      {/* ── SINGLE / BULK TABS ── */}
-      {mode !== 'suggest' && (
+      {mode === 'family' && (
+        <div className="space-y-4">
+          <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3 text-xs text-green-700 dark:text-green-300">
+            <p className="font-semibold">Safe family grouping</p>
+            <p className="mt-1">This only adds the same Family ID/Name to selected clients. It does not move, delete, or rewrite any policies, claims, tasks, PDFs, or client history.</p>
+          </div>
+          <input type="text" placeholder="Search clients..." value={search}
+                 onChange={e => setSearch(e.target.value)} className="form-input" />
+          <div className="max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-xl divide-y divide-gray-100 dark:divide-gray-700">
+            {filtered.map(c => (
+              <label key={c.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${dupIds.includes(c.id) ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-gray-800'}`}>
+                <input type="checkbox" checked={dupIds.includes(c.id)}
+                       onChange={() => toggleDup(c.id)} className="w-4 h-4 cursor-pointer" />
+                <span className="text-sm text-gray-800 dark:text-gray-200">
+                  {c.name}
+                  {c.mobile ? <span className="text-gray-400 dark:text-gray-500"> - {c.mobile}</span> : null}
+                  {c.familyName ? <span className="ml-2 text-xs text-blue-600">Family: {c.familyName}</span> : null}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={() => linkAsFamily(dupIds)} disabled={merging || dupIds.length < 2}
+                    className="btn-primary">
+              {merging ? 'Linking...' : `Link ${dupIds.length} Clients as Family`}
+            </button>
+            <button onClick={onClose} className="btn-secondary">Cancel</button>
+          </div>
+        </div>
+      )}
+      {/* SINGLE / BULK TABS */}
+      {mode !== 'suggest' && mode !== 'family' && (
         <>
           {/* Master client selector */}
           <div>
@@ -944,3 +1015,6 @@ export default function ClientsPage() {
     </div>
   )
 }
+
+
+
