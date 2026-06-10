@@ -7,7 +7,7 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
   importPoliciesBatch,
-  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate, cascadeUpdateClient,
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
   subscribeProposals, updateProposal, findClientByMobileOrName,
 } from '../firebase/firestore'
@@ -70,6 +70,39 @@ const ADDONS = [
   ['returnToInvoice','Return to Invoice'],['tyreProtect','Tyre Protect'],
   ['personalAccident','Personal Accident'],
 ]
+
+function buildImportClientReview(imported, matchedClient) {
+  if (!matchedClient?.id) return null
+  const issues = []
+  const importedName = String(imported.clientName || '').trim()
+  const matchedName = String(matchedClient.name || '').trim()
+  const importedMobile = String(imported.clientMobile || '').replace(/\D/g, '').slice(-10)
+  const matchedMobile = String(matchedClient.mobile || '').replace(/\D/g, '').slice(-10)
+  const importedEmail = String(imported.clientEmail || '').trim().toLowerCase()
+  const matchedEmail = String(matchedClient.email || '').trim().toLowerCase()
+
+  if (importedName && matchedName && importedName.toLowerCase() !== matchedName.toLowerCase()) {
+    issues.push(`Name differs: import "${importedName}", client "${matchedName}"`)
+  }
+  if (importedMobile && matchedMobile && importedMobile !== matchedMobile) {
+    issues.push('Mobile differs from matched client')
+  }
+  if (importedEmail && matchedEmail && importedEmail !== matchedEmail) {
+    issues.push('Email differs from matched client')
+  }
+
+  if (issues.length === 0) return null
+  return {
+    clientReviewRequired: true,
+    clientReviewStatus: 'potential_match',
+    clientReviewReason: issues.join('; '),
+    importMatchedClientId: matchedClient.id,
+    importMatchedClientName: matchedClient.name || '',
+    importOriginalClientName: importedName,
+    importOriginalClientMobile: imported.clientMobile || '',
+    importOriginalClientEmail: imported.clientEmail || '',
+  }
+}
 
 const BASE_EMPTY = {
   policyNumber:'', clientId:'', clientName:'', policyType:'Health',
@@ -1136,25 +1169,14 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         }
       }
 
+      const reviewFlag = buildImportClientReview(data, mc)
       data.clientId   = mc?.id   || ''
-      data.clientName = mc?.name || eName
+      data.clientName = eName || mc?.name || ''
       data.clientMobile = data.clientMobile || mc?.mobile || ''
       data.clientEmail  = data.clientEmail  || mc?.email  || ''
-
-      if (mc?.id) {
-        const needsUpdate = {}
-        const existingMobile = String(mc.mobile || '').replace(/\D/g, '').slice(-10)
-        const importedMobile = String(data.clientMobile || '').replace(/\D/g, '').slice(-10)
-        if (importedMobile && existingMobile !== importedMobile) needsUpdate.mobile = data.clientMobile
-        if (data.clientEmail && String(mc.email || '').trim().toLowerCase() !== String(data.clientEmail).trim().toLowerCase()) needsUpdate.email = data.clientEmail
-        if (Object.keys(needsUpdate).length > 0) {
-          try {
-            await cascadeUpdateClient(mc.id, needsUpdate)
-            mc = { ...mc, ...needsUpdate }
-          } catch(err) {
-            errs.push(`Row ${i+2}: Could not update mobile/email for "${data.clientName}" - ${err.message}`)
-          }
-        }
+      if (reviewFlag) {
+        Object.assign(data, reviewFlag)
+        errs.push(`Row ${i+2}: Existing client matched but details differ. Imported policy was flagged for manual review; client record was not changed.`)
       }
       data.clientMobile = data.clientMobile || mc?.mobile || ''
       data.clientEmail = data.clientEmail || mc?.email || ''
@@ -1352,7 +1374,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
           </p>
           <p className="text-xs text-gray-500 mt-0.5">
             {autoAssign
-              ? 'Client names in your file will be matched automatically. New names not found in your database will be created as new clients instantly — no manual mapping needed.'
+              ? 'Existing clients will be linked only; saved client details will not be overwritten. If imported details differ, the policy is flagged for manual review. New names are created as clients.'
               : 'You will be shown a mapping screen for any client names not found in your database.'}
           </p>
         </div>
@@ -2108,8 +2130,7 @@ export default function PoliciesPage() {
                     <td className="table-cell text-xs text-center text-blue-600 dark:text-blue-400 font-semibold">{p.fyCommission?`${p.fyCommission}%`:'—'}</td>
                     <td className="table-cell text-xs text-center text-green-600 dark:text-green-400 font-semibold">{p.ryCommission?`${p.ryCommission}%`:'—'}</td>
                     <td className="table-cell text-center">
-                      {isDup
-                        ? <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded-full" title="Possible duplicate policy">🔁 Dup</span>
+                      {p.clientReviewRequired ? <span className="px-2 py-0.5 text-xs font-bold bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300 rounded-full" title={p.clientReviewReason || 'Imported client details need manual review'}>Review</span> : isDup ? <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded-full" title="Possible duplicate policy">Dup</span>
                         : <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>
                       }
                     </td>
@@ -2205,3 +2226,5 @@ export default function PoliciesPage() {
     </div>
   )
 }
+
+

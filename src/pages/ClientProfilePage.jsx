@@ -6,7 +6,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getClient, getAllClaims, getAllTasks } from '../firebase/firestore'
 import { usePolicies } from '../hooks/usePolicies'
-import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus } from '../utils/dateUtils'
+import { useClients } from '../hooks/useClients'
+import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -19,6 +20,21 @@ const CLAIM_STATUS_COLORS = {
   'Approved':            'badge-green',
   'Settled':             'badge-green',
   'Rejected':            'badge-red',
+}
+
+function policyHistoryStatus(policy) {
+  const status = String(policy?.status || 'Active').trim()
+  if (status === 'Renewed-Out' || policy?.is_renewed) {
+    return { label: 'Renewed', cls: 'badge-blue' }
+  }
+  if (status === 'Cancelled' || status === 'Matured') {
+    return { label: status, cls: 'badge-gray' }
+  }
+  const expiry = new Date(policy?.expiryDate || '')
+  if (!Number.isNaN(expiry.getTime()) && expiry < new Date()) {
+    return { label: 'Expired', cls: 'badge-red' }
+  }
+  return { label: 'Active', cls: 'badge-green' }
 }
 
 function Section({ title, icon, children, badge }) {
@@ -40,6 +56,7 @@ export default function ClientProfilePage() {
   const { id }    = useParams()
   const navigate  = useNavigate()
   const { policies } = usePolicies()
+  const { clients } = useClients()
 
   const [client,  setClient]  = useState(null)
   const [claims,  setClaims]  = useState([])
@@ -79,6 +96,14 @@ export default function ClientProfilePage() {
   }, [id])
 
   const clientPolicies = policies.filter(p => p.clientId === id)
+  const familyKey = client?.familyId || client?.familyName || ''
+  const familyMembers = familyKey
+    ? clients.filter(c => (client.familyId && c.familyId === client.familyId) || (!client.familyId && c.familyName && c.familyName === client.familyName))
+    : []
+  const familyMemberIds = new Set(familyMembers.map(c => c.id))
+  const familyPolicies = familyKey
+    ? policies.filter(p => familyMemberIds.has(p.clientId))
+    : []
   const isActv = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
   const activePolicies = clientPolicies.filter(p => isActv(p))
 
@@ -199,6 +224,8 @@ export default function ClientProfilePage() {
               ['Annual Income', client.income ? fmtCurrency(client.income) : null],
               ['City',        client.city],
               ['State',       client.state],
+              ['Family',      client.familyName || client.familyId],
+              ['Family Role', client.familyRole],
               ['Address',     client.address],
               ['Notes',       client.notes],
             ].filter(([, v]) => v).map(([k, v]) => (
@@ -232,7 +259,7 @@ export default function ClientProfilePage() {
       </div>
 
       {/* Policies */}
-      <Section title="Policies" icon="📋" badge={clientPolicies.length}>
+      <Section title="Policy History" icon="📋" badge={clientPolicies.length}>
         {clientPolicies.length === 0 ? (
           <p className="text-xs text-gray-400 dark:text-gray-500">No policies found</p>
         ) : (
@@ -246,11 +273,10 @@ export default function ClientProfilePage() {
               <tbody className="bg-white dark:bg-gray-800">
                 {clientPolicies.map(p => {
                   const dueDate = getPolicyDueDate(p)
-                  const st = renewalStatus(dueDate)
                   const coverage = p.sumInsured || p.sumAssured || p.idv || '—'
-                  const bm = { green: 'badge-green', yellow: 'badge-yellow', red: 'badge-red', blue: 'badge-blue', gray: 'badge-gray' }
+                  const history = policyHistoryStatus(p)
                   return (
-                    <tr key={p.id} className={`table-row ${(p.status || '') === 'Renewed-Out' ? 'opacity-50' : ''}`}>
+                    <tr key={p.id} className={`table-row ${history.label === 'Renewed' ? 'opacity-60' : ''}`}>
                       <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
                       <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                       <td className="table-cell text-xs">{p.insurer}</td>
@@ -258,14 +284,10 @@ export default function ClientProfilePage() {
                       <td className="table-cell font-semibold">{fmtCurrency(p.premium)}</td>
                       <td className="table-cell">{coverage !== '—' ? fmtCurrency(coverage) : '—'}</td>
                       <td className="table-cell text-xs">{fmtDate(p.startDate)}</td>
+                      <td className="table-cell text-xs font-semibold text-blue-700 dark:text-blue-400">{fmtDate(dueDate)}</td>
                       <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
-                      <td className="table-cell text-xs">{daysUntil(p.expiryDate) !== null ? `${daysUntil(p.expiryDate)}d` : '—'}</td>
-                      <td className="table-cell">
-                        {(p.status || '') === 'Renewed-Out'
-                          ? <span className="badge-gray">Renewed</span>
-                          : <span className={bm[st.color] || 'badge-gray'}>{st.label}</span>
-                        }
-                      </td>
+                      <td className="table-cell text-xs">{daysUntil(dueDate || p.expiryDate) !== null ? `${daysUntil(dueDate || p.expiryDate)}d` : '—'}</td>
+                      <td className="table-cell"><span className={history.cls}>{history.label}</span></td>
                     </tr>
                   )
                 })}
@@ -274,6 +296,40 @@ export default function ClientProfilePage() {
           </div>
         )}
       </Section>
+
+      {familyKey && (
+        <Section title="Family Policies" icon="Family" badge={familyPolicies.length}>
+          <div className="mb-3 flex flex-wrap gap-2 text-xs">
+            {familyMembers.map(member => (
+              <span key={member.id} className={`px-2 py-1 rounded-full font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                {member.name}{member.familyRole ? ` - ${member.familyRole}` : ''}
+              </span>
+            ))}
+          </div>
+          {familyPolicies.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">No family policies found</p>
+          ) : (
+            <div className="space-y-2">
+              {familyPolicies.map(p => {
+                const owner = clients.find(c => c.id === p.clientId)
+                const history = policyHistoryStatus(p)
+                return (
+                  <div key={p.id} className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs">
+                    <div>
+                      <p className="font-semibold text-gray-800 dark:text-gray-200">{owner?.name || p.clientName || 'Family member'}</p>
+                      <p className="font-mono text-gray-500 dark:text-gray-400">{p.policyNumber} - {p.policyType || 'Policy'} - {p.insurer || 'Insurer'}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtDate(getPolicyDueDate(p))}</p>
+                      <span className={history.cls}>{history.label}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Section>
+      )}
 
       {/* Claims */}
       <Section title="Claims" icon="🔍" badge={claims.length}>
@@ -322,3 +378,5 @@ export default function ClientProfilePage() {
     </div>
   )
 }
+
+

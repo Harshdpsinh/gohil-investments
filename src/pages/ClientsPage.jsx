@@ -25,7 +25,7 @@ const EMPTY = {
   dob:'', gender:'', address:'', city:'', state:'',
   occupation:'', employment:'', income:'',
   qualification:'', designation:'',
-  kycStatus:'Pending', notes:''
+  kycStatus:'Pending', familyId:'', familyName:'', familyRole:'', notes:''
 }
 const CLIENT_FORM_FIELDS = Object.keys(EMPTY)
 const KYC_OPTIONS = ['Pending','In Progress','Complete']
@@ -121,6 +121,12 @@ function ClientForm({ initial, onSave, onCancel }) {
           <select value={form.kycStatus} onChange={e=>set('kycStatus',e.target.value)} className="form-select">
             {KYC_OPTIONS.map(o=><option key={o}>{o}</option>)}
           </select></div>
+      </div>
+      <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider mt-2">Family Unit</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {inp('familyName','Family Name','text',{placeholder:'e.g. Gohil Family'})}
+        {inp('familyId','Family ID','text',{placeholder:'e.g. FAM-GOHIL-001'})}
+        {inp('familyRole','Family Role','text',{placeholder:'Self, Spouse, Child'})}
       </div>
       <div><label className="form-label">Notes</label>
         <textarea rows={2} value={form.notes||''} onChange={e=>set('notes',e.target.value)} className="form-input" /></div>
@@ -854,6 +860,8 @@ export default function ClientsPage() {
                 ['KYC Status', selected.kycStatus],
                 ['City',     selected.city],
                 ['State',    selected.state],
+                ['Family',   selected.familyName || selected.familyId],
+                ['Family Role', selected.familyRole],
                 ['Address',  selected.address],
                 ['Notes',    selected.notes],
               ].filter(([,v]) => v).map(([k,v]) => (

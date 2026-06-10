@@ -10,6 +10,7 @@ import { addFrequencyInterval, computeNextPolicyDue, getDueDate as getPolicyDueD
 const CLIENTS   = 'clients'
 const POLICIES  = 'policies'
 const PROPOSALS = 'proposals'
+const FAMILIES  = 'families'
 const DOCS_META = 'documents'
 const USERS     = 'users'
 const CLAIMS    = 'claims'
@@ -17,9 +18,10 @@ const TASKS     = 'tasks'
 const CLIENT_FIELDS = [
   'name', 'mobile', 'email', 'pan', 'aadhar', 'dob', 'gender',
   'address', 'city', 'state', 'occupation', 'employment', 'income',
-  'qualification', 'designation', 'kycStatus', 'notes',
+  'qualification', 'designation', 'kycStatus', 'familyId', 'familyName',
+  'familyRole', 'notes',
 ]
-const BACKUP_COLLECTIONS = [CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS]
+const BACKUP_COLLECTIONS = [CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS, FAMILIES]
 
 function serialiseBackupValue(value) {
   if (value === null || value === undefined) return value
@@ -182,6 +184,11 @@ function normaliseClientPayload(data, { partial = false } = {}) {
   }
 
   ;['address', 'city', 'state', 'occupation', 'employment', 'qualification', 'designation', 'notes'].forEach(field => {
+    if (next[field] !== undefined && next[field] !== null) {
+      next[field] = String(next[field]).trim()
+    }
+  })
+  ;['familyId', 'familyName', 'familyRole'].forEach(field => {
     if (next[field] !== undefined && next[field] !== null) {
       next[field] = String(next[field]).trim()
     }
@@ -357,6 +364,44 @@ export async function bulkDeleteClients(ids) {
     )
   }
   await deleteRefsInChunks(allRefs)
+}
+
+// ── FAMILY UNITS ───────────────────────────────────────────────
+export const familiesRef = () => collection(db, FAMILIES)
+
+export async function createFamilyUnit(data = {}) {
+  const name = assertString(data.name || data.familyName, 'Family name', 120)
+  return addDoc(familiesRef(), cleanFirestoreData({
+    name,
+    notes: String(data.notes || '').trim(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }))
+}
+
+export async function getAllFamilies() {
+  const s = await getDocs(query(familiesRef(), orderBy('name', 'asc')))
+  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function linkClientToFamily(clientId, familyId, familyName, familyRole = '') {
+  if (!clientId) throw new Error('Client is required.')
+  return setDoc(doc(db, CLIENTS, clientId), cleanFirestoreData({
+    familyId: String(familyId || '').trim(),
+    familyName: String(familyName || '').trim(),
+    familyRole: String(familyRole || '').trim(),
+    updatedAt: serverTimestamp(),
+  }), { merge: true })
+}
+
+export async function unlinkClientFromFamily(clientId) {
+  if (!clientId) throw new Error('Client is required.')
+  return setDoc(doc(db, CLIENTS, clientId), {
+    familyId: '',
+    familyName: '',
+    familyRole: '',
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
 }
 
 // ── CLIMER — CLIENT MERGER MODULE ─────────────────────────────
