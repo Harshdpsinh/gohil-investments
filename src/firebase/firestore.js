@@ -150,6 +150,35 @@ export const clientsRef = () => collection(db, CLIENTS)
 const CLIENT_KYC_OPTIONS = ['Pending', 'In Progress', 'Complete']
 const CLIENT_GENDER_OPTIONS = ['Male', 'Female', 'Other']
 
+function clientBackfillFromSource(client, source = {}) {
+  const update = {}
+  const selfMember = Array.isArray(source.members)
+    ? source.members.find(m => String(m?.relationship || '').trim().toLowerCase() === 'self')
+    : null
+  const copyIfBlank = (clientField, ...sourceFields) => {
+    if (client[clientField]) return
+    const value = sourceFields.map(field => source[field]).find(v => v !== undefined && v !== null && String(v).trim() !== '')
+    if (value !== undefined) update[clientField] = value
+  }
+
+  copyIfBlank('mobile', 'clientMobile', 'mobile')
+  copyIfBlank('email', 'clientEmail', 'email')
+  copyIfBlank('dob', 'clientDob', 'dob', 'dateOfBirth')
+  if (!client.dob && !update.dob && selfMember?.dob) update.dob = selfMember.dob
+  copyIfBlank('gender', 'clientGender', 'gender')
+  copyIfBlank('pan', 'clientPan', 'pan')
+  copyIfBlank('aadhar', 'clientAadhar', 'aadhar', 'aadhaar')
+  copyIfBlank('address', 'clientAddress', 'address')
+  copyIfBlank('city', 'clientCity', 'city')
+  copyIfBlank('state', 'clientState', 'state')
+  copyIfBlank('occupation', 'clientOccupation', 'occupation')
+  copyIfBlank('income', 'clientIncome', 'income')
+  copyIfBlank('qualification', 'clientQualification', 'qualification')
+  copyIfBlank('designation', 'clientDesignation', 'designation')
+
+  return normaliseClientPayload(update, { partial: true })
+}
+
 function normaliseClientPayload(data, { partial = false } = {}) {
   const next = Object.fromEntries(
     CLIENT_FIELDS
@@ -207,7 +236,7 @@ export async function getClient(id) {
 }
 export async function getAllClients() {
   const s = await getDocs(query(clientsRef(), orderBy('createdAt','desc')))
-  return s.docs.map(d => ({ id:d.id, ...d.data() }))
+  return s.docs.map(d => ({ id:d.id, ...d.data() })).filter(c => !c.mergedIntoClientId)
 }
 export async function updateClient(id, data) {
   const payload = normaliseClientPayload(data, { partial: true })
@@ -422,13 +451,18 @@ export async function mergeClients(duplicateId, masterId) {
   ])
 
   const ops = []
+  const masterBackfill = {
+    ...clientBackfillFromSource(master, dup),
+  }
 
   dupPolicies.docs.forEach(d => {
+    const policyData = d.data()
+    Object.assign(masterBackfill, clientBackfillFromSource({ ...master, ...masterBackfill }, policyData))
     ops.push({ ref: d.ref, data: {
       clientId:     masterId,
       clientName:   master.name,
-      clientMobile: master.mobile || dup.mobile || '',
-      clientEmail:  master.email  || dup.email  || '',
+      clientMobile: master.mobile || masterBackfill.mobile || dup.mobile || policyData.clientMobile || '',
+      clientEmail:  master.email  || masterBackfill.email  || dup.email  || policyData.clientEmail  || '',
       updatedAt:    serverTimestamp(),
     }})
   })
@@ -455,6 +489,13 @@ export async function mergeClients(duplicateId, masterId) {
     await batch.commit()
   }
 
+  if (Object.keys(masterBackfill).length > 0) {
+    await setDoc(doc(db, CLIENTS, masterId), cleanFirestoreData({
+      ...masterBackfill,
+      updatedAt: serverTimestamp(),
+    }), { merge: true })
+  }
+
   let docsMoved = 0
   for (const docSnap of dupDocs.docs) {
     const docData = docSnap.data()
@@ -467,7 +508,14 @@ export async function mergeClients(duplicateId, masterId) {
     docsMoved++
   }
 
-  await deleteDoc(doc(db, CLIENTS, duplicateId))
+  await setDoc(doc(db, CLIENTS, duplicateId), cleanFirestoreData({
+    mergedIntoClientId: masterId,
+    mergedIntoClientName: master.name,
+    mergedAt: serverTimestamp(),
+    archivedAfterMerge: true,
+    updatedAt: serverTimestamp(),
+  }), { merge: true })
+  await syncClientPolicySummary(masterId, masterBackfill)
 
   return {
     policiesMoved: dupPolicies.size,
@@ -502,7 +550,7 @@ export async function bulkMergeClients(duplicateIds, masterId) {
 export function subscribeClients(callback, onError) {
   return onSnapshot(
     query(clientsRef(), orderBy('createdAt','desc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))),
+    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() })).filter(c => !c.mergedIntoClientId)),
     onError || (err => console.error('subscribeClients:', err.code, err.message))
   )
 }
@@ -710,8 +758,7 @@ async function syncClientPolicySummary(clientId, policyHint = {}) {
     updatedAt: serverTimestamp(),
   }
 
-  if (!client.mobile && policyHint.clientMobile) update.mobile = String(policyHint.clientMobile).trim()
-  if (!client.email && policyHint.clientEmail) update.email = String(policyHint.clientEmail).trim().toLowerCase()
+  Object.assign(update, clientBackfillFromSource(client, policyHint))
 
   await setDoc(clientRef, cleanFirestoreData(update), { merge: true })
 }

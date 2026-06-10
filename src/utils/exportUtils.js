@@ -235,6 +235,13 @@ const clientMobileValue = row => col(row, [
 const clientEmailValue = row => col(row, [
   'Client Email', 'Customer Email', 'Email', 'Email ID', 'Email Address'
 ])
+const clientDobValue = row => col(row, ['Client DOB', 'Client Date of Birth', 'Date of Birth', 'DOB'])
+const clientGenderValue = row => col(row, ['Client Gender', 'Gender'])
+const clientPanValue = row => col(row, ['Client PAN', 'PAN', 'PAN Number'])
+const clientAadharValue = row => col(row, ['Client Aadhar', 'Client Aadhaar', 'Aadhar', 'Aadhaar', 'Aadhar Number', 'Aadhaar Number'])
+const clientAddressValue = row => col(row, ['Client Address', 'Address'])
+const clientCityValue = row => col(row, ['Client City', 'City'])
+const clientStateValue = row => col(row, ['Client State', 'State'])
 const cleanMobile = value => {
   const text = str(value)
   if (!text) return ''
@@ -303,7 +310,9 @@ export const CLIENT_IMPORT_SAMPLE = [
 // ─────────────────────────────────────────────────────────────
 export const HEALTH_IMPORT_HEADERS = [
   // Base
-  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
+  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email',
+  'Client DOB', 'Client Gender', 'Client PAN', 'Client Aadhar', 'Client Address', 'Client City', 'Client State',
+  'Insurer', 'Plan Name',
   'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Health-specific
   'Sum Insured',
@@ -318,7 +327,9 @@ export const HEALTH_IMPORT_HEADERS = [
 ]
 
 export const HEALTH_IMPORT_SAMPLE = [
-  'ICL-H-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'ICICI Lombard', 'Health Shield Gold',
+  'ICL-H-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com',
+  '15/06/1980', 'Male', 'ABCDE1234F', '123456789012', '12 MG Road', 'Bhavnagar', 'Gujarat',
+  'ICICI Lombard', 'Health Shield Gold',
   '18500', 'Yearly', '01/04/2024', '31/03/2025', '31/03/2025', 'Active',
   '500000',
   'Sunita Shah', 'Spouse',
@@ -352,6 +363,13 @@ export function parseHealthRow(r) {
     clientName:      str(clientNameValue(r)),
     clientMobile:    cleanMobile(clientMobileValue(r)),
     clientEmail:     str(clientEmailValue(r)),
+    clientDob:       normaliseDate(clientDobValue(r)),
+    clientGender:    str(clientGenderValue(r)),
+    clientPan:       str(clientPanValue(r)),
+    clientAadhar:    str(clientAadharValue(r)),
+    clientAddress:   str(clientAddressValue(r)),
+    clientCity:      str(clientCityValue(r)),
+    clientState:     str(clientStateValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),
@@ -375,7 +393,9 @@ export function parseHealthRow(r) {
 // ─────────────────────────────────────────────────────────────
 export const LIFE_IMPORT_HEADERS = [
   // Base
-  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
+  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email',
+  'Client DOB', 'Client Gender', 'Client PAN', 'Client Aadhar', 'Client Address', 'Client City', 'Client State',
+  'Insurer', 'Plan Name',
   'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Life-specific
   'Sum Assured', 'Policy Sub-type',
@@ -386,7 +406,9 @@ export const LIFE_IMPORT_HEADERS = [
 ]
 
 export const LIFE_IMPORT_SAMPLE = [
-  'LIC-T-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'LIC of India', 'Tech Term',
+  'LIC-T-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com',
+  '15/06/1980', 'Male', 'ABCDE1234F', '123456789012', '12 MG Road', 'Bhavnagar', 'Gujarat',
+  'LIC of India', 'Tech Term',
   '12000', 'Yearly', '01/04/2024', '31/03/2054', '31/03/2025', 'Active',
   '10000000', 'Term',
   '30', '30', '31/03/2054',
@@ -405,6 +427,13 @@ export function parseLifeRow(r) {
     clientName:      str(clientNameValue(r)),
     clientMobile:    cleanMobile(clientMobileValue(r)),
     clientEmail:     str(clientEmailValue(r)),
+    clientDob:       normaliseDate(clientDobValue(r)),
+    clientGender:    str(clientGenderValue(r)),
+    clientPan:       str(clientPanValue(r)),
+    clientAadhar:    str(clientAadharValue(r)),
+    clientAddress:   str(clientAddressValue(r)),
+    clientCity:      str(clientCityValue(r)),
+    clientState:     str(clientStateValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),
@@ -431,7 +460,9 @@ export function parseLifeRow(r) {
 // ─────────────────────────────────────────────────────────────
 export const MOTOR_IMPORT_HEADERS = [
   // Base
-  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email', 'Insurer', 'Plan Name',
+  'Policy Number', 'Client Name', 'Client Mobile', 'Client Email',
+  'Client DOB', 'Client Gender', 'Client PAN', 'Client Aadhar', 'Client Address', 'Client City', 'Client State',
+  'Insurer', 'Plan Name',
   'Premium', 'Frequency', 'Start Date', 'Policy End Date', 'Premium Due Date', 'Status',
   // Motor-specific
   'Vehicle Type', 'Registration No', 'IDV', 'NCB %',
@@ -441,7 +472,9 @@ export const MOTOR_IMPORT_HEADERS = [
 ]
 
 export const MOTOR_IMPORT_SAMPLE = [
-  'HDFC-M-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com', 'HDFC ERGO', 'Comprehensive Motor',
+  'HDFC-M-2024-001', 'Ramesh Shah', '9876543210', 'ramesh@email.com',
+  '15/06/1980', 'Male', 'ABCDE1234F', '123456789012', '12 MG Road', 'Bhavnagar', 'Gujarat',
+  'HDFC ERGO', 'Comprehensive Motor',
   '8500', 'Yearly', '01/04/2024', '31/03/2025', '31/03/2025', 'Active',
   '4W', 'GJ-03-AA-1234', '650000', '20',
   'Sunita Shah', 'Spouse',
@@ -459,6 +492,13 @@ export function parseMotorRow(r) {
     clientName:      str(clientNameValue(r)),
     clientMobile:    cleanMobile(clientMobileValue(r)),
     clientEmail:     str(clientEmailValue(r)),
+    clientDob:       normaliseDate(clientDobValue(r)),
+    clientGender:    str(clientGenderValue(r)),
+    clientPan:       str(clientPanValue(r)),
+    clientAadhar:    str(clientAadharValue(r)),
+    clientAddress:   str(clientAddressValue(r)),
+    clientCity:      str(clientCityValue(r)),
+    clientState:     str(clientStateValue(r)),
     insurer:         str(r['Insurer']),
     planName:        str(r['Plan Name']),
     premium:         num(premiumValue(r)),

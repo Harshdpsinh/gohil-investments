@@ -394,7 +394,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
       {/* Info banner */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
         <p className="font-semibold">How CliMer works:</p>
-        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves data into one master client and deletes the duplicate, so use merge only for true duplicate records.</p>
+        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves policies, claims, tasks, and documents into the master client, then archives the duplicate record instead of deleting it.</p>
       </div>
 
       {/* ── SUGGESTED DUPLICATES TAB ── */}
@@ -449,18 +449,56 @@ function CliMerModal({ clients, onClose, onMerged }) {
           </div>
           <input type="text" placeholder="Search clients..." value={search}
                  onChange={e => setSearch(e.target.value)} className="form-input" />
-          <div className="max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-xl divide-y divide-gray-100 dark:divide-gray-700">
-            {filtered.map(c => (
-              <label key={c.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${dupIds.includes(c.id) ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-gray-800'}`}>
-                <input type="checkbox" checked={dupIds.includes(c.id)}
-                       onChange={() => toggleDup(c.id)} className="w-4 h-4 cursor-pointer" />
-                <span className="text-sm text-gray-800 dark:text-gray-200">
-                  {c.name}
-                  {c.mobile ? <span className="text-gray-400 dark:text-gray-500"> - {c.mobile}</span> : null}
-                  {c.familyName ? <span className="ml-2 text-xs text-blue-600">Family: {c.familyName}</span> : null}
-                </span>
-              </label>
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-800">
+              <div className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600">
+                <p className="text-xs font-bold text-gray-700 dark:text-gray-200">Available Clients</p>
+                <p className="text-xs text-gray-400">Click Add for every family member</p>
+              </div>
+              <div className="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+                {filtered.filter(c => !dupIds.includes(c.id)).map(c => (
+                  <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                      <p className="text-xs text-gray-400 truncate">
+                        {c.mobile || 'No mobile'}{c.familyName ? ` - Family: ${c.familyName}` : ''}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setDupIds(prev => [...prev, c.id])}
+                            className="px-3 py-1 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">
+                      Add
+                    </button>
+                  </div>
+                ))}
+                {filtered.filter(c => !dupIds.includes(c.id)).length === 0 && (
+                  <p className="px-3 py-8 text-center text-xs text-gray-400">No more clients to add</p>
+                )}
+              </div>
+            </div>
+
+            <div className="border border-blue-200 dark:border-blue-800 rounded-xl overflow-hidden bg-blue-50/40 dark:bg-blue-900/10">
+              <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/30 border-b border-blue-200 dark:border-blue-800">
+                <p className="text-xs font-bold text-blue-700 dark:text-blue-300">Selected Family Members ({dupIds.length})</p>
+                <p className="text-xs text-blue-500 dark:text-blue-400">These clients will be linked together only</p>
+              </div>
+              <div className="max-h-80 overflow-y-auto divide-y divide-blue-100 dark:divide-blue-900/50">
+                {dupIds.map(id => clients.find(c => c.id === id)).filter(Boolean).map(c => (
+                  <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                      <p className="text-xs text-gray-400 truncate">{c.mobile || 'No mobile'}</p>
+                    </div>
+                    <button type="button" onClick={() => setDupIds(prev => prev.filter(x => x !== c.id))}
+                            className="px-3 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-gray-800 text-red-600 hover:bg-red-50">
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                {dupIds.length === 0 && (
+                  <p className="px-3 py-8 text-center text-xs text-gray-400">No family members selected yet</p>
+                )}
+              </div>
+            </div>
           </div>
           <div className="flex gap-3">
             <button onClick={() => linkAsFamily(dupIds)} disabled={merging || dupIds.length < 2}
@@ -496,7 +534,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
           {mode === 'single' ? (
             <>
               <div>
-                <label className="form-label">🗑️ Duplicate Client (will be deleted)</label>
+                <label className="form-label">Duplicate Client (will be archived after merge)</label>
                 <select value={dupId} onChange={e => setDupId(e.target.value)}
                         className="form-select" size={5}>
                   <option value="">— Select duplicate —</option>
@@ -506,7 +544,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
                 </select>
                 {dupClient && (
                   <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 font-semibold">
-                    ⚠️ Duplicate: {dupClient.name} — will be permanently deleted after merge
+                    Duplicate: {dupClient.name} — will be archived after merge
                   </p>
                 )}
               </div>
@@ -515,7 +553,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
                 <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-3 text-sm">
                   <p className="font-semibold text-orange-700 dark:text-orange-300">Confirm merge:</p>
                   <p className="text-orange-600 dark:text-orange-400 mt-1">
-                    Move all data from <strong>{dupClient?.name}</strong> → <strong>{masterClient?.name}</strong> then delete {dupClient?.name}.
+                    Move all linked policies, claims, tasks, and documents from <strong>{dupClient?.name}</strong> to <strong>{masterClient?.name}</strong>, then archive {dupClient?.name}. Original policy details remain unchanged.
                   </p>
                 </div>
               )}
@@ -531,7 +569,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
           ) : (
             <>
               <div>
-                <label className="form-label">🗑️ Duplicate Clients (select all to merge into master)</label>
+                <label className="form-label">Duplicate Clients (select all to merge into master and archive)</label>
                 <div className="max-h-52 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-xl divide-y divide-gray-100 dark:divide-gray-700">
                   {filtered.filter(c => c.id !== masterId).map(c => (
                     <label key={c.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${dupIds.includes(c.id) ? 'bg-orange-50 dark:bg-orange-900/20' : 'bg-white dark:bg-gray-800'}`}>
