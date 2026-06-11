@@ -295,6 +295,26 @@ function RenewModal({ policy, onConfirm, onClose }) {
           </div>
         )}
 
+        {companySame && (
+          <div className="space-y-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4">
+            <p className="text-xs font-semibold text-green-700 dark:text-green-300 uppercase tracking-wider">
+              Same Company Plan Details
+            </p>
+            <div>
+              <label className="form-label">Renewed Plan Name</label>
+              <input
+                value={form.planName}
+                onChange={e => set('planName', e.target.value)}
+                className="form-input"
+                placeholder="Update plan name if changed"
+              />
+              <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                Company remains {policy.insurer || 'same insurer'}; only the renewed plan name changes.
+              </p>
+            </div>
+          </div>
+        )}
+
         <p className="text-xs text-gray-400 dark:text-gray-500">
           Step 2 — Fill renewal details below. Old policy → <strong>Renewed-Out</strong>. New policy entry created automatically.
         </p>
@@ -670,7 +690,7 @@ export default function RenewalsPage() {
           ? policy.insurer
           : (renewForm.insurer?.trim() || policy.insurer),
         planName: renewForm.companySame
-          ? (policy.planName || '')
+          ? (renewForm.planName?.trim() || policy.planName || '')
           : (renewForm.planName?.trim() || ''),
 
         // Reset PDF — new term has no document yet
