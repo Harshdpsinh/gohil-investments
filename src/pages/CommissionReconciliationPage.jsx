@@ -6,9 +6,12 @@ import { fmtCurrency, fmtDate } from '../utils/dateUtils'
 import { KNOWN_INSURERS } from '../utils/constants'
 import { uploadSharedDocument } from '../firebase/storage'
 import {
+  addClient,
   addCommissionReconciliationRow,
   addCommissionTransaction,
+  addPolicy,
   createCommissionReconciliationBatch,
+  findClientByMobileOrName,
   getAllCommissionReconciliationBatches,
   getCommissionReconciliationRows,
   updateCommissionReconciliationBatch,
@@ -25,10 +28,22 @@ function numberValue(value) {
   return Number.isFinite(n) ? n : 0
 }
 
-function pick(row, names) {
+const AGENT_HEADER_WORDS = ['agent', 'advisor', 'adviser', 'broker', 'subbroker', 'sub broker', 'sm', 'sales manager', 'rm', 'relationship manager', 'posp']
+
+function headerKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isAgentHeader(header) {
+  const raw = String(header || '').toLowerCase()
+  const compact = headerKey(header)
+  return AGENT_HEADER_WORDS.some(word => raw.includes(word) || compact.includes(headerKey(word)))
+}
+
+function pick(row, names, { ignoreAgentColumns = false } = {}) {
   const keys = Object.keys(row || {})
-  const wanted = names.map(n => n.toLowerCase().replace(/[^a-z0-9]/g, ''))
-  const key = keys.find(k => wanted.includes(k.toLowerCase().replace(/[^a-z0-9]/g, '')))
+  const wanted = names.map(headerKey)
+  const key = keys.find(k => wanted.includes(headerKey(k)) && (!ignoreAgentColumns || !isAgentHeader(k)))
   return key ? row[key] : ''
 }
 
@@ -74,6 +89,15 @@ export default function CommissionReconciliationPage() {
   const [statementMonth, setStatementMonth] = useState('')
   const [progress, setProgress] = useState('')
   const [posting, setPosting] = useState('')
+  const [includeRow, setIncludeRow] = useState(null)
+  const [includeForm, setIncludeForm] = useState({
+    clientName: '',
+    policyNumber: '',
+    insurer: '',
+    premium: '',
+    policyType: 'Health',
+    planName: '',
+  })
 
   const insurerOptions = useMemo(() => {
     const policyInsurers = policies.map(p => clean(p.insurer)).filter(Boolean)
@@ -128,7 +152,7 @@ export default function CommissionReconciliationPage() {
         for (const source of importedRows) {
           const draft = {
             batchId,
-            uploadedClientName: pick(source, ['client', 'client name', 'customer name', 'insured name']),
+            uploadedClientName: pick(source, ['client', 'client name', 'customer name', 'insured name', 'policy holder', 'policyholder'], { ignoreAgentColumns: true }),
             uploadedPolicyNumber: pick(source, ['policy number', 'policy no', 'policy']),
             uploadedProposalNumber: pick(source, ['proposal number', 'proposal no']),
             uploadedPremium: numberValue(pick(source, ['premium', 'net premium', 'gross premium'])),
@@ -168,7 +192,7 @@ export default function CommissionReconciliationPage() {
 
   const acceptRow = async row => {
     if (!row.matchedPolicyId) {
-      toast.error('Select or match a policy before accepting this row.')
+      toast.error('This policy is not in CRM yet. Include it first, then reconcile.')
       return
     }
     if (posting) return
@@ -205,6 +229,67 @@ export default function CommissionReconciliationPage() {
       toast.success('Commission posted.')
     } catch (err) {
       toast.error(err.message || 'Could not post commission.')
+    } finally {
+      setPosting('')
+    }
+  }
+
+  const openIncludePolicy = row => {
+    setIncludeRow(row)
+    setIncludeForm({
+      clientName: row.uploadedClientName || '',
+      policyNumber: row.uploadedPolicyNumber || '',
+      insurer: insurer || '',
+      premium: row.uploadedPremium || '',
+      policyType: 'Health',
+      planName: '',
+    })
+  }
+
+  const includeMissingPolicy = async e => {
+    e.preventDefault()
+    if (!includeRow || posting) return
+    if (!includeForm.clientName.trim()) {
+      toast.error('Client name is required to include this policy.')
+      return
+    }
+    if (!includeForm.policyNumber.trim()) {
+      toast.error('Policy number is required to include this policy.')
+      return
+    }
+    setPosting(includeRow.id)
+    try {
+      const existingClient = await findClientByMobileOrName('', includeForm.clientName)
+      const clientId = existingClient?.id || (await addClient({
+        name: includeForm.clientName,
+        mobile: '',
+        email: '',
+        kycStatus: 'Pending',
+        notes: 'Created from commission reconciliation unmatched statement row.',
+      })).id
+      const policyRef = await addPolicy({
+        policyNumber: includeForm.policyNumber,
+        clientId,
+        clientName: includeForm.clientName,
+        policyType: includeForm.policyType,
+        insurer: includeForm.insurer,
+        planName: includeForm.planName,
+        premium: includeForm.premium,
+        frequency: 'Yearly',
+        status: 'Active',
+        notes: 'Included from commission statement before reconciliation.',
+      })
+      await updateCommissionReconciliationRow(includeRow.id, {
+        matchedPolicyId: policyRef.id,
+        matchedPolicyNumber: includeForm.policyNumber,
+        matchConfidence: 'manual',
+        status: 'review',
+      })
+      await loadRows(includeRow.batchId)
+      setIncludeRow(null)
+      toast.success('Policy included. You can reconcile this row now.')
+    } catch (err) {
+      toast.error(err.message || 'Could not include missing policy.')
     } finally {
       setPosting('')
     }
@@ -278,9 +363,15 @@ export default function CommissionReconciliationPage() {
                 <td className="px-4 py-3"><span className="badge badge-blue">{row.matchConfidence}</span></td>
                 <td className="px-4 py-3">{row.status}</td>
                 <td className="px-4 py-3">
-                  <button className="text-blue-600 font-semibold disabled:opacity-50" disabled={row.status === 'posted' || posting === row.id} onClick={() => acceptRow(row)}>
-                    {posting === row.id ? 'Posting...' : row.status === 'posted' ? 'Posted' : 'Accept'}
-                  </button>
+                  {row.matchedPolicyId ? (
+                    <button className="text-blue-600 font-semibold disabled:opacity-50" disabled={row.status === 'posted' || posting === row.id} onClick={() => acceptRow(row)}>
+                      {posting === row.id ? 'Posting...' : row.status === 'posted' ? 'Posted' : 'Accept'}
+                    </button>
+                  ) : (
+                    <button className="text-purple-600 font-semibold disabled:opacity-50" disabled={posting === row.id} onClick={() => openIncludePolicy(row)}>
+                      Include Policy
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -288,6 +379,34 @@ export default function CommissionReconciliationPage() {
           </tbody>
         </table>
       </div>
+
+      {includeRow && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <form onSubmit={includeMissingPolicy} className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Include Missing Policy</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">This policy was found in the commission statement but not in CRM. Add it first, then reconcile the commission.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input className="form-input" placeholder="Client name" value={includeForm.clientName} onChange={e => setIncludeForm({ ...includeForm, clientName: e.target.value })} />
+              <input className="form-input" placeholder="Policy number" value={includeForm.policyNumber} onChange={e => setIncludeForm({ ...includeForm, policyNumber: e.target.value })} />
+              <input className="form-input" list="include-insurer-options" placeholder="Insurer" value={includeForm.insurer} onChange={e => setIncludeForm({ ...includeForm, insurer: e.target.value })} />
+              <datalist id="include-insurer-options">
+                {insurerOptions.map(name => <option key={name} value={name} />)}
+              </datalist>
+              <select className="form-input" value={includeForm.policyType} onChange={e => setIncludeForm({ ...includeForm, policyType: e.target.value })}>
+                {['Health', 'Life', 'Motor', 'Home', 'Travel', 'Marine', 'Fire', 'Other'].map(type => <option key={type}>{type}</option>)}
+              </select>
+              <input className="form-input" type="number" placeholder="Premium" value={includeForm.premium} onChange={e => setIncludeForm({ ...includeForm, premium: e.target.value })} />
+              <input className="form-input sm:col-span-2" placeholder="Plan name" value={includeForm.planName} onChange={e => setIncludeForm({ ...includeForm, planName: e.target.value })} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setIncludeRow(null)}>Cancel</button>
+              <button className="btn-primary" disabled={posting === includeRow.id}>{posting === includeRow.id ? 'Including...' : 'Include Policy'}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
