@@ -27,6 +27,10 @@ service cloud.firestore {
         allow delete: if isAdmin();
       }
     }
+    match /families/{familyId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
     match /policies/{policyId} {
       allow read, create: if isAuth();
       allow update: if isAuth() && (!isSoftDeleteChange() || isAdmin());
@@ -43,6 +47,54 @@ service cloud.firestore {
     match /tasks/{taskId} {
       allow read, create, update: if isAuth();
       allow delete: if isAdmin();
+    }
+    match /leads/{leadId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /lead_followups/{followupId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /endorsements/{endorsementId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /documents/{documentId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /message_logs/{messageId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
+    }
+    match /audit_logs/{auditId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+    match /commission_master/{commissionMasterId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /commission_transactions/{commissionTransactionId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /commission_import_templates/{templateId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /commission_reconciliation_batches/{batchId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /commission_reconciliation_rows/{rowId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /sub_brokers/{subBrokerId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /sales_managers/{salesManagerId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /reports_saved_filters/{filterId} {
+      allow read, create, update, delete: if isAuth();
     }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();

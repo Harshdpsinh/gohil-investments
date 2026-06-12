@@ -15,13 +15,57 @@ const DOCS_META = 'documents'
 const USERS     = 'users'
 const CLAIMS    = 'claims'
 const TASKS     = 'tasks'
+const AUDIT_LOGS = 'audit_logs'
+const DOCUMENTS = 'documents'
+const MESSAGE_LOGS = 'message_logs'
+const LEADS = 'leads'
+const LEAD_FOLLOWUPS = 'lead_followups'
+const ENDORSEMENTS = 'endorsements'
+const COMMISSION_MASTER = 'commission_master'
+const COMMISSION_TRANSACTIONS = 'commission_transactions'
+const COMMISSION_IMPORT_TEMPLATES = 'commission_import_templates'
+const COMMISSION_RECONCILIATION_BATCHES = 'commission_reconciliation_batches'
+const COMMISSION_RECONCILIATION_ROWS = 'commission_reconciliation_rows'
+const SUB_BROKERS = 'sub_brokers'
+const SALES_MANAGERS = 'sales_managers'
+const REPORTS_SAVED_FILTERS = 'reports_saved_filters'
 const CLIENT_FIELDS = [
   'name', 'mobile', 'email', 'pan', 'aadhar', 'dob', 'gender',
   'address', 'city', 'state', 'occupation', 'employment', 'income',
   'qualification', 'designation', 'kycStatus', 'familyId', 'familyName',
   'familyRole', 'notes',
 ]
-const BACKUP_COLLECTIONS = [CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS, FAMILIES]
+const BACKUP_COLLECTIONS = [
+  CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS, FAMILIES,
+  AUDIT_LOGS, DOCUMENTS, MESSAGE_LOGS, LEADS, LEAD_FOLLOWUPS, ENDORSEMENTS,
+  COMMISSION_MASTER, COMMISSION_TRANSACTIONS, COMMISSION_IMPORT_TEMPLATES,
+  COMMISSION_RECONCILIATION_BATCHES, COMMISSION_RECONCILIATION_ROWS,
+  SUB_BROKERS, SALES_MANAGERS, REPORTS_SAVED_FILTERS,
+]
+
+export const CRM_COLLECTIONS = Object.freeze({
+  CLIENTS,
+  POLICIES,
+  PROPOSALS,
+  FAMILIES,
+  USERS,
+  CLAIMS,
+  TASKS,
+  AUDIT_LOGS,
+  DOCUMENTS,
+  MESSAGE_LOGS,
+  LEADS,
+  LEAD_FOLLOWUPS,
+  ENDORSEMENTS,
+  COMMISSION_MASTER,
+  COMMISSION_TRANSACTIONS,
+  COMMISSION_IMPORT_TEMPLATES,
+  COMMISSION_RECONCILIATION_BATCHES,
+  COMMISSION_RECONCILIATION_ROWS,
+  SUB_BROKERS,
+  SALES_MANAGERS,
+  REPORTS_SAVED_FILTERS,
+})
 
 function serialiseBackupValue(value) {
   if (value === null || value === undefined) return value
@@ -142,6 +186,293 @@ export async function setUserRole(uid, data) {
 export async function getAllUsers() {
   const s = await getDocs(collection(db,USERS))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
+}
+
+// ── PHASE 1 FOUNDATION MODULES ────────────────────────────────
+function foundationRef(name) {
+  return collection(db, name)
+}
+
+function normaliseFoundationPayload(data = {}, { requireName = false, nameField = 'name' } = {}) {
+  const payload = { ...data }
+  if (requireName) payload[nameField] = assertString(payload[nameField], nameField, 160)
+  Object.entries(payload).forEach(([key, value]) => {
+    if (typeof value === 'string') payload[key] = value.trim()
+  })
+  return cleanFirestoreData(payload)
+}
+
+async function addFoundationDoc(collectionName, data = {}, options = {}) {
+  const payload = normaliseFoundationPayload(data, options)
+  return addDoc(foundationRef(collectionName), {
+    ...payload,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  })
+}
+
+async function updateFoundationDoc(collectionName, id, data = {}, options = {}) {
+  if (!id) throw new Error('Record id is required.')
+  const payload = normaliseFoundationPayload(data, options)
+  return setDoc(doc(db, collectionName, id), {
+    ...payload,
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+}
+
+async function listFoundationDocs(collectionName, orderField = 'createdAt', direction = 'desc') {
+  const s = await getDocs(query(foundationRef(collectionName), orderBy(orderField, direction)))
+  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function createAuditLog(data = {}) {
+  const payload = normaliseFoundationPayload({
+    action: data.action || '',
+    entityType: data.entityType || '',
+    entityId: data.entityId || '',
+    summary: data.summary || '',
+    before: data.before || null,
+    after: data.after || null,
+    userId: data.userId || '',
+    userEmail: data.userEmail || '',
+    metadata: data.metadata || {},
+  })
+  if (!payload.action) throw new Error('Audit action is required.')
+  if (!payload.entityType) throw new Error('Audit entity type is required.')
+  return addDoc(foundationRef(AUDIT_LOGS), {
+    ...payload,
+    createdAt: serverTimestamp(),
+  })
+}
+
+export async function getAuditLogs({ entityType = '', entityId = '' } = {}) {
+  const base = foundationRef(AUDIT_LOGS)
+  const constraints = []
+  if (entityType) constraints.push(where('entityType', '==', entityType))
+  if (entityId) constraints.push(where('entityId', '==', entityId))
+  constraints.push(orderBy('createdAt', 'desc'))
+  const s = await getDocs(query(base, ...constraints))
+  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function addDocumentRecord(data = {}) {
+  if (!data.ownerType || !data.ownerId) throw new Error('Document owner is required.')
+  if (!data.name && !data.fileName) throw new Error('Document name is required.')
+  return addFoundationDoc(DOCUMENTS, {
+    ownerType: data.ownerType,
+    ownerId: data.ownerId,
+    documentType: data.documentType || 'other',
+    name: data.name || data.fileName,
+    url: data.url || '',
+    storagePath: data.storagePath || '',
+    contentType: data.contentType || '',
+    size: Number(data.size || 0),
+    notes: data.notes || '',
+  })
+}
+
+export async function getDocumentRecords(ownerType, ownerId) {
+  if (!ownerType || !ownerId) return []
+  const s = await getDocs(query(
+    foundationRef(DOCUMENTS),
+    where('ownerType', '==', ownerType),
+    where('ownerId', '==', ownerId),
+    orderBy('createdAt', 'desc'),
+  ))
+  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function addMessageLog(data = {}) {
+  if (!data.channel) throw new Error('Message channel is required.')
+  return addFoundationDoc(MESSAGE_LOGS, {
+    channel: data.channel,
+    templateType: data.templateType || '',
+    entityType: data.entityType || '',
+    entityId: data.entityId || '',
+    clientId: data.clientId || '',
+    policyId: data.policyId || '',
+    recipientName: data.recipientName || '',
+    recipientMobile: data.recipientMobile || '',
+    recipientEmail: data.recipientEmail || '',
+    messagePreview: data.messagePreview || '',
+    status: data.status || 'draft',
+    sentAt: data.sentAt || null,
+  })
+}
+
+export async function addLead(data = {}) {
+  return addFoundationDoc(LEADS, {
+    name: data.name || '',
+    mobile: data.mobile || '',
+    email: data.email || '',
+    source: data.source || '',
+    leadType: data.leadType || '',
+    insuranceNeed: data.insuranceNeed || '',
+    assignedUserId: data.assignedUserId || '',
+    assignedUserName: data.assignedUserName || '',
+    followUpDate: data.followUpDate || '',
+    leadValue: Number(data.leadValue || 0),
+    status: data.status || 'new',
+    lostReason: data.lostReason || '',
+    remarks: data.remarks || '',
+  }, { requireName: true })
+}
+
+export async function updateLead(id, data = {}) {
+  return updateFoundationDoc(LEADS, id, data)
+}
+
+export async function getAllLeads() {
+  return listFoundationDocs(LEADS)
+}
+
+export async function addLeadFollowup(data = {}) {
+  if (!data.leadId) throw new Error('Lead is required.')
+  return addFoundationDoc(LEAD_FOLLOWUPS, {
+    leadId: data.leadId,
+    type: data.type || 'call',
+    note: data.note || '',
+    nextFollowUpDate: data.nextFollowUpDate || '',
+    status: data.status || 'open',
+    userId: data.userId || '',
+  })
+}
+
+export async function addEndorsement(data = {}) {
+  if (!data.policyId && !data.clientId) throw new Error('Endorsement must be linked to a policy or client.')
+  return addFoundationDoc(ENDORSEMENTS, {
+    policyId: data.policyId || '',
+    policyNumber: data.policyNumber || '',
+    clientId: data.clientId || '',
+    clientName: data.clientName || '',
+    type: data.type || 'other',
+    status: data.status || 'requested',
+    requestedDate: data.requestedDate || '',
+    completedDate: data.completedDate || '',
+    notes: data.notes || '',
+  })
+}
+
+export async function updateEndorsement(id, data = {}) {
+  return updateFoundationDoc(ENDORSEMENTS, id, data)
+}
+
+export async function addCommissionMaster(data = {}) {
+  return addFoundationDoc(COMMISSION_MASTER, {
+    insurer: data.insurer || '',
+    product: data.product || '',
+    insuranceType: data.insuranceType || '',
+    policyYear: Number(data.policyYear || 1),
+    businessType: data.businessType || 'fresh',
+    premiumMin: Number(data.premiumMin || 0),
+    premiumMax: Number(data.premiumMax || 0),
+    commissionPct: Number(data.commissionPct || 0),
+    rewardPct: Number(data.rewardPct || 0),
+    active: data.active !== false,
+  })
+}
+
+export async function addCommissionTransaction(data = {}) {
+  if (!data.policyId && !data.policyNumber) throw new Error('Commission transaction must be linked to a policy.')
+  return addFoundationDoc(COMMISSION_TRANSACTIONS, {
+    policyId: data.policyId || '',
+    policyNumber: data.policyNumber || '',
+    clientId: data.clientId || '',
+    clientName: data.clientName || '',
+    insurer: data.insurer || '',
+    premium: Number(data.premium || 0),
+    expectedCommission: Number(data.expectedCommission || 0),
+    receivedCommission: Number(data.receivedCommission || 0),
+    rewardCommission: Number(data.rewardCommission || 0),
+    tds: Number(data.tds || 0),
+    gst: Number(data.gst || 0),
+    netReceived: Number(data.netReceived || 0),
+    difference: Number(data.difference || 0),
+    payoutDate: data.payoutDate || '',
+    payoutMonth: data.payoutMonth || '',
+    referenceNumber: data.referenceNumber || '',
+    status: data.status || 'pending',
+    reconciliationBatchId: data.reconciliationBatchId || '',
+    remarks: data.remarks || '',
+  })
+}
+
+export async function addCommissionImportTemplate(data = {}) {
+  return addFoundationDoc(COMMISSION_IMPORT_TEMPLATES, {
+    name: data.name || '',
+    insurer: data.insurer || '',
+    fileType: data.fileType || 'excel',
+    fieldMap: data.fieldMap || {},
+    active: data.active !== false,
+  }, { requireName: true })
+}
+
+export async function createCommissionReconciliationBatch(data = {}) {
+  return addFoundationDoc(COMMISSION_RECONCILIATION_BATCHES, {
+    insurer: data.insurer || '',
+    statementMonth: data.statementMonth || '',
+    payoutDate: data.payoutDate || '',
+    originalFileUrl: data.originalFileUrl || '',
+    originalFileName: data.originalFileName || '',
+    extractedText: data.extractedText || '',
+    status: data.status || 'draft',
+    summary: data.summary || {},
+    confirmedAt: null,
+    rolledBackAt: null,
+  })
+}
+
+export async function addCommissionReconciliationRow(data = {}) {
+  if (!data.batchId) throw new Error('Reconciliation batch is required.')
+  return addFoundationDoc(COMMISSION_RECONCILIATION_ROWS, {
+    batchId: data.batchId,
+    uploadedClientName: data.uploadedClientName || '',
+    uploadedPolicyNumber: data.uploadedPolicyNumber || '',
+    uploadedProposalNumber: data.uploadedProposalNumber || '',
+    uploadedPremium: Number(data.uploadedPremium || 0),
+    uploadedCommission: Number(data.uploadedCommission || 0),
+    tds: Number(data.tds || 0),
+    gst: Number(data.gst || 0),
+    netPaid: Number(data.netPaid || 0),
+    matchedPolicyId: data.matchedPolicyId || '',
+    matchedPolicyNumber: data.matchedPolicyNumber || '',
+    matchConfidence: data.matchConfidence || 'unmatched',
+    status: data.status || 'review',
+    note: data.note || '',
+  })
+}
+
+export async function addSubBroker(data = {}) {
+  return addFoundationDoc(SUB_BROKERS, {
+    name: data.name || '',
+    mobile: data.mobile || '',
+    email: data.email || '',
+    commissionSharePct: Number(data.commissionSharePct || 0),
+    active: data.active !== false,
+    notes: data.notes || '',
+  }, { requireName: true })
+}
+
+export async function addSalesManager(data = {}) {
+  return addFoundationDoc(SALES_MANAGERS, {
+    name: data.name || '',
+    mobile: data.mobile || '',
+    email: data.email || '',
+    targetPremium: Number(data.targetPremium || 0),
+    targetPolicies: Number(data.targetPolicies || 0),
+    incentivePct: Number(data.incentivePct || 0),
+    active: data.active !== false,
+    notes: data.notes || '',
+  }, { requireName: true })
+}
+
+export async function saveReportFilter(data = {}) {
+  return addFoundationDoc(REPORTS_SAVED_FILTERS, {
+    name: data.name || '',
+    reportType: data.reportType || '',
+    filters: data.filters || {},
+    userId: data.userId || '',
+  }, { requireName: true })
 }
 
 // ── CLIENTS ───────────────────────────────────────────────────
