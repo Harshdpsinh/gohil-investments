@@ -215,6 +215,7 @@ export default function CommissionReconciliationPage() {
 
       let importedRows = []
       const canParse = /\.(csv|xlsx?|xls)$/i.test(file.name)
+      const isPdf = /\.pdf$/i.test(file.name)
       if (canParse) {
         setProgress('Reading statement rows...')
         importedRows = await parseImportFile(file)
@@ -228,7 +229,9 @@ export default function CommissionReconciliationPage() {
             rows: 0,
             note: uploadError
               ? `Manual entry/review needed. File storage issue: ${uploadError}`
-              : 'File uploaded. Manual entry/review needed for PDF or unrecognized statement.',
+              : isPdf
+                ? 'PDF statement saved for manual review. Free automatic row extraction works with Excel/CSV statements only.'
+                : 'File uploaded. Manual entry/review needed for unrecognized statement format.',
           },
         })
       } else {
@@ -268,7 +271,11 @@ export default function CommissionReconciliationPage() {
       await loadRows(batchId)
       setFile(null)
       setProgress('')
-      toast.success('Commission statement ready for review.')
+      if (importedRows.length === 0 && isPdf) {
+        toast.error('PDF saved, but no rows can be extracted on the free setup. Upload Excel/CSV for automatic rows.')
+      } else {
+        toast.success('Commission statement ready for review.')
+      }
     } catch (err) {
       setProgress('')
       toast.error(friendlyFirebaseError(err, 'Could not create reconciliation batch.'))
@@ -445,6 +452,9 @@ export default function CommissionReconciliationPage() {
         <input className="form-input md:col-span-2" type="file" accept=".csv,.xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp" onChange={e => setFile(e.target.files?.[0] || null)} />
         <button className="btn-primary" disabled={Boolean(progress)}>{progress ? 'Working...' : 'Upload & Review'}</button>
         {progress && <p className="md:col-span-5 text-sm text-blue-600">{progress}</p>}
+        <p className="md:col-span-5 text-xs text-gray-500">
+          For automatic commission rows, upload Excel or CSV. PDF statements are saved for reference/manual review in the free version.
+        </p>
       </form>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

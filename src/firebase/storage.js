@@ -205,6 +205,49 @@ export function getDownloadUrl(url, fileName = '') {
   return `${safeUrl}${separator}dl=${encodeURIComponent(safeFileName)}`
 }
 
+async function fetchDocumentBlob(url) {
+  const safeUrl = getViewUrl(url)
+  if (!safeUrl) throw new Error('No document URL found.')
+  const response = await fetch(safeUrl, { mode: 'cors' })
+  if (!response.ok) throw new Error('Could not read the uploaded document.')
+  return response.blob()
+}
+
+export async function openDocumentPreview(url, fileName = 'document.pdf') {
+  try {
+    const blob = await fetchDocumentBlob(url)
+    const blobUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'application/pdf' }))
+    window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+  } catch {
+    const directUrl = getViewUrl(url)
+    if (directUrl) window.open(directUrl, '_blank', 'noopener,noreferrer')
+    else throw new Error(`Could not open ${fileName}.`)
+  }
+}
+
+export async function downloadDocumentFile(url, fileName = 'document.pdf') {
+  const safeFileName = String(fileName || 'document.pdf')
+    .replace(/[^\w.\-() ]+/g, '')
+    .trim()
+    .replace(/\s+/g, '_') || 'document.pdf'
+  try {
+    const blob = await fetchDocumentBlob(url)
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = safeFileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+  } catch {
+    const directUrl = getDownloadUrl(url, safeFileName)
+    if (directUrl) window.open(directUrl, '_blank', 'noopener,noreferrer')
+    else throw new Error(`Could not download ${safeFileName}.`)
+  }
+}
+
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
   validateClientDocument(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'client_document'
