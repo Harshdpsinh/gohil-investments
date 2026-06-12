@@ -225,6 +225,15 @@ async function listFoundationDocs(collectionName, orderField = 'createdAt', dire
   return s.docs.map(d => ({ id: d.id, ...d.data() }))
 }
 
+function sortByCreatedAt(rows, direction = 'desc') {
+  const dir = direction === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const av = a.createdAt?.seconds || 0
+    const bv = b.createdAt?.seconds || 0
+    return (av - bv) * dir
+  })
+}
+
 export async function createAuditLog(data = {}) {
   const payload = normaliseFoundationPayload({
     action: data.action || '',
@@ -250,9 +259,8 @@ export async function getAuditLogs({ entityType = '', entityId = '' } = {}) {
   const constraints = []
   if (entityType) constraints.push(where('entityType', '==', entityType))
   if (entityId) constraints.push(where('entityId', '==', entityId))
-  constraints.push(orderBy('createdAt', 'desc'))
   const s = await getDocs(query(base, ...constraints))
-  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+  return sortByCreatedAt(s.docs.map(d => ({ id: d.id, ...d.data() })))
 }
 
 export async function addDocumentRecord(data = {}) {
@@ -277,9 +285,8 @@ export async function getDocumentRecords(ownerType, ownerId) {
     foundationRef(DOCUMENTS),
     where('ownerType', '==', ownerType),
     where('ownerId', '==', ownerId),
-    orderBy('createdAt', 'desc'),
   ))
-  return s.docs.map(d => ({ id: d.id, ...d.data() }))
+  return sortByCreatedAt(s.docs.map(d => ({ id: d.id, ...d.data() })))
 }
 
 export async function addMessageLog(data = {}) {
@@ -338,6 +345,15 @@ export async function addLeadFollowup(data = {}) {
   })
 }
 
+export async function getLeadFollowups(leadId) {
+  if (!leadId) return []
+  const s = await getDocs(query(
+    foundationRef(LEAD_FOLLOWUPS),
+    where('leadId', '==', leadId),
+  ))
+  return sortByCreatedAt(s.docs.map(d => ({ id: d.id, ...d.data() })))
+}
+
 export async function addEndorsement(data = {}) {
   if (!data.policyId && !data.clientId) throw new Error('Endorsement must be linked to a policy or client.')
   return addFoundationDoc(ENDORSEMENTS, {
@@ -357,6 +373,10 @@ export async function updateEndorsement(id, data = {}) {
   return updateFoundationDoc(ENDORSEMENTS, id, data)
 }
 
+export async function getAllEndorsements() {
+  return listFoundationDocs(ENDORSEMENTS)
+}
+
 export async function addCommissionMaster(data = {}) {
   return addFoundationDoc(COMMISSION_MASTER, {
     insurer: data.insurer || '',
@@ -370,6 +390,14 @@ export async function addCommissionMaster(data = {}) {
     rewardPct: Number(data.rewardPct || 0),
     active: data.active !== false,
   })
+}
+
+export async function updateCommissionMaster(id, data = {}) {
+  return updateFoundationDoc(COMMISSION_MASTER, id, data)
+}
+
+export async function getAllCommissionMaster() {
+  return listFoundationDocs(COMMISSION_MASTER)
 }
 
 export async function addCommissionTransaction(data = {}) {
@@ -397,6 +425,10 @@ export async function addCommissionTransaction(data = {}) {
   })
 }
 
+export async function getAllCommissionTransactions() {
+  return listFoundationDocs(COMMISSION_TRANSACTIONS)
+}
+
 export async function addCommissionImportTemplate(data = {}) {
   return addFoundationDoc(COMMISSION_IMPORT_TEMPLATES, {
     name: data.name || '',
@@ -405,6 +437,10 @@ export async function addCommissionImportTemplate(data = {}) {
     fieldMap: data.fieldMap || {},
     active: data.active !== false,
   }, { requireName: true })
+}
+
+export async function getAllCommissionImportTemplates() {
+  return listFoundationDocs(COMMISSION_IMPORT_TEMPLATES)
 }
 
 export async function createCommissionReconciliationBatch(data = {}) {
@@ -420,6 +456,14 @@ export async function createCommissionReconciliationBatch(data = {}) {
     confirmedAt: null,
     rolledBackAt: null,
   })
+}
+
+export async function updateCommissionReconciliationBatch(id, data = {}) {
+  return updateFoundationDoc(COMMISSION_RECONCILIATION_BATCHES, id, data)
+}
+
+export async function getAllCommissionReconciliationBatches() {
+  return listFoundationDocs(COMMISSION_RECONCILIATION_BATCHES)
 }
 
 export async function addCommissionReconciliationRow(data = {}) {
@@ -442,6 +486,19 @@ export async function addCommissionReconciliationRow(data = {}) {
   })
 }
 
+export async function updateCommissionReconciliationRow(id, data = {}) {
+  return updateFoundationDoc(COMMISSION_RECONCILIATION_ROWS, id, data)
+}
+
+export async function getCommissionReconciliationRows(batchId) {
+  if (!batchId) return []
+  const s = await getDocs(query(
+    foundationRef(COMMISSION_RECONCILIATION_ROWS),
+    where('batchId', '==', batchId),
+  ))
+  return sortByCreatedAt(s.docs.map(d => ({ id: d.id, ...d.data() })), 'asc')
+}
+
 export async function addSubBroker(data = {}) {
   return addFoundationDoc(SUB_BROKERS, {
     name: data.name || '',
@@ -451,6 +508,14 @@ export async function addSubBroker(data = {}) {
     active: data.active !== false,
     notes: data.notes || '',
   }, { requireName: true })
+}
+
+export async function updateSubBroker(id, data = {}) {
+  return updateFoundationDoc(SUB_BROKERS, id, data)
+}
+
+export async function getAllSubBrokers() {
+  return listFoundationDocs(SUB_BROKERS)
 }
 
 export async function addSalesManager(data = {}) {
@@ -466,6 +531,14 @@ export async function addSalesManager(data = {}) {
   }, { requireName: true })
 }
 
+export async function updateSalesManager(id, data = {}) {
+  return updateFoundationDoc(SALES_MANAGERS, id, data)
+}
+
+export async function getAllSalesManagers() {
+  return listFoundationDocs(SALES_MANAGERS)
+}
+
 export async function saveReportFilter(data = {}) {
   return addFoundationDoc(REPORTS_SAVED_FILTERS, {
     name: data.name || '',
@@ -473,6 +546,10 @@ export async function saveReportFilter(data = {}) {
     filters: data.filters || {},
     userId: data.userId || '',
   }, { requireName: true })
+}
+
+export async function getAllSavedReportFilters() {
+  return listFoundationDocs(REPORTS_SAVED_FILTERS)
 }
 
 // ── CLIENTS ───────────────────────────────────────────────────

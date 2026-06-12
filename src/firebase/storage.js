@@ -1,7 +1,7 @@
 // src/firebase/storage.js
 // PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
 // Images use /image/ endpoint. Both are publicly accessible.
-import { addDocMeta, deleteDocMeta, getDocMeta } from './firestore'
+import { addDocMeta, addDocumentRecord, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app, { firebaseConfig } from './config'
 
@@ -11,6 +11,15 @@ const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
 const UPLOAD_TIMEOUT_MS = 30000
 const ALLOWED_CLIENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+const ALLOWED_SHARED_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/csv',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]
 const projectId = firebaseConfig.projectId
 const configuredBucket = firebaseConfig.storageBucket
 const STORAGE_BUCKETS = [...new Set([
@@ -40,6 +49,18 @@ function validatePolicyPdf(file) {
   }
   const isPdf = file.type === 'application/pdf' && file.name.toLowerCase().endsWith('.pdf')
   if (!isPdf) throw new Error('Only PDF files are allowed.')
+}
+
+function validateSharedDocument(file) {
+  if (!file) throw new Error('No file selected.')
+  if (file.size > MAX_POLICY_PDF_BYTES) {
+    throw new Error('File is too large. Please upload a file smaller than 25 MB.')
+  }
+  const name = file.name.toLowerCase()
+  const allowedExtension = /\.(pdf|jpe?g|png|webp|csv|xlsx?|xls)$/.test(name)
+  if (!ALLOWED_SHARED_TYPES.includes(file.type) || !allowedExtension) {
+    throw new Error('Only PDF, image, CSV, or Excel files are allowed.')
+  }
 }
 
 function cloudinaryUpload(file, folder, onProgress = () => {}) {
@@ -180,6 +201,24 @@ export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
   const meta = await firebaseUploadWithFallback(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
   return { url: meta.url, name: meta.name, storagePath: meta.storagePath, storageBucket: meta.storageBucket }
+}
+
+export async function uploadSharedDocument(ownerType, ownerId, file, onProgress = () => {}) {
+  validateSharedDocument(file)
+  if (!ownerType || !ownerId) throw new Error('Document owner is required.')
+  const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'document'
+  const meta = await firebaseUploadWithFallback(file, `documents/${ownerType}/${ownerId}/${Date.now()}_${safeName}`, onProgress)
+  await addDocumentRecord({
+    ownerType,
+    ownerId,
+    documentType: ownerType,
+    name: meta.name,
+    url: meta.url,
+    storagePath: meta.storagePath,
+    contentType: meta.type,
+    size: meta.size,
+  })
+  return meta
 }
 
 export async function deleteStorageObjectByPath(storagePath, storageBucket = '') {
