@@ -184,6 +184,9 @@ export function getViewUrl(url) {
 export function getPreviewUrl(url) {
   const safeUrl = getViewUrl(url)
   if (!safeUrl) return ''
+  if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/raw/upload/')) {
+    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(safeUrl)}`
+  }
   return safeUrl
 }
 
@@ -194,6 +197,10 @@ export function getDownloadUrl(url, fileName = '') {
     .replace(/[^\w.\-() ]+/g, '')
     .trim()
     .replace(/\s+/g, '_') || 'document.pdf'
+  if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/raw/upload/')) {
+    const encodedName = encodeURIComponent(safeFileName).replace(/%20/g, '_')
+    return safeUrl.replace('/raw/upload/', `/raw/upload/fl_attachment:${encodedName}/`)
+  }
   const separator = safeUrl.includes('?') ? '&' : '?'
   return `${safeUrl}${separator}dl=${encodeURIComponent(safeFileName)}`
 }
