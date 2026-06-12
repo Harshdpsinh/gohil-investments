@@ -3,6 +3,7 @@ import toast from 'react-hot-toast'
 import { usePolicies } from '../hooks/usePolicies'
 import { parseImportFile } from '../utils/exportUtils'
 import { fmtCurrency, fmtDate } from '../utils/dateUtils'
+import { KNOWN_INSURERS } from '../utils/constants'
 import { uploadSharedDocument } from '../firebase/storage'
 import {
   addCommissionReconciliationRow,
@@ -52,6 +53,17 @@ function confidenceFor(row, policies) {
   return { level: 'unmatched', policy: null }
 }
 
+function monthOptions(count = 36) {
+  const now = new Date()
+  return Array.from({ length: count }, (_, index) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - index, 1)
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const value = `${d.getFullYear()}-${month}`
+    const label = d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+    return { value, label }
+  })
+}
+
 export default function CommissionReconciliationPage() {
   const { policies } = usePolicies()
   const [batches, setBatches] = useState([])
@@ -62,6 +74,13 @@ export default function CommissionReconciliationPage() {
   const [statementMonth, setStatementMonth] = useState('')
   const [progress, setProgress] = useState('')
   const [posting, setPosting] = useState('')
+
+  const insurerOptions = useMemo(() => {
+    const policyInsurers = policies.map(p => clean(p.insurer)).filter(Boolean)
+    return Array.from(new Set([...KNOWN_INSURERS, ...policyInsurers])).sort((a, b) => a.localeCompare(b))
+  }, [policies])
+
+  const statementMonthOptions = useMemo(() => monthOptions(48), [])
 
   const loadBatches = async () => setBatches(await getAllCommissionReconciliationBatches())
 
@@ -206,8 +225,22 @@ export default function CommissionReconciliationPage() {
       </div>
 
       <form onSubmit={createBatch} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-        <input className="form-input" placeholder="Insurer" value={insurer} onChange={e => setInsurer(e.target.value)} />
-        <input className="form-input" placeholder="Statement month" value={statementMonth} onChange={e => setStatementMonth(e.target.value)} />
+        <div>
+          <input
+            className="form-input"
+            list="commission-insurer-options"
+            placeholder="Select insurer"
+            value={insurer}
+            onChange={e => setInsurer(e.target.value)}
+          />
+          <datalist id="commission-insurer-options">
+            {insurerOptions.map(name => <option key={name} value={name} />)}
+          </datalist>
+        </div>
+        <select className="form-input" value={statementMonth} onChange={e => setStatementMonth(e.target.value)}>
+          <option value="">Select statement month</option>
+          {statementMonthOptions.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}
+        </select>
         <input className="form-input md:col-span-2" type="file" accept=".csv,.xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp" onChange={e => setFile(e.target.files?.[0] || null)} />
         <button className="btn-primary" disabled={Boolean(progress)}>{progress ? 'Working...' : 'Upload & Review'}</button>
         {progress && <p className="md:col-span-5 text-sm text-blue-600">{progress}</p>}
