@@ -37,6 +37,7 @@ function friendlyFirebaseError(err, fallback) {
 }
 
 const AGENT_HEADER_WORDS = ['agent', 'advisor', 'adviser', 'broker', 'subbroker', 'sub broker', 'sm', 'sales manager', 'rm', 'relationship manager', 'posp']
+const NAME_STOP_WORDS = ['mr', 'mrs', 'ms', 'miss', 'shri', 'smt', 'kumari', 'dr', 'late', 'policyholder', 'policy', 'holder']
 
 function headerKey(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -55,9 +56,40 @@ function pick(row, names, { ignoreAgentColumns = false } = {}) {
   return key ? row[key] : ''
 }
 
+function normaliseName(value) {
+  return clean(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token && !NAME_STOP_WORDS.includes(token))
+    .join(' ')
+}
+
+function nameTokens(value) {
+  return normaliseName(value).split(' ').filter(token => token.length > 1)
+}
+
+function nameMatchScore(a, b) {
+  const aTokens = nameTokens(a)
+  const bTokens = nameTokens(b)
+  if (!aTokens.length || !bTokens.length) return 0
+  const aSet = new Set(aTokens)
+  const bSet = new Set(bTokens)
+  const common = aTokens.filter(token => bSet.has(token)).length
+  const reverseCommon = bTokens.filter(token => aSet.has(token)).length
+  return Math.max(common / aTokens.length, reverseCommon / bTokens.length)
+}
+
+function insurerLooksSame(rowInsurer, policyInsurer) {
+  const a = headerKey(rowInsurer)
+  const b = headerKey(policyInsurer)
+  if (!a || !b) return false
+  return a.includes(b) || b.includes(a)
+}
+
 function confidenceFor(row, policies) {
   const policyNo = clean(row.uploadedPolicyNumber).toLowerCase()
-  const client = clean(row.uploadedClientName).toLowerCase()
+  const client = clean(row.uploadedClientName)
   const premium = Number(row.uploadedPremium || 0)
   if (!policyNo && !client) return { level: 'unmatched', policy: null }
 
@@ -67,10 +99,17 @@ function confidenceFor(row, policies) {
   const partial = policyNo && policies.find(p => clean(p.policyNumber).toLowerCase().includes(policyNo) || policyNo.includes(clean(p.policyNumber).toLowerCase()))
   if (partial) return { level: 'medium', policy: partial }
 
+  const strongName = policies.find(p => {
+    const score = nameMatchScore(client, p.clientName)
+    const insurerMatch = insurerLooksSame(row.uploadedInsurer, p.insurer)
+    return score >= 0.85 && (insurerMatch || !row.uploadedInsurer)
+  })
+  if (strongName) return { level: 'medium', policy: strongName }
+
   const fuzzy = policies.find(p => {
-    const nameMatch = client && clean(p.clientName).toLowerCase().includes(client.split(' ')[0] || client)
+    const score = nameMatchScore(client, p.clientName)
     const premiumMatch = premium && Math.abs((Number(p.premium) || 0) - premium) <= Math.max(50, premium * 0.02)
-    return nameMatch && premiumMatch
+    return score >= 0.5 && premiumMatch
   })
   if (fuzzy) return { level: 'medium', policy: fuzzy }
   return { level: 'unmatched', policy: null }
@@ -99,6 +138,8 @@ export default function CommissionReconciliationPage() {
   const [progress, setProgress] = useState('')
   const [posting, setPosting] = useState('')
   const [includeRow, setIncludeRow] = useState(null)
+  const [matchRow, setMatchRow] = useState(null)
+  const [matchQuery, setMatchQuery] = useState('')
   const [includeForm, setIncludeForm] = useState({
     clientName: '',
     policyNumber: '',
@@ -114,6 +155,27 @@ export default function CommissionReconciliationPage() {
   }, [policies])
 
   const statementMonthOptions = useMemo(() => monthOptions(48), [])
+
+  const candidatePolicies = useMemo(() => {
+    if (!matchRow) return []
+    const q = clean(matchQuery).toLowerCase()
+    return policies
+      .map(policy => ({
+        policy,
+        score: Math.max(
+          nameMatchScore(matchRow.uploadedClientName, policy.clientName),
+          clean(matchRow.uploadedPolicyNumber) && clean(policy.policyNumber).toLowerCase().includes(clean(matchRow.uploadedPolicyNumber).toLowerCase()) ? 1 : 0,
+        ),
+      }))
+      .filter(({ policy, score }) => {
+        const searchable = [policy.policyNumber, policy.clientName, policy.insurer, policy.planName, policy.premium].join(' ').toLowerCase()
+        const insurerOk = !insurer || insurerLooksSame(insurer, policy.insurer) || score >= 0.65
+        return insurerOk && (!q || searchable.includes(q)) && (score >= 0.35 || q)
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30)
+      .map(({ policy }) => policy)
+  }, [matchRow, matchQuery, policies, insurer])
 
   const loadBatches = async () => setBatches(await getAllCommissionReconciliationBatches())
 
@@ -177,6 +239,7 @@ export default function CommissionReconciliationPage() {
             uploadedClientName: pick(source, ['client', 'client name', 'customer name', 'insured name', 'policy holder', 'policyholder'], { ignoreAgentColumns: true }),
             uploadedPolicyNumber: pick(source, ['policy number', 'policy no', 'policy']),
             uploadedProposalNumber: pick(source, ['proposal number', 'proposal no']),
+            uploadedInsurer: pick(source, ['insurer', 'insurance company', 'company']) || insurer,
             uploadedPremium: numberValue(pick(source, ['premium', 'net premium', 'gross premium'])),
             uploadedCommission: numberValue(pick(source, ['commission', 'gross commission', 'brokerage'])),
             tds: numberValue(pick(source, ['tds'])),
@@ -266,6 +329,31 @@ export default function CommissionReconciliationPage() {
       policyType: 'Health',
       planName: '',
     })
+  }
+
+  const openMatchPolicy = row => {
+    setMatchRow(row)
+    setMatchQuery(row.uploadedClientName || row.uploadedPolicyNumber || '')
+  }
+
+  const manualMatchPolicy = async policy => {
+    if (!matchRow || !policy) return
+    setPosting(matchRow.id)
+    try {
+      await updateCommissionReconciliationRow(matchRow.id, {
+        matchedPolicyId: policy.id,
+        matchedPolicyNumber: policy.policyNumber,
+        matchConfidence: 'manual',
+        status: 'review',
+      })
+      await loadRows(matchRow.batchId)
+      setMatchRow(null)
+      toast.success('Policy matched. You can reconcile this row now.')
+    } catch (err) {
+      toast.error(friendlyFirebaseError(err, 'Could not match policy.'))
+    } finally {
+      setPosting('')
+    }
   }
 
   const includeMissingPolicy = async e => {
@@ -385,7 +473,12 @@ export default function CommissionReconciliationPage() {
               <tr key={row.id} className="border-t border-gray-100 dark:border-gray-700">
                 <td className="px-4 py-3">{row.uploadedClientName || '-'}</td>
                 <td className="px-4 py-3">{row.uploadedPolicyNumber || '-'}</td>
-                <td className="px-4 py-3">{row.matchedPolicyNumber || '-'}</td>
+                <td className="px-4 py-3">
+                  {row.matchedPolicyNumber || '-'}
+                  <button className="ml-2 text-xs text-purple-600 font-semibold" onClick={() => openMatchPolicy(row)}>
+                    Match
+                  </button>
+                </td>
                 <td className="px-4 py-3">{fmtCurrency(row.uploadedPremium)}</td>
                 <td className="px-4 py-3">{fmtCurrency(row.netPaid || row.uploadedCommission)}</td>
                 <td className="px-4 py-3"><span className="badge badge-blue">{row.matchConfidence}</span></td>
@@ -396,9 +489,14 @@ export default function CommissionReconciliationPage() {
                       {posting === row.id ? 'Posting...' : row.status === 'posted' ? 'Posted' : 'Accept'}
                     </button>
                   ) : (
-                    <button className="text-purple-600 font-semibold disabled:opacity-50" disabled={posting === row.id} onClick={() => openIncludePolicy(row)}>
-                      Include Policy
-                    </button>
+                    <div className="flex gap-3">
+                      <button className="text-purple-600 font-semibold disabled:opacity-50" disabled={posting === row.id} onClick={() => openMatchPolicy(row)}>
+                        Match Existing
+                      </button>
+                      <button className="text-green-600 font-semibold disabled:opacity-50" disabled={posting === row.id} onClick={() => openIncludePolicy(row)}>
+                        Include New
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -433,6 +531,59 @@ export default function CommissionReconciliationPage() {
               <button className="btn-primary" disabled={posting === includeRow.id}>{posting === includeRow.id ? 'Including...' : 'Include Policy'}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {matchRow && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-3xl w-full p-5 space-y-4">
+            <div className="flex justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">Match Existing Policy</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Statement: {matchRow.uploadedClientName || '-'} | {matchRow.uploadedPolicyNumber || '-'} | {fmtCurrency(matchRow.uploadedPremium)}
+                </p>
+              </div>
+              <button className="text-gray-500" onClick={() => setMatchRow(null)}>Close</button>
+            </div>
+            <input
+              className="form-input"
+              placeholder="Search policy number, client, insurer, plan, premium..."
+              value={matchQuery}
+              onChange={e => setMatchQuery(e.target.value)}
+            />
+            <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Policy</th>
+                    <th className="px-3 py-2 text-left">Client</th>
+                    <th className="px-3 py-2 text-left">Insurer</th>
+                    <th className="px-3 py-2 text-left">Premium</th>
+                    <th className="px-3 py-2 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidatePolicies.map(policy => (
+                    <tr key={policy.id} className="border-t border-gray-100 dark:border-gray-700">
+                      <td className="px-3 py-2 font-semibold">{policy.policyNumber}</td>
+                      <td className="px-3 py-2">{policy.clientName}</td>
+                      <td className="px-3 py-2">{policy.insurer || '-'}</td>
+                      <td className="px-3 py-2">{fmtCurrency(policy.premium)}</td>
+                      <td className="px-3 py-2">
+                        <button className="text-blue-600 font-semibold disabled:opacity-50" disabled={posting === matchRow.id} onClick={() => manualMatchPolicy(policy)}>
+                          Select
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {candidatePolicies.length === 0 && (
+                    <tr><td className="px-3 py-8 text-gray-400" colSpan="5">No existing policy found. Try a different search, or use Include New.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>
