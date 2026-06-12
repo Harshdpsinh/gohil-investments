@@ -157,6 +157,23 @@ async function firebaseUploadWithFallback(file, path, onProgress = () => {}) {
   throw err
 }
 
+async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onProgress = () => {}) {
+  try {
+    return await firebaseUploadWithFallback(file, firebasePath, onProgress)
+  } catch (firebaseErr) {
+    if (!CLOUD || !PRESET) throw firebaseErr
+    onProgress(0)
+    const meta = await cloudinaryUpload(file, cloudinaryFolder, onProgress)
+    return {
+      ...meta,
+      storageProvider: 'cloudinary',
+      storagePath: '',
+      storageBucket: '',
+      firebaseError: firebaseErr?.code || firebaseErr?.message || '',
+    }
+  }
+}
+
 export function getViewUrl(url) {
   if (!url) return ''
   return String(url)
@@ -184,7 +201,12 @@ export function getDownloadUrl(url, fileName = '') {
 export async function uploadClientDocument(clientId, file, onProgress = () => {}) {
   validateClientDocument(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'client_document'
-  const meta = await firebaseUploadWithFallback(file, `clients/${clientId}/${Date.now()}_${safeName}`, onProgress)
+  const meta = await uploadWithFreeFallback(
+    file,
+    `clients/${clientId}/${Date.now()}_${safeName}`,
+    `gohil_investments/clients/${clientId}`,
+    onProgress
+  )
   await addDocMeta(clientId, meta)
   return meta
 }
@@ -199,15 +221,25 @@ export async function deleteClientDocument(clientId, docId) {
 export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
   validatePolicyPdf(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
-  const meta = await firebaseUploadWithFallback(file, `policies/${policyId}/${Date.now()}_${safeName}`, onProgress)
-  return { url: meta.url, name: meta.name, storagePath: meta.storagePath, storageBucket: meta.storageBucket }
+  const meta = await uploadWithFreeFallback(
+    file,
+    `policies/${policyId}/${Date.now()}_${safeName}`,
+    `gohil_investments/policies/${policyId}`,
+    onProgress
+  )
+  return { url: meta.url, name: meta.name, storagePath: meta.storagePath, storageBucket: meta.storageBucket, storageProvider: meta.storageProvider || 'firebase', publicId: meta.publicId || '' }
 }
 
 export async function uploadSharedDocument(ownerType, ownerId, file, onProgress = () => {}) {
   validateSharedDocument(file)
   if (!ownerType || !ownerId) throw new Error('Document owner is required.')
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'document'
-  const meta = await firebaseUploadWithFallback(file, `documents/${ownerType}/${ownerId}/${Date.now()}_${safeName}`, onProgress)
+  const meta = await uploadWithFreeFallback(
+    file,
+    `documents/${ownerType}/${ownerId}/${Date.now()}_${safeName}`,
+    `gohil_investments/documents/${ownerType}/${ownerId}`,
+    onProgress
+  )
   await addDocumentRecord({
     ownerType,
     ownerId,
@@ -215,6 +247,8 @@ export async function uploadSharedDocument(ownerType, ownerId, file, onProgress 
     name: meta.name,
     url: meta.url,
     storagePath: meta.storagePath,
+    storageProvider: meta.storageProvider || 'firebase',
+    publicId: meta.publicId || '',
     contentType: meta.type,
     size: meta.size,
   })
