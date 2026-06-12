@@ -28,6 +28,13 @@ function numberValue(value) {
   return Number.isFinite(n) ? n : 0
 }
 
+function friendlyFirebaseError(err, fallback) {
+  if (err?.code === 'permission-denied' || /permission/i.test(err?.message || '')) {
+    return 'Permission blocked by Firebase rules. Publish the latest Firestore and Storage rules, then try again.'
+  }
+  return err?.message || fallback
+}
+
 const AGENT_HEADER_WORDS = ['agent', 'advisor', 'adviser', 'broker', 'subbroker', 'sub broker', 'sm', 'sales manager', 'rm', 'relationship manager', 'posp']
 
 function headerKey(value) {
@@ -109,7 +116,7 @@ export default function CommissionReconciliationPage() {
   const loadBatches = async () => setBatches(await getAllCommissionReconciliationBatches())
 
   useEffect(() => {
-    loadBatches().catch(err => toast.error(err.message || 'Could not load reconciliation batches.'))
+    loadBatches().catch(err => toast.error(friendlyFirebaseError(err, 'Could not load reconciliation batches.')))
   }, [])
 
   const loadRows = async batchId => {
@@ -186,7 +193,7 @@ export default function CommissionReconciliationPage() {
       toast.success('Commission statement ready for review.')
     } catch (err) {
       setProgress('')
-      toast.error(err.message || 'Could not create reconciliation batch.')
+      toast.error(friendlyFirebaseError(err, 'Could not create reconciliation batch.'))
     }
   }
 
@@ -228,7 +235,7 @@ export default function CommissionReconciliationPage() {
       await loadRows(row.batchId)
       toast.success('Commission posted.')
     } catch (err) {
-      toast.error(err.message || 'Could not post commission.')
+      toast.error(friendlyFirebaseError(err, 'Could not post commission.'))
     } finally {
       setPosting('')
     }
@@ -289,7 +296,7 @@ export default function CommissionReconciliationPage() {
       setIncludeRow(null)
       toast.success('Policy included. You can reconcile this row now.')
     } catch (err) {
-      toast.error(err.message || 'Could not include missing policy.')
+      toast.error(friendlyFirebaseError(err, 'Could not include missing policy.'))
     } finally {
       setPosting('')
     }
