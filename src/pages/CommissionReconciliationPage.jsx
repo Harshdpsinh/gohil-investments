@@ -5,6 +5,7 @@ import { parseImportFile } from '../utils/exportUtils'
 import { fmtCurrency, fmtDate } from '../utils/dateUtils'
 import { KNOWN_INSURERS } from '../utils/constants'
 import { uploadSharedDocument } from '../firebase/storage'
+import { useAuth } from '../hooks/useAuth'
 import {
   addClient,
   addCommissionReconciliationRow,
@@ -88,6 +89,7 @@ function monthOptions(count = 36) {
 
 export default function CommissionReconciliationPage() {
   const { policies } = usePolicies()
+  const { isAdmin } = useAuth()
   const [batches, setBatches] = useState([])
   const [rows, setRows] = useState([])
   const [selectedBatch, setSelectedBatch] = useState('')
@@ -116,8 +118,9 @@ export default function CommissionReconciliationPage() {
   const loadBatches = async () => setBatches(await getAllCommissionReconciliationBatches())
 
   useEffect(() => {
+    if (!isAdmin) return
     loadBatches().catch(err => toast.error(friendlyFirebaseError(err, 'Could not load reconciliation batches.')))
-  }, [])
+  }, [isAdmin])
 
   const loadRows = async batchId => {
     setSelectedBatch(batchId)
@@ -139,7 +142,14 @@ export default function CommissionReconciliationPage() {
         status: 'review',
       })
       const batchId = batchRef.id
-      const upload = await uploadSharedDocument('commission', batchId, file, pct => setProgress(`Uploading statement ${pct}%...`))
+      let upload = { url: '' }
+      let uploadError = ''
+      try {
+        upload = await uploadSharedDocument('commission', batchId, file, pct => setProgress(`Uploading statement ${pct}%...`))
+      } catch (uploadErr) {
+        uploadError = friendlyFirebaseError(uploadErr, 'Statement file could not be stored.')
+        toast.error('File storage was skipped, but reconciliation will continue.')
+      }
 
       let importedRows = []
       const canParse = /\.(csv|xlsx?|xls)$/i.test(file.name)
@@ -152,7 +162,12 @@ export default function CommissionReconciliationPage() {
         await updateCommissionReconciliationBatch(batchId, {
           originalFileUrl: upload.url,
           status: 'manual-review',
-          summary: { rows: 0, note: 'File uploaded. Manual entry/review needed for PDF or unrecognized statement.' },
+          summary: {
+            rows: 0,
+            note: uploadError
+              ? `Manual entry/review needed. File storage issue: ${uploadError}`
+              : 'File uploaded. Manual entry/review needed for PDF or unrecognized statement.',
+          },
         })
       } else {
         let count = 0
@@ -182,7 +197,7 @@ export default function CommissionReconciliationPage() {
         await updateCommissionReconciliationBatch(batchId, {
           originalFileUrl: upload.url,
           status: 'review',
-          summary: { rows: importedRows.length },
+          summary: { rows: importedRows.length, uploadError },
         })
       }
 
@@ -308,6 +323,12 @@ export default function CommissionReconciliationPage() {
     review: rows.filter(r => r.status === 'review' || r.status === 'suggested').length,
     posted: rows.filter(r => r.status === 'posted').length,
   }), [rows])
+
+  if (!isAdmin) return (
+    <div className="p-8 text-center">
+      <p className="text-gray-600 dark:text-gray-400 font-medium">Access restricted to administrators only.</p>
+    </div>
+  )
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">

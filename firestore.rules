@@ -86,16 +86,19 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
     match /commission_transactions/{commissionTransactionId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
     }
     match /commission_import_templates/{templateId} {
       allow read, create, update, delete: if isAdmin();
     }
     match /commission_reconciliation_batches/{batchId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
     }
     match /commission_reconciliation_rows/{rowId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
     }
     match /sub_brokers/{subBrokerId} {
       allow read, create, update, delete: if isAdmin();
