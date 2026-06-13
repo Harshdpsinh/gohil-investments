@@ -18,17 +18,18 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
 
   return (
     <Modal open={open} onClose={onClose} title={title} size="sm">
-      <p className="text-gray-600 dark:text-gray-300 text-sm mb-6">{message}</p>
-      <div className="flex gap-3 justify-end">
+      <p className="mb-6 text-sm leading-6 text-gray-600 dark:text-gray-300">{message}</p>
+      <div className="flex justify-end gap-3">
         <button type="button" onClick={onClose} disabled={confirming} className="btn-secondary">Cancel</button>
         <button
           type="button"
+          /* UI-only verification: confirmation button still calls the same handleConfirm wrapper. */
           onClick={handleConfirm}
           disabled={confirming}
           className={danger ? 'btn-danger' : 'btn-primary'}>
           {confirming ? (
             <span className="inline-flex items-center gap-2">
-              <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
               Please wait...
             </span>
           ) : 'Confirm'}

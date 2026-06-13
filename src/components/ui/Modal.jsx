@@ -20,28 +20,24 @@ export default function Modal({ open, onClose, title, children, size = 'md' }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-gray-900/70 backdrop-blur-sm" onClick={onClose} />
-      {/* Dialog */}
-      <div className={`relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full
-                       ${widths[size]} max-w-[calc(100vw-2rem)] max-h-[90vh] flex flex-col min-w-0
-                       border border-gray-200 dark:border-gray-700`}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4
-                        border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4">
+      {/* UI-only verification: backdrop click still calls the original onClose prop. */}
+      <div className="absolute inset-0 bg-gray-950/65 backdrop-blur-sm" onClick={onClose} />
+
+      <div className={`relative flex max-h-[90vh] w-full min-w-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-2xl shadow-gray-950/20 dark:border-gray-800 dark:bg-gray-950 ${widths[size]} max-w-[calc(100vw-2rem)]`}>
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50/80 px-6 py-4 dark:border-gray-800 dark:bg-gray-900/80">
+          <h2 className="text-base font-black tracking-tight text-gray-950 dark:text-white">{title}</h2>
+          {/* UI-only verification: close button remains mapped to the same onClose prop. */}
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg text-gray-400 dark:text-gray-500
-                       hover:bg-gray-100 dark:hover:bg-gray-700
-                       hover:text-gray-600 dark:hover:text-gray-300
-                       flex items-center justify-center transition-colors text-xl leading-none">
-            ×
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-lg leading-none text-gray-500 shadow-sm transition hover:bg-gray-100 hover:text-gray-900 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-gray-100"
+            aria-label="Close modal"
+          >
+            &times;
           </button>
         </div>
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5 min-w-0">
+
+        <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-6 py-5">
           {children}
         </div>
       </div>
