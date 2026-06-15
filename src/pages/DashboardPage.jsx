@@ -64,8 +64,8 @@ function StatCard({ icon, label, value, sub, color, onClick, badge }) {
       )}
       <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/20 to-cyan-500/10 text-sm font-black shadow-[0_4px_12px_rgba(37,99,235,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] ${colors[color] || colors.blue}`}>{icon}</div>
       <div className="relative z-[1] min-w-0">
-        <p className="bg-gradient-to-br from-slate-100 to-slate-400 bg-clip-text font-mono text-[28px] font-black leading-none tracking-tight text-transparent">{value}</p>
-        <p className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">{label}</p>
+        <p className="bg-gradient-to-br from-slate-950 to-slate-500 bg-clip-text font-mono text-[28px] font-black leading-none tracking-tight text-transparent dark:from-slate-100 dark:to-slate-400">{value}</p>
+        <p className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-500">{label}</p>
         {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
       </div>
     </div>
@@ -200,8 +200,8 @@ export default function DashboardPage() {
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">
       <div className="card flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Gohil Investments · Bhavnagar</p>
-          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-100">{greeting}, Harshdip</h1>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-cyan-300">Gohil Investments · Bhavnagar</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 dark:text-slate-100">{greeting}, Harshdip</h1>
           <p className="mt-1 text-sm text-slate-500">{fmtDate(NOW)}</p>
         </div>
         <div className="flex flex-wrap gap-2">
