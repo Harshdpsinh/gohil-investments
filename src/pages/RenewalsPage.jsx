@@ -3,7 +3,7 @@
 //           R4 status colors, R5 button reset, R6 all tabs, R7 premium col,
 //           R8 PDF autoTable, R9 insurer col, R10 confirm dialog
 
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
 import { useAuth }      from '../hooks/useAuth'
@@ -528,6 +528,8 @@ export default function RenewalsPage() {
   const [premiumPaidModal, setPremiumPaidModal] = useState(null)
   const [saving,       setSaving]       = useState(false)
   const submittingRef  = useRef(false)
+  const topScrollRef = useRef(null)
+  const tableScrollRef = useRef(null)
 
   // ─── WhatsApp ───────────────────────────────────────────────
   const openWhatsApp = useCallback((policy) => {
@@ -613,6 +615,31 @@ export default function RenewalsPage() {
   }, [policies, search, dayWindow, dateFrom, dateTo, policyTab])
 
   // ─── Summary stats ────────────────────────────────────────────
+  useEffect(() => {
+    const top = topScrollRef.current
+    const table = tableScrollRef.current
+    if (!top || !table) return undefined
+    let syncing = false
+    const syncTop = () => {
+      if (syncing) return
+      syncing = true
+      table.scrollLeft = top.scrollLeft
+      syncing = false
+    }
+    const syncTable = () => {
+      if (syncing) return
+      syncing = true
+      top.scrollLeft = table.scrollLeft
+      syncing = false
+    }
+    top.addEventListener('scroll', syncTop)
+    table.addEventListener('scroll', syncTable)
+    return () => {
+      top.removeEventListener('scroll', syncTop)
+      table.removeEventListener('scroll', syncTable)
+    }
+  }, [filtered.length])
+
   const stats = useMemo(() => {
     const overdue  = filtered.filter(p => (daysUntilPolicyDue(p) ?? 1) < 0).length
     const dueToday = filtered.filter(p => daysUntilPolicyDue(p) === 0).length
@@ -833,8 +860,11 @@ export default function RenewalsPage() {
       <SearchBar value={search} onChange={setSearch} placeholder="Client name, policy no, insurer…" />
 
       {/* ✅ FIX R7, R9: Table with premium + insurer columns */}
-      <div className="table-container">
-        <table className="min-w-full">
+      <div ref={topScrollRef} className="table-scroll-top overflow-x-auto rounded-t-2xl border border-b-0 border-slate-200/80 bg-white/80 dark:border-slate-700/70 dark:bg-slate-900/80">
+        <div className="h-3 min-w-[1180px]" />
+      </div>
+      <div ref={tableScrollRef} className="table-container renewals-table-container">
+        <table className="min-w-[1180px]">
           <thead>
             <tr>
               {['#', 'Client', 'Phone', 'Policy No', 'Type', 'Insurer', 'Due Date', 'Days', 'Premium', 'Status', 'WhatsApp', 'Action'].map(h => (

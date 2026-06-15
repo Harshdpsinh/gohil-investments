@@ -578,3 +578,83 @@ textarea::placeholder {
 .table-container button:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-success):not(.btn-whatsapp) {
   color: inherit;
 }
+
+.renewals-table-container {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.table-scroll-top {
+  scrollbar-gutter: stable;
+}
+
+.renewals-table-container .table-header,
+.renewals-table-container .table-cell {
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
+}
+
+.renewals-table-container th:nth-child(2),
+.renewals-table-container td:nth-child(2) {
+  max-width: 220px;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.renewals-table-container th:nth-child(4),
+.renewals-table-container td:nth-child(4) {
+  max-width: 155px;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.25;
+}
+
+.renewals-table-container th:nth-child(6),
+.renewals-table-container td:nth-child(6) {
+  max-width: 185px;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.renewals-table-container th:nth-child(11),
+.renewals-table-container td:nth-child(11) {
+  position: sticky;
+  right: 92px;
+  z-index: 15;
+  min-width: 92px;
+  background: var(--surface);
+  box-shadow: -10px 0 18px rgba(15, 23, 42, 0.05);
+}
+
+.renewals-table-container th:nth-child(12),
+.renewals-table-container td:nth-child(12) {
+  position: sticky;
+  right: 0;
+  z-index: 16;
+  min-width: 92px;
+  background: var(--surface);
+}
+
+.dark .renewals-table-container th:nth-child(11),
+.dark .renewals-table-container td:nth-child(11),
+.dark .renewals-table-container th:nth-child(12),
+.dark .renewals-table-container td:nth-child(12) {
+  background: #0f172a;
+}
+
+.renewals-table-container thead th:nth-child(11),
+.renewals-table-container thead th:nth-child(12) {
+  z-index: 25;
+  background: rgba(248, 250, 252, 0.98);
+}
+
+.dark .renewals-table-container thead th:nth-child(11),
+.dark .renewals-table-container thead th:nth-child(12) {
+  background: rgba(15, 23, 42, 0.98);
+}
+
+.renewals-table-container td:nth-child(11) button,
+.renewals-table-container td:nth-child(12) button {
+  min-width: 68px;
+  white-space: nowrap;
+}
