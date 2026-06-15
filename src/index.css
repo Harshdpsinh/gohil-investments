@@ -88,6 +88,20 @@
     color: white;
     background: rgba(37, 99, 235, 0.4);
   }
+
+  ::-webkit-scrollbar { width: 7px; height: 7px; }
+  ::-webkit-scrollbar-track { background: rgba(148, 163, 184, 0.12); }
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+    border-radius: 999px;
+  }
+
+  input[type="date"],
+  input[type="number"],
+  input[inputmode="numeric"],
+  .table-cell:nth-child(n+4) {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @layer components {
@@ -255,6 +269,13 @@
     border-bottom: 1px solid var(--border-soft);
   }
 
+  .table-cell .font-mono,
+  .table-cell time,
+  .table-cell [data-mono="true"] {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
   .table-row { @apply transition-colors duration-150; }
   .table-row:hover { background: rgba(37, 99, 235, 0.055); }
 
@@ -262,7 +283,10 @@
   .badge-red,
   .badge-yellow,
   .badge-blue,
-  .badge-gray {
+  .badge-gray,
+  .badge-purple,
+  .badge-orange,
+  .badge {
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.05em];
     border: 1px solid currentColor;
   }
@@ -272,12 +296,35 @@
   .badge-yellow { color: #b45309; background: rgba(245, 158, 11, 0.14); }
   .badge-blue   { color: #2563eb; background: rgba(37, 99, 235, 0.12); }
   .badge-gray   { color: #64748b; background: rgba(100, 116, 139, 0.12); }
+  .badge-purple { color: #7c3aed; background: rgba(139, 92, 246, 0.13); }
+  .badge-orange { color: #c2410c; background: rgba(249, 115, 22, 0.14); }
 
   .dark .badge-green  { color: #34d399; }
   .dark .badge-red    { color: #f87171; }
   .dark .badge-yellow { color: #fcd34d; }
   .dark .badge-blue   { color: #93c5fd; }
   .dark .badge-gray   { color: #cbd5e1; }
+  .dark .badge-purple { color: #c4b5fd; }
+  .dark .badge-orange { color: #fdba74; }
+
+  .skeleton {
+    background: linear-gradient(90deg, rgba(226, 232, 240, 0.75) 25%, rgba(241, 245, 249, 0.92) 50%, rgba(226, 232, 240, 0.75) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite;
+    border-radius: 8px;
+  }
+
+  .dark .skeleton {
+    background: linear-gradient(90deg, rgba(30, 41, 59, 0.66) 25%, rgba(51, 65, 85, 0.76) 50%, rgba(30, 41, 59, 0.66) 75%);
+    background-size: 200% 100%;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 
   .nav-item,
   .nav-item-active {
@@ -568,12 +615,16 @@ textarea::placeholder {
 .badge-yellow { color: #92400e !important; background: rgba(245, 158, 11, 0.16) !important; }
 .badge-blue   { color: #1d4ed8 !important; background: rgba(37, 99, 235, 0.13) !important; }
 .badge-gray   { color: #475569 !important; background: rgba(100, 116, 139, 0.12) !important; }
+.badge-purple { color: #6d28d9 !important; background: rgba(139, 92, 246, 0.13) !important; }
+.badge-orange { color: #c2410c !important; background: rgba(249, 115, 22, 0.14) !important; }
 
 .dark .badge-green  { color: #34d399 !important; }
 .dark .badge-red    { color: #fca5a5 !important; }
 .dark .badge-yellow { color: #fde68a !important; }
 .dark .badge-blue   { color: #bfdbfe !important; }
 .dark .badge-gray   { color: #e2e8f0 !important; }
+.dark .badge-purple { color: #ddd6fe !important; }
+.dark .badge-orange { color: #fed7aa !important; }
 
 .table-container button:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-success):not(.btn-whatsapp) {
   color: inherit;
@@ -657,4 +708,21 @@ textarea::placeholder {
 .renewals-table-container td:nth-child(12) button {
   min-width: 68px;
   white-space: nowrap;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .card,
+  .card-sm,
+  .stat-card,
+  .pipeline-card,
+  .table-container {
+    box-shadow: none !important;
+    border-color: #d1d5db !important;
+    background: #ffffff !important;
+  }
 }

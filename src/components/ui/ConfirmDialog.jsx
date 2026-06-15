@@ -18,8 +18,10 @@ export default function ConfirmDialog({ open, onClose, onConfirm, title, message
 
   return (
     <Modal open={open} onClose={onClose} title={title} size="sm">
-      <p className="mb-6 text-sm leading-6 text-gray-600 dark:text-gray-300">{message}</p>
-      <div className="flex justify-end gap-3">
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
+        <p className="text-sm leading-6 text-slate-700 dark:text-slate-200">{message}</p>
+      </div>
+      <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
         <button type="button" onClick={onClose} disabled={confirming} className="btn-secondary">Cancel</button>
         <button
           type="button"

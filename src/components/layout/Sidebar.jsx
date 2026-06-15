@@ -23,6 +23,8 @@ function Icon({ name }) {
     reports: <><path d="M3 3v18h18" /><path d="M7 15v-4" /><path d="M12 15V7" /><path d="M17 15v-6" /></>,
     staff: <><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="8.5" cy="7" r="4" /><path d="M20 8v6" /><path d="M23 11h-6" /></>,
     backup: <><path d="M12 2v10" /><path d="m16 6-4-4-4 4" /><path d="M20 14.5A4.5 4.5 0 0 1 15.5 19h-7A4.5 4.5 0 0 1 4 14.5" /></>,
+    moon: <><path d="M20.9 13.6A8 8 0 1 1 10.4 3.1 6 6 0 0 0 20.9 13.6Z" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></>,
   }
   return <svg {...common}>{paths[name] || paths.dashboard}</svg>
 }
@@ -97,7 +99,7 @@ export default function Sidebar({ mobile, onClose }) {
           className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-400/10 dark:bg-slate-800/70 dark:text-slate-300 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-slate-100"
         >
           <span className="flex items-center gap-2">
-            <span className="nav-icon h-5 w-5"><Icon name={dark ? 'dashboard' : 'calendar'} /></span>
+            <span className="nav-icon h-5 w-5"><Icon name={dark ? 'sun' : 'moon'} /></span>
             {dark ? 'Light Mode' : 'Dark Mode'}
           </span>
           <span className={`relative h-6 w-11 rounded-full p-0.5 transition-colors ${dark ? 'bg-gradient-to-r from-blue-600 to-cyan-500' : 'bg-slate-300'}`}>
