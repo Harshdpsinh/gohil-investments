@@ -50,23 +50,23 @@ function getPremDays(p) {
 
 function StatCard({ icon, label, value, sub, color, onClick, badge }) {
   const colors = {
-    blue:   'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
-    green:  'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300',
-    yellow: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-200',
-    red:    'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300',
-    purple: 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
-    orange: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300',
+    blue:   'text-blue-300',
+    green:  'text-emerald-300',
+    yellow: 'text-amber-300',
+    red:    'text-red-300',
+    purple: 'text-violet-300',
+    orange: 'text-orange-300',
   }
   return (
-    <div className={`stat-card relative ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`} onClick={onClick}>
+    <div className={`stat-card group relative ${onClick ? 'cursor-pointer' : ''}`} onClick={onClick}>
       {badge > 0 && (
-        <span className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">{badge}</span>
+        <span className="absolute right-3 top-3 z-10 flex h-5 min-w-5 animate-[floatSoft_3s_ease-in-out_infinite] items-center justify-center rounded-full border-2 border-slate-950 bg-gradient-to-br from-red-500 to-red-600 px-1 text-[10px] font-black text-white">{badge}</span>
       )}
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 ${colors[color] || colors.blue}`}>{icon}</div>
-      <div>
-        <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
-        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{label}</p>
-        {sub && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{sub}</p>}
+      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/20 to-cyan-500/10 text-sm font-black shadow-[0_4px_12px_rgba(37,99,235,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] ${colors[color] || colors.blue}`}>{icon}</div>
+      <div className="relative z-[1] min-w-0">
+        <p className="bg-gradient-to-br from-slate-100 to-slate-400 bg-clip-text font-mono text-[28px] font-black leading-none tracking-tight text-transparent">{value}</p>
+        <p className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">{label}</p>
+        {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
       </div>
     </div>
   )
@@ -76,14 +76,14 @@ const CHART_OPTS = {
   responsive: true, maintainAspectRatio: false,
   plugins: { legend: { display: false } },
   scales: {
-    x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-    y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11 } } }
+    x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
+    y: { grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { font: { size: 11 }, color: '#94a3b8' } }
   }
 }
 
 const DOUGHNUT_OPTS = {
   responsive: true, maintainAspectRatio: false,
-  plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12 } } },
+  plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12, color: '#94a3b8' } } },
   cutout: '65%'
 }
 
@@ -186,7 +186,8 @@ export default function DashboardPage() {
     [policies]
   )
 
-  const typeColors = ['#3b82f6', '#a855f7', '#f97316', '#22c55e', '#14b8a6', '#6b7280']
+  const typeColors = ['#2563eb', '#06b6d4', '#f59e0b', '#10b981', '#8b5cf6', '#64748b']
+  const greeting = NOW.getHours() < 12 ? 'Good morning' : NOW.getHours() < 17 ? 'Good afternoon' : 'Good evening'
 
   if (loading) return (
     <div className="p-8 flex items-center gap-3 text-gray-400 dark:text-gray-500">
@@ -196,19 +197,31 @@ export default function DashboardPage() {
   )
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div>
+    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="card flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Gohil Investments · Bhavnagar</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-100">{greeting}, Harshdip</h1>
+          <p className="mt-1 text-sm text-slate-500">{fmtDate(NOW)}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
+          <button onClick={() => navigate('/policies')} className="btn-primary">Add Policy</button>
+          <button onClick={() => navigate('/renewals')} className="btn-secondary">Renewals</button>
+        </div>
+      </div>
+      <div className="hidden">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">{fmtDate(NOW)}</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <StatCard icon="👥" label="Clients"         value={stats.clients}     color="blue"   onClick={() => navigate('/clients')} />
-        <StatCard icon="📋" label="Active Policies" value={stats.active}      color="green"  onClick={() => navigate('/policies')} />
-        <StatCard icon="🔔" label="Expiring (30d)"  value={stats.expiring30}  color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
-        <StatCard icon="⏰" label="Overdue"          value={stats.expired}     color="red"    onClick={() => navigate('/renewals')} badge={stats.expired} />
-        <StatCard icon="💰" label="Est. Commission" value={fmtCurrency(stats.totalComm)} color="purple" />
-        <StatCard icon="🔍" label="Open Claims"     value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <StatCard icon="CL" label="Clients"         value={stats.clients}     color="blue"   onClick={() => navigate('/clients')} />
+        <StatCard icon="PL" label="Active Policies" value={stats.active}      color="green"  onClick={() => navigate('/policies')} />
+        <StatCard icon="RN" label="Expiring (30d)"  value={stats.expiring30}  color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
+        <StatCard icon="OD" label="Overdue"          value={stats.expired}     color="red"    onClick={() => navigate('/renewals')} badge={stats.expired} />
+        <StatCard icon="CO" label="Est. Commission" value={fmtCurrency(stats.totalComm)} color="purple" />
+        <StatCard icon="CM" label="Open Claims"     value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -371,3 +384,4 @@ export default function DashboardPage() {
     </div>
   )
 }
+

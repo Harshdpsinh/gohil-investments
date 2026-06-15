@@ -1,4 +1,4 @@
-// src/App.jsx
+// UI MODERNIZATION - logic unchanged
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth }           from './hooks/useAuth'
 import { ThemeProvider }     from './context/ThemeContext'
@@ -25,10 +25,11 @@ import CommissionReconciliationPage from './pages/CommissionReconciliationPage'
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
   if (loading) return (
-    <div className="flex h-screen items-center justify-center bg-gray-100 dark:bg-gray-950">
-      <div className="rounded-lg border border-gray-200 bg-white px-8 py-7 text-center shadow-xl shadow-gray-200/70 dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/30">
-        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
-        <p className="mt-4 text-sm font-semibold text-gray-500 dark:text-gray-400">Loading...</p>
+    <div className="flex h-screen items-center justify-center bg-[#0a0f1e]">
+      <div className="w-80 rounded-2xl border border-slate-400/10 bg-slate-800/60 p-6 shadow-[0_4px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl">
+        <div className="skeleton-shimmer h-5 rounded-full" />
+        <div className="skeleton-shimmer mt-4 h-20 rounded-xl" />
+        <p className="mt-4 text-center text-sm font-semibold text-slate-400">Loading...</p>
       </div>
     </div>
   )
