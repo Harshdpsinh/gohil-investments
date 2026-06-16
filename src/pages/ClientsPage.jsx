@@ -9,7 +9,7 @@ import {
   bulkDeleteClients, getDocMeta,
   mergeClients, bulkMergeClients
 } from '../firebase/firestore'
-import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath } from '../firebase/storage'
+import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath, openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -225,10 +225,33 @@ function DocumentManager({ clientId }) {
           : <ul className="divide-y divide-gray-100 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden min-w-[420px]">
               {docs.map(d => (
                 <li key={d.id} className="flex items-center justify-between px-3 py-2 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700">
-                  <a href={d.url} target="_blank" rel="noreferrer"
-                     className="text-sm text-blue-600 dark:text-blue-400 hover:underline truncate max-w-[70%]">📄 {d.name}</a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await openDocumentPreview(d.storagePath || d.url, d.name)
+                      } catch (err) {
+                        toast.error(err.message)
+                      }
+                    }}
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline truncate max-w-[60%] text-left">
+                    📄 {d.name}
+                  </button>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className="text-xs text-gray-400 dark:text-gray-500">{Math.round((d.size||0)/1024)} KB</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await downloadDocumentFile(d.storagePath || d.url, d.name)
+                        } catch (err) {
+                          toast.error(err.message)
+                        }
+                      }}
+                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 flex-shrink-0"
+                      title="Download">
+                      ⬇
+                    </button>
                     {isAdmin && (
                       <button onClick={() => onDelete(d)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
                     )}

@@ -198,53 +198,111 @@ export function getDownloadUrl(url, fileName = '') {
     .trim()
     .replace(/\s+/g, '_') || 'document.pdf'
   if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/raw/upload/')) {
-    const encodedName = encodeURIComponent(safeFileName).replace(/%20/g, '_')
-    return safeUrl.replace('/raw/upload/', `/raw/upload/fl_attachment:${encodedName}/`)
+    return safeUrl.replace('/raw/upload/', '/raw/upload/fl_attachment/')
   }
   const separator = safeUrl.includes('?') ? '&' : '?'
   return `${safeUrl}${separator}dl=${encodeURIComponent(safeFileName)}`
 }
 
+async function resolveDocumentUrl(urlOrPath) {
+  const input = String(urlOrPath || '').trim()
+  if (!input) throw new Error('No document URL found.')
+  if (input.startsWith('gs://')) {
+    const storageRef = ref(getStorage(app), input)
+    return getDownloadURL(storageRef)
+  }
+  if (input.startsWith('http')) return getViewUrl(input)
+  const bucket = STORAGE_BUCKETS[0]
+  const storageRef = ref(storageForBucket(bucket), input)
+  return getDownloadURL(storageRef)
+}
+
+function clickDocumentAnchor(url, { fileName = '', download = false } = {}) {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.rel = 'noopener noreferrer'
+  if (download) {
+    anchor.download = fileName || 'document.pdf'
+  } else {
+    anchor.target = '_blank'
+  }
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+}
+
 async function fetchDocumentBlob(url) {
-  const safeUrl = getViewUrl(url)
+  const safeUrl = await resolveDocumentUrl(url)
   if (!safeUrl) throw new Error('No document URL found.')
   const response = await fetch(safeUrl, { mode: 'cors' })
   if (!response.ok) throw new Error('Could not read the uploaded document.')
   return response.blob()
 }
 
-export async function openDocumentPreview(url, fileName = 'document.pdf') {
+// ✅ FIXED: resolves gs:// / storage paths to fresh HTTPS URLs and avoids popup-blocked window.open.
+export async function openDocumentPreview(urlOrPath, fileName = 'document.pdf') {
   try {
-    const blob = await fetchDocumentBlob(url)
-    const blobUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: 'application/pdf' }))
-    window.open(blobUrl, '_blank', 'noopener,noreferrer')
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-  } catch {
-    const directUrl = getViewUrl(url)
-    if (directUrl) window.open(directUrl, '_blank', 'noopener,noreferrer')
-    else throw new Error(`Could not open ${fileName}.`)
+    const finalUrl = await resolveDocumentUrl(urlOrPath)
+    if (!finalUrl || !finalUrl.startsWith('http')) {
+      throw new Error('Invalid document URL. The file may have been deleted or the link has expired.')
+    }
+
+    const isPdf = /\.pdf(\?|#|$)/i.test(finalUrl) || /\.pdf$/i.test(String(fileName || ''))
+    if (isPdf) {
+      try {
+        const blob = await fetchDocumentBlob(finalUrl)
+        const pdfBlob = blob.type === 'application/pdf' ? blob : new Blob([blob], { type: 'application/pdf' })
+        const blobUrl = URL.createObjectURL(pdfBlob)
+        clickDocumentAnchor(blobUrl)
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
+        return
+      } catch {
+        // Fall through to direct HTTPS preview when CORS blocks blob reading.
+      }
+    }
+
+    clickDocumentAnchor(finalUrl)
+  } catch (err) {
+    console.error('openDocumentPreview error:', err)
+    throw new Error(
+      err?.code === 'storage/object-not-found'
+        ? 'File not found in storage. It may have been deleted.'
+        : err?.code === 'storage/unauthorized'
+          ? 'You do not have permission to view this file. Check Firebase Storage rules.'
+          : err?.message || 'Could not open document. Please try again.'
+    )
   }
 }
 
-export async function downloadDocumentFile(url, fileName = 'document.pdf') {
+// ✅ FIXED: resolves fresh URLs, forces browser download with Blob, and falls back to a safe direct URL.
+export async function downloadDocumentFile(urlOrPath, fileName = 'document.pdf') {
   const safeFileName = String(fileName || 'document.pdf')
     .replace(/[^\w.\-() ]+/g, '')
     .trim()
     .replace(/\s+/g, '_') || 'document.pdf'
   try {
-    const blob = await fetchDocumentBlob(url)
+    const finalUrl = await resolveDocumentUrl(urlOrPath)
+    if (!finalUrl || !finalUrl.startsWith('http')) {
+      throw new Error('Invalid document URL. The file may have been deleted.')
+    }
+    const blob = await fetchDocumentBlob(finalUrl)
     const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = safeFileName
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
+    clickDocumentAnchor(blobUrl, { fileName: safeFileName, download: true })
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60000)
-  } catch {
-    const directUrl = getDownloadUrl(url, safeFileName)
-    if (directUrl) window.open(directUrl, '_blank', 'noopener,noreferrer')
-    else throw new Error(`Could not download ${safeFileName}.`)
+  } catch (err) {
+    const directUrl = getDownloadUrl(await resolveDocumentUrl(urlOrPath).catch(() => urlOrPath), safeFileName)
+    if (directUrl) {
+      clickDocumentAnchor(directUrl, { fileName: safeFileName, download: true })
+      return
+    }
+    console.error('downloadDocumentFile error:', err)
+    throw new Error(
+      err?.code === 'storage/object-not-found'
+        ? 'File not found in storage. It may have been deleted.'
+        : err?.code === 'storage/unauthorized'
+          ? 'You do not have permission to download this file.'
+          : err?.message || 'Download failed. Please try again.'
+    )
   }
 }
 

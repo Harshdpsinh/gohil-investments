@@ -10,6 +10,7 @@ import { useClients } from '../hooks/useClients'
 import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
+import { openDocumentPreview } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
@@ -249,8 +250,18 @@ export default function ClientProfilePage() {
                     <span className="text-lg flex-shrink-0">{d.type?.includes('pdf') ? '📄' : '🖼️'}</span>
                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{d.name}</p>
                   </div>
-                  <a href={d.url} target="_blank" rel="noreferrer"
-                     className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-2">View</a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await openDocumentPreview(d.storagePath || d.url, d.name)
+                      } catch (err) {
+                        toast.error(err.message)
+                      }
+                    }}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-2">
+                    View
+                  </button>
                 </div>
               ))}
             </div>

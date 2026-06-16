@@ -263,8 +263,14 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
         </button>
         {existingUrl && (
           <>
-            <button type="button" onClick={() => openDocumentPreview(existingUrl, existingName)} className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-100">View</button>
-            <button type="button" onClick={() => downloadDocumentFile(existingUrl, existingName)} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</button>
+            <button type="button" onClick={async () => {
+              try { await openDocumentPreview(existingUrl, existingName) }
+              catch (err) { toast.error(err.message) }
+            }} className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-100">View</button>
+            <button type="button" onClick={async () => {
+              try { await downloadDocumentFile(existingUrl, existingName) }
+              catch (err) { toast.error(err.message) }
+            }} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Download</button>
           </>
         )}
       </div>
@@ -276,9 +282,15 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
       <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">Policy Document (PDF)</p>
       {existingUrl && (
         <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
-          <button type="button" onClick={() => openDocumentPreview(existingUrl, existingName)}
+          <button type="button" onClick={async () => {
+            try { await openDocumentPreview(existingUrl, existingName) }
+            catch (err) { toast.error(err.message) }
+          }}
              className="text-xs text-indigo-700 font-medium hover:underline flex-1 truncate text-left">{existingName || 'View PDF'}</button>
-          <button type="button" onClick={() => downloadDocumentFile(existingUrl, existingName)}
+          <button type="button" onClick={async () => {
+            try { await downloadDocumentFile(existingUrl, existingName) }
+            catch (err) { toast.error(err.message) }
+          }}
              className="text-xs text-blue-600 font-semibold hover:underline">Download</button>
           <span className="text-xs text-green-600 font-semibold">Stored</span>
         </div>
