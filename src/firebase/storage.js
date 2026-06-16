@@ -158,6 +158,21 @@ async function firebaseUploadWithFallback(file, path, onProgress = () => {}) {
 }
 
 async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onProgress = () => {}) {
+  if (CLOUD && PRESET) {
+    try {
+      onProgress(0)
+      const meta = await cloudinaryUpload(file, cloudinaryFolder, onProgress)
+      return {
+        ...meta,
+        storageProvider: 'cloudinary',
+        storagePath: '',
+        storageBucket: '',
+      }
+    } catch (cloudinaryErr) {
+      console.warn('Cloudinary upload failed, trying Firebase Storage fallback:', cloudinaryErr?.message || cloudinaryErr)
+    }
+  }
+
   try {
     return await firebaseUploadWithFallback(file, firebasePath, onProgress)
   } catch (firebaseErr) {
