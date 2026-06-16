@@ -10,7 +10,7 @@ import { useClients } from '../hooks/useClients'
 import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
-import { openDocumentPreview } from '../firebase/storage'
+import { openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 
@@ -97,6 +97,17 @@ export default function ClientProfilePage() {
   }, [id])
 
   const clientPolicies = policies.filter(p => p.clientId === id)
+  const policyDocuments = clientPolicies
+    .filter(p => p.policyPdfUrl)
+    .map(p => ({
+      id: `policy-${p.id}`,
+      url: p.policyPdfUrl,
+      name: p.policyPdfName || `${p.policyNumber || 'policy'} document.pdf`,
+      policyNumber: p.policyNumber || 'Policy',
+      policyType: p.policyType || 'Policy',
+      insurer: p.insurer || '',
+      status: policyHistoryStatus(p),
+    }))
   const familyKey = client?.familyId || client?.familyName || ''
   const familyMembers = familyKey
     ? clients.filter(c => (client.familyId && c.familyId === client.familyId) || (!client.familyId && c.familyName && c.familyName === client.familyName))
@@ -239,11 +250,48 @@ export default function ClientProfilePage() {
         </Section>
 
         {/* Documents */}
-        <Section title="Documents" icon="📎" badge={docs.length}>
-          {docs.length === 0 ? (
+        <Section title="Documents" icon="📎" badge={docs.length + policyDocuments.length}>
+          {docs.length === 0 && policyDocuments.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">No documents uploaded</p>
           ) : (
             <div className="space-y-2">
+              {policyDocuments.map(d => (
+                <div key={d.id} className="flex items-center justify-between gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0">PDF</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{d.name}</p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} - {d.status.label}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await openDocumentPreview(d.url, d.name)
+                        } catch (err) {
+                          toast.error(err.message)
+                        }
+                      }}
+                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await downloadDocumentFile(d.url, d.name)
+                        } catch (err) {
+                          toast.error(err.message)
+                        }
+                      }}
+                      className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600">
+                      Download
+                    </button>
+                  </div>
+                </div>
+              ))}
               {docs.map(d => (
                 <div key={d.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -261,6 +309,18 @@ export default function ClientProfilePage() {
                     }}
                     className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-2">
                     View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await downloadDocumentFile(d.storagePath || d.url, d.name)
+                      } catch (err) {
+                        toast.error(err.message)
+                      }
+                    }}
+                    className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600 flex-shrink-0 ml-2">
+                    Download
                   </button>
                 </div>
               ))}

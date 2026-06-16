@@ -1023,6 +1023,60 @@ export default function ClientsPage() {
                 </div>
               ) : null
             })()}
+            {(() => {
+              const policyDocs = policies
+                .filter(p => p.clientId === selected.id && p.policyPdfUrl)
+                .map(p => ({
+                  id: p.id,
+                  url: p.policyPdfUrl,
+                  name: p.policyPdfName || `${p.policyNumber || 'policy'} document.pdf`,
+                  policyNumber: p.policyNumber || 'Policy',
+                  policyType: p.policyType || 'Policy',
+                  insurer: p.insurer || '',
+                  status: p.status || 'Active',
+                }))
+              return policyDocs.length > 0 ? (
+                <div>
+                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">Policy PDFs ({policyDocs.length})</p>
+                  <div className="space-y-1">
+                    {policyDocs.map(d => (
+                      <div key={d.id} className="flex items-center justify-between gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 text-xs">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-gray-800 dark:text-gray-200 truncate">{d.name}</p>
+                          <p className="font-mono text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} - {d.status}</p>
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await openDocumentPreview(d.url, d.name)
+                              } catch (err) {
+                                toast.error(err.message)
+                              }
+                            }}
+                            className="text-blue-600 dark:text-blue-400 hover:underline">
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await downloadDocumentFile(d.url, d.name)
+                              } catch (err) {
+                                toast.error(err.message)
+                              }
+                            }}
+                            className="text-gray-600 dark:text-gray-300 hover:text-blue-600">
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            })()}
             <DocumentManager clientId={selected.id} />
           </div>
         )}
