@@ -71,9 +71,7 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
     const safeName = file.name.replace(/\s+/g, '_')
     const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
     const baseName = safeName.replace(/\.[^/.]+$/, '')
-    const publicId = isPdfFile
-      ? `${Date.now()}_${baseName}.pdf`
-      : `${Date.now()}_${baseName}`
+    const publicId = `${Date.now()}_${baseName}`
     const fd = new FormData()
     fd.append('file',          file)
     fd.append('upload_preset', PRESET)
@@ -81,10 +79,9 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
     fd.append('public_id',     publicId)
 
     const xhr = new XMLHttpRequest()
-    // PDFs: use /raw/upload to preserve the file byte-for-byte (no re-encoding).
-    // All other file types (images, etc.): use /auto/upload.
-    // Note: unsigned presets support both /raw/ and /auto/.
-    const endpoint  = isPdfFile ? 'raw/upload' : 'auto/upload'
+    // PDFs are uploaded through auto/upload so Cloudinary chooses a browser-safe
+    // delivery URL. raw/upload caused Chrome's PDF viewer to reject some files.
+    const endpoint  = 'auto/upload'
     xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${endpoint}`, true)
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
     xhr.onload = () => {
@@ -191,17 +188,17 @@ async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onPr
 
 export function getViewUrl(url) {
   if (!url) return ''
-  return String(url)
+  const safe = String(url)
     .replace('/raw/upload/fl_attachment/', '/raw/upload/')
+    .replace('/image/upload/fl_attachment/', '/image/upload/')
     .replace(/\/raw\/upload\/fl_attachment:[^/]+\//, '/raw/upload/')
+    .replace(/\/image\/upload\/fl_attachment:[^/]+\//, '/image/upload/')
+  return safe
 }
 
 export function getPreviewUrl(url) {
   const safeUrl = getViewUrl(url)
   if (!safeUrl) return ''
-  if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/raw/upload/')) {
-    return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(safeUrl)}`
-  }
   return safeUrl
 }
 
@@ -213,7 +210,10 @@ export function getDownloadUrl(url, fileName = '') {
     .trim()
     .replace(/\s+/g, '_') || 'document.pdf'
   if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/raw/upload/')) {
-    return safeUrl.replace('/raw/upload/', '/raw/upload/fl_attachment/')
+    return safeUrl
+  }
+  if (safeUrl.includes('res.cloudinary.com') && safeUrl.includes('/image/upload/')) {
+    return safeUrl
   }
   const separator = safeUrl.includes('?') ? '&' : '?'
   return `${safeUrl}${separator}dl=${encodeURIComponent(safeFileName)}`
