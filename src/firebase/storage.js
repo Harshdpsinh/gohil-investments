@@ -87,7 +87,16 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         const data = JSON.parse(xhr.responseText)
-        resolve({ url: data.secure_url, publicId: data.public_id, name: file.name, size: file.size, type: file.type, format: data.format || '' })
+        resolve({
+          url: data.secure_url,
+          publicId: data.public_id,
+          deleteToken: data.delete_token || '',
+          resourceType: data.resource_type || (isPdfFile ? 'image' : 'image'),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          format: data.format || '',
+        })
       } else {
         try { reject(new Error(JSON.parse(xhr.responseText).error?.message || `Upload failed (${xhr.status})`)) }
         catch { reject(new Error(`Upload failed with status ${xhr.status}`)) }
@@ -341,16 +350,27 @@ export async function deleteClientDocument(clientId, docId) {
   await deleteDocMeta(clientId, docId)
 }
 
-export async function uploadPolicyPdf(policyId, file, onProgress = () => {}) {
+export async function uploadPolicyPdf(policyId, file, onProgress = () => {}, documentYear = '') {
   validatePolicyPdf(file)
   const safeName = file.name.replace(/[^\w.\-() ]+/g, '').trim().replace(/\s+/g, '_') || 'policy.pdf'
+  const year = String(documentYear || new Date().getFullYear()).replace(/[^\d]/g, '').slice(0, 4) || String(new Date().getFullYear())
   const meta = await uploadWithFreeFallback(
     file,
-    `policies/${policyId}/${Date.now()}_${safeName}`,
-    `gohil_investments/policies/${policyId}`,
+    `policies/${policyId}/${year}/${Date.now()}_${safeName}`,
+    `gohil_investments/policies/${policyId}/${year}`,
     onProgress
   )
-  return { url: meta.url, name: meta.name, storagePath: meta.storagePath, storageBucket: meta.storageBucket, storageProvider: meta.storageProvider || 'firebase', publicId: meta.publicId || '' }
+  return {
+    url: meta.url,
+    name: meta.name,
+    documentYear: year,
+    storagePath: meta.storagePath,
+    storageBucket: meta.storageBucket,
+    storageProvider: meta.storageProvider || 'firebase',
+    publicId: meta.publicId || '',
+    resourceType: meta.resourceType || '',
+    deleteToken: meta.deleteToken || '',
+  }
 }
 
 export async function uploadSharedDocument(ownerType, ownerId, file, onProgress = () => {}) {
@@ -387,6 +407,41 @@ export async function deleteStorageObjectByPath(storagePath, storageBucket = '')
     if (err?.code === 'storage/object-not-found') return
     throw new Error('Could not delete file from storage. Please try again.')
   }
+}
+
+async function deleteCloudinaryByToken(deleteToken) {
+  if (!deleteToken) return false
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD}/delete_by_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ token: deleteToken }),
+  })
+  return response.ok
+}
+
+async function deleteCloudinaryByPublicId(publicId, resourceType = 'image') {
+  if (!publicId) return false
+  const response = await fetch('/api/cloudinary-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ publicId, resourceType }),
+  })
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.error || 'Could not delete old Cloudinary PDF.')
+  }
+  return true
+}
+
+export async function deletePolicyPdfAsset(asset = {}) {
+  if (asset.storageProvider === 'cloudinary' || asset.publicId || asset.deleteToken) {
+    if (await deleteCloudinaryByToken(asset.deleteToken)) return
+    if (asset.publicId) {
+      await deleteCloudinaryByPublicId(asset.publicId, asset.resourceType || 'image')
+    }
+    return
+  }
+  await deleteStorageObjectByPath(asset.storagePath, asset.storageBucket)
 }
 
 export const deletePolicyPdfByPath = deleteStorageObjectByPath

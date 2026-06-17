@@ -1353,12 +1353,17 @@ export function subscribePolicies(callback, onError) {
   )
 }
 
-export async function savePolicyPdfUrl(policyId, url, name, storagePath = '', storageBucket = '') {
+export async function savePolicyPdfUrl(policyId, url, name, storagePath = '', storageBucket = '', extra = {}) {
   return updateDoc(doc(db,POLICIES,policyId), {
     policyPdfUrl: url,
     policyPdfName: name,
+    policyPdfYear: extra.documentYear || extra.policyPdfYear || null,
     policyPdfStoragePath: storagePath || null,
     policyPdfStorageBucket: storageBucket || null,
+    policyPdfStorageProvider: extra.storageProvider || null,
+    policyPdfPublicId: extra.publicId || null,
+    policyPdfResourceType: extra.resourceType || null,
+    policyPdfDeleteToken: extra.deleteToken || null,
     updatedAt: serverTimestamp()
   })
 }

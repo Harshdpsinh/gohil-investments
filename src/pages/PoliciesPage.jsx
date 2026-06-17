@@ -11,7 +11,7 @@ import {
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
   subscribeProposals, updateProposal, findClientByMobileOrName,
 } from '../firebase/firestore'
-import { deletePolicyPdfByPath, downloadDocumentFile, openDocumentPreview, uploadPolicyPdf } from '../firebase/storage'
+import { deletePolicyPdfAsset, downloadDocumentFile, openDocumentPreview, uploadPolicyPdf } from '../firebase/storage'
 import {
   HEALTH_DEFAULTS, LIFE_DEFAULTS, MOTOR_DEFAULTS,
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
@@ -70,6 +70,15 @@ const ADDONS = [
   ['returnToInvoice','Return to Invoice'],['tyreProtect','Tyre Protect'],
   ['personalAccident','Personal Accident'],
 ]
+
+const isLifePolicyType = (type = '') => String(type || '').trim().toLowerCase() === 'life'
+
+function policyDocumentYear(policy = {}) {
+  if (policy.policyPdfYear) return policy.policyPdfYear
+  if (policy.policyYear) return policy.policyYear
+  const date = parseAnyDate(policy.expiryDate || policy.nextPremiumDue || policy.startDate)
+  return date ? String(date.getFullYear()) : String(new Date().getFullYear())
+}
 
 function buildImportClientReview(imported, matchedClient) {
   if (!matchedClient?.id) return null
@@ -198,10 +207,25 @@ function QuickAddClientModal({ onCreated, onClose }) {
 }
 
 // ── Policy PDF Upload ─────────────────────────────────────────
-function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () => {}, compact = false }) {
+function PolicyPdfUpload({
+  policyId,
+  policyType = '',
+  documentYear = '',
+  existingUrl,
+  existingName,
+  existingStoragePath = '',
+  existingStorageBucket = '',
+  existingStorageProvider = '',
+  existingPublicId = '',
+  existingResourceType = '',
+  existingDeleteToken = '',
+  onUploaded = () => {},
+  compact = false,
+}) {
   const fileRef = useRef()
   const [progress, setProgress]   = useState(null)
   const [uploading, setUploading] = useState(false)
+  const canDeleteOldPdf = !isLifePolicyType(policyType)
 
   const onFileChange = async e => {
     const file = e.target.files[0]
@@ -214,10 +238,24 @@ function PolicyPdfUpload({ policyId, existingUrl, existingName, onUploaded = () 
     setUploading(true)
     setProgress(0)
     try {
-      const { url, name, storagePath, storageBucket } = await uploadPolicyPdf(policyId, file, p => setProgress(p))
-      await savePolicyPdfUrl(policyId, url, name, storagePath, storageBucket)
-      toast.success('PDF uploaded')
-      onUploaded(url, name)
+      const uploaded = await uploadPolicyPdf(policyId, file, p => setProgress(p), documentYear)
+      if (existingUrl && canDeleteOldPdf) {
+        try {
+          await deletePolicyPdfAsset({
+            storagePath: existingStoragePath,
+            storageBucket: existingStorageBucket,
+            storageProvider: existingStorageProvider,
+            publicId: existingPublicId,
+            resourceType: existingResourceType,
+            deleteToken: existingDeleteToken,
+          })
+        } catch (deleteErr) {
+          toast.error(`New PDF uploaded, but old PDF was not deleted: ${deleteErr.message}`)
+        }
+      }
+      await savePolicyPdfUrl(policyId, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, uploaded)
+      toast.success(existingUrl && canDeleteOldPdf ? 'PDF replaced and old file deleted' : 'PDF uploaded')
+      onUploaded(uploaded.url, uploaded.name, uploaded)
     } catch(err) {
       const message = err?.code === 'storage/unauthorized'
         ? 'PDF upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
@@ -581,6 +619,15 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
   const [localClients, setLocalClients] = useState(initClients)
   const [pdfUrl,  setPdfUrl]        = useState(initial?.policyPdfUrl  || '')
   const [pdfName, setPdfName]       = useState(initial?.policyPdfName || '')
+  const [pdfMeta, setPdfMeta]       = useState({
+    documentYear: initial?.policyPdfYear || policyDocumentYear(initial || form),
+    storagePath: initial?.policyPdfStoragePath || '',
+    storageBucket: initial?.policyPdfStorageBucket || '',
+    storageProvider: initial?.policyPdfStorageProvider || '',
+    publicId: initial?.policyPdfPublicId || '',
+    resourceType: initial?.policyPdfResourceType || '',
+    deleteToken: initial?.policyPdfDeleteToken || '',
+  })
 
   const set = (k,v) => setForm(p=>({...p,[k]:v}))
 
@@ -747,7 +794,18 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     cleanForm.coverageTermYears = Number(cleanForm.coverageTermYears || 1)
     cleanForm.isMultiYearPolicy = !isLifePolicy && cleanForm.coverageTermYears > 1
     if (!isLifePolicy) cleanForm.nextPremiumDue = toInputDate(cleanForm.expiryDate) || cleanForm.expiryDate
-    try { await onSave({...cleanForm, policyPdfUrl:pdfUrl, policyPdfName:pdfName}) }
+    try { await onSave({
+      ...cleanForm,
+      policyPdfUrl: pdfUrl,
+      policyPdfName: pdfName,
+      policyPdfYear: pdfMeta.documentYear || policyDocumentYear(form),
+      policyPdfStoragePath: pdfMeta.storagePath || null,
+      policyPdfStorageBucket: pdfMeta.storageBucket || null,
+      policyPdfStorageProvider: pdfMeta.storageProvider || null,
+      policyPdfPublicId: pdfMeta.publicId || null,
+      policyPdfResourceType: pdfMeta.resourceType || null,
+      policyPdfDeleteToken: pdfMeta.deleteToken || null,
+    }) }
     finally { setSaving(false) }
   }
 
@@ -883,8 +941,28 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
         </div>
 
         {/* PDF */}
-        <PolicyPdfUpload policyId={initial?.id||null} existingUrl={pdfUrl} existingName={pdfName}
-                         onUploaded={(u,n)=>{setPdfUrl(u);setPdfName(n)}} />
+        <PolicyPdfUpload
+          policyId={initial?.id||null}
+          policyType={form.policyType}
+          documentYear={pdfMeta.documentYear || policyDocumentYear(form)}
+          existingUrl={pdfUrl}
+          existingName={pdfName}
+          existingStoragePath={pdfMeta.storagePath}
+          existingStorageBucket={pdfMeta.storageBucket}
+          existingStorageProvider={pdfMeta.storageProvider}
+          existingPublicId={pdfMeta.publicId}
+          existingResourceType={pdfMeta.resourceType}
+          existingDeleteToken={pdfMeta.deleteToken}
+          onUploaded={(u,n,meta)=>{setPdfUrl(u);setPdfName(n);setPdfMeta({
+            documentYear: meta?.documentYear || policyDocumentYear(form),
+            storagePath: meta?.storagePath || '',
+            storageBucket: meta?.storageBucket || '',
+            storageProvider: meta?.storageProvider || '',
+            publicId: meta?.publicId || '',
+            resourceType: meta?.resourceType || '',
+            deleteToken: meta?.deleteToken || '',
+          })}}
+        />
 
         <div><label className="form-label">Notes</label>
           <textarea rows={2} value={form.notes||''} onChange={e=>set('notes',e.target.value)} className="form-input" /></div>
@@ -988,6 +1066,9 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
   // Duplicate review state
   const [dupRows,    setDupRows]    = useState([])   // [{rowIndex, data, pNo}]
   const [dupChoices, setDupChoices] = useState({})   // {pNo: 'skip'|'overwrite'|'new'}
+  // Existing-client match review state
+  const [clientMatchRows, setClientMatchRows] = useState([])
+  const [clientMatchChoices, setClientMatchChoices] = useState({})
   // Lapsed policy review state
   const [lapseRows,  setLapseRows]  = useState([])   // [{rowIndex, data, daysAgo}]
   const [lapseChoices, setLapseChoices] = useState({}) // {pNo: {action:'skip'|'import', newExpiry, newStart}}
@@ -1039,13 +1120,30 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
     }
   }
 
-  // ── Pre-flight scan: find dups + lapsed before importing ────
+  const findImportClientMatch = (data = {}) => {
+    const importedName = String(data.clientName || '').trim().toLowerCase()
+    const importedMobile = String(data.clientMobile || '').replace(/\D/g, '').slice(-10)
+    const importedEmail = String(data.clientEmail || '').trim().toLowerCase()
+    if (!importedName && !importedMobile && !importedEmail) return null
+    return clients.find(c => {
+      const name = String(c.name || '').trim().toLowerCase()
+      const mobile = String(c.mobile || '').replace(/\D/g, '').slice(-10)
+      const email = String(c.email || '').trim().toLowerCase()
+      return Boolean(
+        (importedMobile && mobile && importedMobile === mobile) ||
+        (importedEmail && email && importedEmail === email) ||
+        (importedName && name && importedName === name)
+      )
+    }) || null
+  }
+
+  // ── Pre-flight scan: find dups + client matches + lapsed before importing ────
   const preflight = async (overrides, autoCreate) => {
     // Note: setPreflighting(true) is called by onClickImport before this
     // to lock the button immediately on first click
     try {
     const today = new Date()
-    const dups = [], lapses = []
+    const dups = [], lapses = [], clientMatches = []
 
     for (const [i, r] of rows.entries()) {
       let data
@@ -1053,6 +1151,8 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       catch (err) { setErrors([`Row ${i + 2}: ${err.message}`]); throw err }
       const pNo  = data.policyNumber
       if (!pNo) continue
+      const matchedClient = findImportClientMatch(data)
+      if (matchedClient) clientMatches.push({ rowIndex: i, data, pNo, matchedClient })
 
       // Comprehensive duplicate check: policy number + registration + client+premium+insurer
       const dupResult = await checkDuplicate({
@@ -1081,6 +1181,10 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       setDupRows(dups)
       setDupChoices(Object.fromEntries(dups.map(d => [d.pNo, 'skip'])))
       setStep('dup_review')
+    } else if (clientMatches.length > 0) {
+      setClientMatchRows(clientMatches)
+      setClientMatchChoices(Object.fromEntries(clientMatches.map(m => [m.pNo, 'family'])))
+      setStep('client_match_review')
     } else if (lapses.length > 0) {
       setLapseRows(lapses)
       setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
@@ -1125,6 +1229,58 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
       }
     }
+    const clientMatches = []
+    for (const [i, r] of pendingRows.entries()) {
+      const data = parseRow(r)
+      const pNo = data.policyNumber
+      if (!pNo || dupRows.some(d => d.pNo === pNo)) continue
+      const matchedClient = findImportClientMatch(data)
+      if (matchedClient) clientMatches.push({ rowIndex: i, data, pNo, matchedClient })
+    }
+    if (clientMatches.length > 0) {
+      setClientMatchRows(clientMatches)
+      setClientMatchChoices(Object.fromEntries(clientMatches.map(m => [m.pNo, 'family'])))
+      setStep('client_match_review')
+      setReviewSubmitting(false)
+    } else if (lapses.length > 0) {
+      setLapseRows(lapses)
+      setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
+      setStep('lapse_review')
+      setReviewSubmitting(false)
+    } else {
+      toast.loading('Import is working. Please wait...', { id: 'policy-import-working' })
+      doImport(pendingOverrides, pendingAutoCreate, dupChoices, {})
+    }
+  }
+
+  const afterClientMatchReview = () => {
+    if (reviewSubmitting || importing) return
+    setReviewSubmitting(true)
+    const today = new Date()
+    const lapses = []
+    for (const [i, r] of pendingRows.entries()) {
+      let data
+      try { data = parseRow(r) }
+      catch (err) {
+        setErrors([`Row ${i + 2}: ${err.message}`])
+        toast.error(err.message)
+        setReviewSubmitting(false)
+        return
+      }
+      const pNo = data.policyNumber
+      if (!pNo) continue
+      if (data.expiryDate) {
+        const exp = parseAnyDate(data.expiryDate)
+        if (!exp) {
+          setErrors([`Row ${i + 2}: Policy End Date is invalid.`])
+          toast.error(`Row ${i + 2}: Policy End Date is invalid.`)
+          setReviewSubmitting(false)
+          return
+        }
+        const daysAgo = Math.ceil((today - exp) / (1000 * 60 * 60 * 24))
+        if (daysAgo > 30) lapses.push({ rowIndex: i, data, pNo, daysAgo })
+      }
+    }
     if (lapses.length > 0) {
       setLapseRows(lapses)
       setLapseChoices(Object.fromEntries(lapses.map(l => [l.pNo, { action: 'skip', newStart: '', newExpiry: '' }])))
@@ -1152,6 +1308,7 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       if (!pNo) { errs.push(`Row ${i+2}: Missing Policy Number`); continue }
 
       const eName = data.clientName
+      const matchChoice = clientMatchChoices[pNo]
       let mc = clients.find(c => c.name.toLowerCase().trim() === eName.toLowerCase())
       if (!mc && (data.clientMobile || eName)) {
         try {
@@ -1166,14 +1323,19 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
         mc = mapped || { id: ov.id, name: ov.name }
       }
 
-      if (!mc && autoCreate && eName) {
-        if (autoCreated[eName.toLowerCase()]) {
-          mc = autoCreated[eName.toLowerCase()]
+      if (matchChoice === 'new_profile') {
+        mc = null
+      }
+
+      if (!mc && (autoCreate || matchChoice === 'new_profile') && eName) {
+        const createKey = `${matchChoice === 'new_profile' ? 'new:' : ''}${eName.toLowerCase()}`
+        if (autoCreated[createKey]) {
+          mc = autoCreated[createKey]
         } else {
           try {
             const ref = await addClient({ name: eName, mobile: data.clientMobile || '', email: data.clientEmail || '', kycStatus: 'Pending' })
             mc = { id: ref.id, name: eName, mobile: data.clientMobile || '', email: data.clientEmail || '' }
-            autoCreated[eName.toLowerCase()] = mc
+            autoCreated[createKey] = mc
           } catch(err) {
             errs.push(`Row ${i+2}: Could not create client "${eName}" - ${err.message}`)
             continue
@@ -1189,6 +1351,14 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       if (reviewFlag) {
         Object.assign(data, reviewFlag)
         errs.push(`Row ${i+2}: Existing client matched but details differ. Imported policy was flagged for manual review; client record was not changed.`)
+      }
+      if (matchChoice === 'family' && mc?.id) {
+        data.importClientMatchDecision = 'family'
+        data.importMatchedClientId = mc.id
+        data.familyId = mc.familyId || data.familyId || ''
+        data.familyName = mc.familyName || data.familyName || ''
+      } else if (matchChoice === 'new_profile') {
+        data.importClientMatchDecision = 'new_profile'
       }
       data.clientMobile = data.clientMobile || mc?.mobile || ''
       data.clientEmail = data.clientEmail || mc?.email || ''
@@ -1243,6 +1413,64 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
     orange: { bg:'bg-orange-50', border:'border-orange-200', text:'text-orange-700' },
   }
   const c = colorMap[color] || colorMap.green
+
+  if (step === 'client_match_review') return (
+    <div className="space-y-4">
+      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+        <p className="text-sm font-bold text-blue-700 dark:text-blue-300">
+          Review {clientMatchRows.length} existing client match{clientMatchRows.length !== 1 ? 'es' : ''}
+        </p>
+        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+          The import found clients with the same name, mobile, or email. Choose how to handle each one. Existing client details will not be overwritten.
+        </p>
+      </div>
+      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+        {clientMatchRows.map(({ pNo, data, matchedClient }) => {
+          const choice = clientMatchChoices[pNo] || 'family'
+          return (
+            <div key={pNo} className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-white dark:bg-gray-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <p className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Imported Policy</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{data.clientName || 'Unnamed client'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{data.clientMobile || 'No mobile'} - {data.clientEmail || 'No email'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Policy: {pNo}</p>
+                </div>
+                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/20 p-3">
+                  <p className="text-xs font-bold text-blue-600 dark:text-blue-300 uppercase">Existing Match</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">{matchedClient.name || 'Unnamed client'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{matchedClient.mobile || 'No mobile'} - {matchedClient.email || 'No email'}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Family: {matchedClient.familyName || 'Not grouped yet'}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={reviewSubmitting || importing}
+                  onClick={() => setClientMatchChoices(p => ({ ...p, [pNo]: 'family' }))}
+                  className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-50 ${choice === 'family'
+                    ? 'bg-blue-600 border-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-700 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300'}`}>
+                  Add/link to current family
+                </button>
+                <button type="button" disabled={reviewSubmitting || importing}
+                  onClick={() => setClientMatchChoices(p => ({ ...p, [pNo]: 'new_profile' }))}
+                  className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-colors disabled:opacity-50 ${choice === 'new_profile'
+                    ? 'bg-green-600 border-green-600 text-white'
+                    : 'bg-white dark:bg-gray-700 border-green-300 dark:border-green-700 text-green-700 dark:text-green-300'}`}>
+                  Create separate new profile
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex gap-3">
+        <button onClick={afterClientMatchReview} disabled={reviewSubmitting || importing} className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed">
+          {reviewSubmitting || importing ? `Working... ${importProgress.total ? `${importProgress.done}/${importProgress.total}` : ''}` : 'Confirm & Continue'}
+        </button>
+        <button onClick={() => setStep('upload')} disabled={reviewSubmitting || importing} className="btn-secondary disabled:opacity-60">Back</button>
+      </div>
+    </div>
+  )
 
   // ── Duplicate review step ───────────────────────────────────
   if (step === 'dup_review') return (
@@ -1575,7 +1803,14 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     setPermDeling(true)
     try {
       const policy = deleted.find(p => p.id === permDel)
-      await deletePolicyPdfByPath(policy?.policyPdfStoragePath, policy?.policyPdfStorageBucket)
+      await deletePolicyPdfAsset({
+        storagePath: policy?.policyPdfStoragePath,
+        storageBucket: policy?.policyPdfStorageBucket,
+        storageProvider: policy?.policyPdfStorageProvider,
+        publicId: policy?.policyPdfPublicId,
+        resourceType: policy?.policyPdfResourceType,
+        deleteToken: policy?.policyPdfDeleteToken,
+      })
       await permanentDeletePolicy(permDel)
       toast.success('Policy permanently deleted')
       setDeleted(prev => prev.filter(p => p.id !== permDel))
@@ -1593,7 +1828,14 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
     setEmptying(true)
     try {
       await Promise.all(deleted.map(async p => {
-        await deletePolicyPdfByPath(p.policyPdfStoragePath, p.policyPdfStorageBucket)
+        await deletePolicyPdfAsset({
+          storagePath: p.policyPdfStoragePath,
+          storageBucket: p.policyPdfStorageBucket,
+          storageProvider: p.policyPdfStorageProvider,
+          publicId: p.policyPdfPublicId,
+          resourceType: p.policyPdfResourceType,
+          deleteToken: p.policyPdfDeleteToken,
+        })
         await permanentDeletePolicy(p.id)
       }))
       toast.success('Recycle bin emptied')
@@ -2173,8 +2415,16 @@ export default function PoliciesPage() {
                       <PolicyPdfUpload
                         compact
                         policyId={p.id}
+                        policyType={p.policyType}
+                        documentYear={policyDocumentYear(p)}
                         existingUrl={p.policyPdfUrl}
                         existingName={p.policyPdfName}
+                        existingStoragePath={p.policyPdfStoragePath}
+                        existingStorageBucket={p.policyPdfStorageBucket}
+                        existingStorageProvider={p.policyPdfStorageProvider}
+                        existingPublicId={p.policyPdfPublicId}
+                        existingResourceType={p.policyPdfResourceType}
+                        existingDeleteToken={p.policyPdfDeleteToken}
                       />
                     </td>
 

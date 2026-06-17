@@ -478,18 +478,18 @@ function CliMerModal({ clients, onClose, onMerged }) {
                 <p className="text-xs font-bold text-gray-700 dark:text-gray-200">Available Clients</p>
                 <p className="text-xs text-gray-400">Click Add for every family member</p>
               </div>
-              <div className="max-h-80 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+              <div className="max-h-80 overflow-y-auto p-3 grid grid-cols-1 gap-3">
                 {filtered.filter(c => !dupIds.includes(c.id)).map(c => (
-                  <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <div key={c.id} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 shadow-sm hover:border-blue-300 hover:shadow-md transition-all">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{c.name}</p>
                       <p className="text-xs text-gray-400 truncate">
                         {c.mobile || 'No mobile'}{c.familyName ? ` - Family: ${c.familyName}` : ''}
                       </p>
                     </div>
                     <button type="button" onClick={() => setDupIds(prev => [...prev, c.id])}
-                            className="px-3 py-1 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">
-                      Add
+                            className="mt-3 w-full px-3 py-2 text-xs font-semibold rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100">
+                      Add to Family
                     </button>
                   </div>
                 ))}
@@ -504,15 +504,15 @@ function CliMerModal({ clients, onClose, onMerged }) {
                 <p className="text-xs font-bold text-blue-700 dark:text-blue-300">Selected Family Members ({dupIds.length})</p>
                 <p className="text-xs text-blue-500 dark:text-blue-400">These clients will be linked together only</p>
               </div>
-              <div className="max-h-80 overflow-y-auto divide-y divide-blue-100 dark:divide-blue-900/50">
+              <div className="max-h-80 overflow-y-auto p-3 grid grid-cols-1 gap-3">
                 {dupIds.map(id => clients.find(c => c.id === id)).filter(Boolean).map(c => (
-                  <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div key={c.id} className="rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-800 p-3 shadow-sm">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate">{c.name}</p>
+                      <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{c.name}</p>
                       <p className="text-xs text-gray-400 truncate">{c.mobile || 'No mobile'}</p>
                     </div>
                     <button type="button" onClick={() => setDupIds(prev => prev.filter(x => x !== c.id))}
-                            className="px-3 py-1 text-xs font-semibold rounded-lg bg-white dark:bg-gray-800 text-red-600 hover:bg-red-50">
+                            className="mt-3 w-full px-3 py-2 text-xs font-semibold rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100">
                       Remove
                     </button>
                   </div>
@@ -1033,6 +1033,7 @@ export default function ClientsPage() {
                   policyNumber: p.policyNumber || 'Policy',
                   policyType: p.policyType || 'Policy',
                   insurer: p.insurer || '',
+                  year: p.policyPdfYear || p.policyYear || '',
                   status: p.status || 'Active',
                 }))
               return policyDocs.length > 0 ? (
@@ -1043,7 +1044,7 @@ export default function ClientsPage() {
                       <div key={d.id} className="flex items-center justify-between gap-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 text-xs">
                         <div className="min-w-0">
                           <p className="font-semibold text-gray-800 dark:text-gray-200 truncate">{d.name}</p>
-                          <p className="font-mono text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} - {d.status}</p>
+                          <p className="font-mono text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} {d.year ? `- Year ${d.year}` : ''} - {d.status}</p>
                         </div>
                         <div className="flex flex-shrink-0 items-center gap-2">
                           <button

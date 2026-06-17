@@ -11,6 +11,7 @@ import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
   markPremiumPaid,
 } from '../firebase/firestore'
+import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
@@ -109,6 +110,20 @@ function RenewModal({ policy, onConfirm, onClose }) {
     notes:        '',
   })
   const [saving, setSaving] = useState(false)
+  const pdfRef = useRef()
+  const [pdfUploading, setPdfUploading] = useState(false)
+  const [pdfProgress, setPdfProgress] = useState(null)
+  const [pdfMeta, setPdfMeta] = useState({
+    policyPdfUrl: '',
+    policyPdfName: '',
+    policyPdfYear: '',
+    policyPdfStoragePath: '',
+    policyPdfStorageBucket: '',
+    policyPdfStorageProvider: '',
+    policyPdfPublicId: '',
+    policyPdfResourceType: '',
+    policyPdfDeleteToken: '',
+  })
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
 
   const recalcExpiry = (startDate, frequency, coverageTermYears = 1) =>
@@ -158,6 +173,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
   }
 
   const handleSubmit = async () => {
+    if (pdfUploading) { toast.error('Please wait for the PDF upload to finish'); return }
     if (!form.startDate)  { toast.error('Start date required'); return }
     if (!form.expiryDate) { toast.error('Expiry date required'); return }
     if (new Date(form.expiryDate) <= new Date(form.startDate)) {
@@ -184,8 +200,39 @@ function RenewModal({ policy, onConfirm, onClose }) {
       }
     }
     setSaving(true)
-    try { await onConfirm({ ...form, companySame }) }
+    try { await onConfirm({ ...form, companySame, ...pdfMeta }) }
     finally { setSaving(false) }
+  }
+
+  const uploadRenewalPdf = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (isLifePolicy) return
+    setPdfUploading(true)
+    setPdfProgress(0)
+    try {
+      const yearDate = parseAnyDate(form.expiryDate || form.startDate)
+      const documentYear = yearDate ? String(yearDate.getFullYear()) : String(new Date().getFullYear())
+      const uploaded = await uploadPolicyPdf(`${policy.id}_renewal`, file, setPdfProgress, documentYear)
+      setPdfMeta({
+        policyPdfUrl: uploaded.url,
+        policyPdfName: uploaded.name,
+        policyPdfYear: uploaded.documentYear || documentYear,
+        policyPdfStoragePath: uploaded.storagePath || '',
+        policyPdfStorageBucket: uploaded.storageBucket || '',
+        policyPdfStorageProvider: uploaded.storageProvider || '',
+        policyPdfPublicId: uploaded.publicId || '',
+        policyPdfResourceType: uploaded.resourceType || '',
+        policyPdfDeleteToken: uploaded.deleteToken || '',
+      })
+      toast.success('Renewal PDF uploaded for the new policy term')
+    } catch (err) {
+      toast.error(err?.message || 'Renewal PDF upload failed')
+    } finally {
+      setPdfUploading(false)
+      setPdfProgress(null)
+      if (pdfRef.current) pdfRef.current.value = ''
+    }
   }
 
   return (
@@ -379,6 +426,35 @@ function RenewModal({ policy, onConfirm, onClose }) {
           <textarea rows={2} value={form.notes} onChange={e => set('notes', e.target.value)}
                     className="form-input" placeholder="e.g. Sum insured increased to 10L" />
         </div>
+
+        {!isLifePolicy && (
+          <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/60 dark:bg-blue-900/20 p-4">
+            <label className="form-label">Renewed Policy PDF</label>
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <input
+                ref={pdfRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={uploadRenewalPdf}
+                disabled={pdfUploading || saving}
+                className="form-input"
+              />
+              {pdfMeta.policyPdfUrl && (
+                <span className="text-xs font-semibold text-green-700 dark:text-green-300">
+                  Uploaded: {pdfMeta.policyPdfName}
+                </span>
+              )}
+            </div>
+            {pdfUploading && (
+              <div className="mt-3 h-2 rounded-full bg-blue-100 overflow-hidden">
+                <div className="h-full bg-blue-600 transition-all" style={{ width: `${pdfProgress || 5}%` }} />
+              </div>
+            )}
+            <p className="text-xs text-blue-700 dark:text-blue-300 mt-2">
+              Old PDF remains in history. This file is attached only to the new renewed policy.
+            </p>
+          </div>
+        )}
 
         <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3 text-xs">
           <p className="font-semibold text-emerald-800 dark:text-emerald-200">Renewal change request</p>
@@ -721,8 +797,15 @@ export default function RenewalsPage() {
           : (renewForm.planName?.trim() || ''),
 
         // Reset PDF — new term has no document yet
-        policyPdfUrl:  null,
-        policyPdfName: null,
+        policyPdfUrl:  renewForm.policyPdfUrl || null,
+        policyPdfName: renewForm.policyPdfName || null,
+        policyPdfYear: renewForm.policyPdfYear || null,
+        policyPdfStoragePath: renewForm.policyPdfStoragePath || null,
+        policyPdfStorageBucket: renewForm.policyPdfStorageBucket || null,
+        policyPdfStorageProvider: renewForm.policyPdfStorageProvider || null,
+        policyPdfPublicId: renewForm.policyPdfPublicId || null,
+        policyPdfResourceType: renewForm.policyPdfResourceType || null,
+        policyPdfDeleteToken: renewForm.policyPdfDeleteToken || null,
       }
 
       // Remove old Firestore doc ID — saveRenewal creates a new document
@@ -738,6 +821,18 @@ export default function RenewalsPage() {
       toast.success(`✅ Renewed! New policy created for ${policy.clientName}`)
       setRenewModal(null)
     } catch (e) {
+      if (renewForm.policyPdfUrl) {
+        try {
+          await deletePolicyPdfAsset({
+            storagePath: renewForm.policyPdfStoragePath,
+            storageBucket: renewForm.policyPdfStorageBucket,
+            storageProvider: renewForm.policyPdfStorageProvider,
+            publicId: renewForm.policyPdfPublicId,
+            resourceType: renewForm.policyPdfResourceType,
+            deleteToken: renewForm.policyPdfDeleteToken,
+          })
+        } catch {}
+      }
       toast.error(renewalErrorMessage(e))
     } finally {
       submittingRef.current = false

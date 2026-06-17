@@ -106,6 +106,7 @@ export default function ClientProfilePage() {
       policyNumber: p.policyNumber || 'Policy',
       policyType: p.policyType || 'Policy',
       insurer: p.insurer || '',
+      year: p.policyPdfYear || p.policyYear || '',
       status: policyHistoryStatus(p),
     }))
   const familyKey = client?.familyId || client?.familyName || ''
@@ -261,7 +262,7 @@ export default function ClientProfilePage() {
                     <span className="text-xs font-bold text-blue-700 dark:text-blue-300 flex-shrink-0">PDF</span>
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{d.name}</p>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} - {d.status.label}</p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{d.policyNumber} - {d.policyType} - {d.insurer} {d.year ? `- Year ${d.year}` : ''} - {d.status.label}</p>
                     </div>
                   </div>
                   <div className="flex flex-shrink-0 items-center gap-2">
