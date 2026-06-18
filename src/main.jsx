@@ -3,6 +3,7 @@ import React          from 'react'
 import ReactDOM       from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster }    from 'react-hot-toast'
+import { Capacitor }  from '@capacitor/core'
 import App            from './App'
 import { AuthProvider } from './hooks/useAuth'
 import './styles/tokens.css'
@@ -15,7 +16,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <AuthProvider>
         <App />
         <Toaster
-          position="bottom-right"
+          position={Capacitor.isNativePlatform() ? 'top-center' : 'bottom-right'}
           toastOptions={{
             duration: 3500,
             style: {

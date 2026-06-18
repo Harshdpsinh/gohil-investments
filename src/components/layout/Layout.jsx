@@ -1,9 +1,77 @@
 // UI MODERNIZATION - logic unchanged
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
+import useAndroidBack from '../../hooks/useAndroidBack'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+  useAndroidBack({ sidebarOpen, closeSidebar })
+
+  useEffect(() => {
+    if (!sidebarOpen) return undefined
+    const onKey = event => { if (event.key === 'Escape') setSidebarOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sidebarOpen])
+
+  useEffect(() => {
+    let activeScroller = null
+    let startX = 0
+    let startScrollLeft = 0
+
+    const findScroller = target => target?.closest?.('.table-container')
+
+    const onWheel = event => {
+      const scroller = findScroller(event.target)
+      if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
+
+      const horizontalIntent = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      if (!event.shiftKey && !horizontalIntent) return
+
+      scroller.scrollLeft += horizontalIntent ? event.deltaX : event.deltaY
+      event.preventDefault()
+    }
+
+    const onPointerDown = event => {
+      const scroller = findScroller(event.target)
+      if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
+      if (event.button !== undefined && event.button !== 0) return
+      if (event.target.closest('button, a, input, select, textarea, [role="button"]')) return
+
+      activeScroller = scroller
+      startX = event.clientX
+      startScrollLeft = scroller.scrollLeft
+      scroller.dataset.dragging = 'true'
+    }
+
+    const onPointerMove = event => {
+      if (!activeScroller) return
+      const distance = event.clientX - startX
+      if (Math.abs(distance) < 4) return
+      activeScroller.scrollLeft = startScrollLeft - distance
+      event.preventDefault()
+    }
+
+    const stopDrag = () => {
+      if (activeScroller) delete activeScroller.dataset.dragging
+      activeScroller = null
+    }
+
+    document.addEventListener('wheel', onWheel, { passive: false })
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('pointermove', onPointerMove)
+    document.addEventListener('pointerup', stopDrag)
+    document.addEventListener('pointercancel', stopDrag)
+
+    return () => {
+      document.removeEventListener('wheel', onWheel)
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('pointermove', onPointerMove)
+      document.removeEventListener('pointerup', stopDrag)
+      document.removeEventListener('pointercancel', stopDrag)
+    }
+  }, [])
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100 text-slate-950 dark:bg-[#0a0f1e] dark:text-slate-100">
@@ -17,7 +85,16 @@ export default function Layout({ children }) {
         <div className="fixed inset-0 z-40 flex lg:hidden">
           {/* UI-only verification: this keeps the original backdrop close action mapped to setSidebarOpen(false). */}
           <div className="fixed inset-0 bg-gray-950/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
-          <div className="relative z-50 flex w-72 flex-col shadow-2xl">
+          <div
+            className="mobile-drawer open relative z-50 flex w-72 flex-col shadow-2xl"
+            onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX) }}
+            onTouchEnd={event => {
+              const start = Number(event.currentTarget.dataset.touchX || 0)
+              if (start - event.changedTouches[0].clientX > 70) setSidebarOpen(false)
+            }}
+            role="navigation"
+            aria-label="Main menu"
+          >
             <Sidebar mobile onClose={() => setSidebarOpen(false)} />
           </div>
         </div>
@@ -25,11 +102,11 @@ export default function Layout({ children }) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="sticky top-0 z-[100] flex h-16 flex-shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 shadow-sm backdrop-blur-2xl lg:hidden dark:border-slate-400/10 dark:bg-slate-950/80 dark:shadow-[0_1px_0_rgba(255,255,255,0.04),0_4px_16px_rgba(0,0,0,0.2)]">
+        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/90 px-2 shadow-sm backdrop-blur-2xl lg:hidden dark:border-slate-400/10 dark:bg-slate-950/80 dark:shadow-[0_1px_0_rgba(255,255,255,0.04),0_4px_16px_rgba(0,0,0,0.2)]">
           {/* UI-only verification: the menu button still opens the existing mobile sidebar state. */}
           <button
             onClick={() => setSidebarOpen(true)}
-            className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-400/10 dark:bg-slate-800/70 dark:text-slate-300 dark:hover:border-blue-500/30 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"
+            className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"
             aria-label="Open navigation"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

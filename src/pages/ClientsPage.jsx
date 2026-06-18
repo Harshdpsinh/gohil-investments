@@ -213,10 +213,10 @@ function DocumentManager({ clientId }) {
     <div className="space-y-3 mt-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">📎 Documents</p>
-        <button onClick={() => fileRef.current?.click()} disabled={uploading} className="btn-secondary text-xs">
+        <label className={`btn-secondary relative overflow-hidden text-xs ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" onChange={onFile} disabled={uploading} />
           {uploading ? `⏳ ${progress}%` : '+ Upload PDF/Image'}
-        </button>
-        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={onFile} />
+        </label>
       </div>
       {/* Side-scrollable document list */}
       <div className="overflow-x-auto">
@@ -880,8 +880,42 @@ export default function ClientsPage() {
         </div>
       )}
 
+      <div className="space-y-3 md:hidden">
+        {pagedClients.length === 0 ? (
+          <div className="gi-empty-state">No clients found</div>
+        ) : pagedClients.map(c => (
+          <article key={c.id} className="gi-client-card">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleOne(c.id)} className="mt-1 h-5 w-5" />
+                <div className="min-w-0">
+                  <button type="button" onClick={() => { setSelected(c); setModal('view') }} className="truncate text-left text-base font-bold text-slate-950 dark:text-white">
+                    {c.name}
+                  </button>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{c.mobile || 'Mobile not added'}</p>
+                  <p className="truncate text-xs text-slate-400">{c.email || 'Email not added'}</p>
+                </div>
+              </div>
+              <span className={kycBadge(c.kycStatus)}>{c.kycStatus || 'Pending'}</span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600 dark:text-slate-300">
+              <span className="gi-info-chip">{c._policyCount} policies</span>
+              {c.familyName && <span className="gi-info-chip">{c.familyName}</span>}
+              {c._bday !== null && <span className="gi-info-chip">Birthday {c._bday === 0 ? 'today' : `in ${c._bday}d`}</span>}
+            </div>
+            {c._gaps.length > 0 && <div className="mt-3 flex flex-wrap gap-1">{c._gaps.map(g => <span key={g.id} className={`rounded-full px-2 py-1 text-xs font-semibold ${g.color}`}>{g.label}</span>)}</div>}
+            <div className="gi-policy-card-actions">
+              <button type="button" onClick={() => { setSelected(c); setModal('view') }} className="btn-secondary">Details</button>
+              <button type="button" onClick={() => { setSelected(c); setModal('edit') }} className="btn-secondary">Edit</button>
+              {c._bday !== null && c._bday <= 7 && <button type="button" onClick={() => openGreeting(c)} className="btn-whatsapp">Greeting</button>}
+              {isAdmin && <button type="button" onClick={() => { setSelected(c); setDelOpen(true) }} className="btn-danger">Delete</button>}
+            </div>
+          </article>
+        ))}
+      </div>
+
       {/* Side-scrollable table */}
-      <div className="table-container">
+      <div className="table-container hidden md:block">
         <table className="min-w-full" style={{ minWidth: '900px' }}>
           <thead>
             <tr>
@@ -958,6 +992,10 @@ export default function ClientsPage() {
           </tbody>
         </table>
       </div>
+
+      <button type="button" className="gi-fab md:hidden" onClick={() => { setSelected(null); setModal('add') }} aria-label="Add client">
+        <span aria-hidden="true">+</span>
+      </button>
 
       {/* Modals */}
       <Modal open={modal==='add'}  onClose={() => setModal(null)} title="Add New Client" size="lg">

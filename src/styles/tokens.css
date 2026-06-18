@@ -1,5 +1,21 @@
 /* UI MODERNIZATION - presentation tokens only, no app behavior changed. */
 :root {
+  --gi-primary: #2563eb;
+  --gi-primary-dark: #1d4ed8;
+  --gi-accent: #06b6d4;
+  --gi-success: #10b981;
+  --gi-warning: #f59e0b;
+  --gi-danger: #ef4444;
+  --gi-bg: #f5f7fb;
+  --gi-surface: #ffffff;
+  --gi-surface-2: #f1f5f9;
+  --gi-border: rgba(15, 23, 42, 0.1);
+  --gi-text: #0f172a;
+  --gi-text-muted: #64748b;
+  --gi-radius: 12px;
+  --gi-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --gi-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --gi-transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   --color-primary: #2563eb;
   --color-primary-dark: #1e40af;
   --color-primary-light: #3b82f6;
@@ -34,6 +50,12 @@
 }
 
 .dark {
+  --gi-bg: #0a0f1e;
+  --gi-surface: #0f172a;
+  --gi-surface-2: #1e293b;
+  --gi-border: rgba(148, 163, 184, 0.16);
+  --gi-text: #f8fafc;
+  --gi-text-muted: #cbd5e1;
   --surface-0: #0a0f1e;
   --surface-1: #0f172a;
   --surface-2-token: #1e293b;

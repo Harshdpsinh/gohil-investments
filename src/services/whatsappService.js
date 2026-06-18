@@ -1,4 +1,22 @@
+import { Capacitor, registerPlugin } from '@capacitor/core'
+
 const DEFAULT_COUNTRY_CODE = '91'
+const NativeLauncher = registerPlugin('AppLauncher')
+const NativeBrowser = registerPlugin('Browser')
+
+async function launchWhatsAppNative(phone, message, fallbackUrl) {
+  const nativeUrl = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message || '')}`
+  try {
+    const result = await NativeLauncher.canOpenUrl({ url: nativeUrl })
+    if (result?.value) {
+      await NativeLauncher.openUrl({ url: nativeUrl })
+      return
+    }
+    await NativeBrowser.open({ url: fallbackUrl })
+  } catch {
+    window.location.href = fallbackUrl
+  }
+}
 
 export function normaliseWhatsAppNumber(value, countryCode = DEFAULT_COUNTRY_CODE) {
   const digits = String(value || '').replace(/\D/g, '')
@@ -32,12 +50,22 @@ export function buildWhatsAppApiLink({ mobile, message, countryCode = DEFAULT_CO
 
 export function openWhatsAppLink({ mobile, message, countryCode = DEFAULT_COUNTRY_CODE }) {
   const url = buildWhatsAppLink({ mobile, message, countryCode })
+  if (Capacitor.isNativePlatform()) {
+    const phone = normaliseWhatsAppNumber(mobile, countryCode)
+    launchWhatsAppNative(phone, message, url)
+    return url
+  }
   window.open(url, '_blank', 'noopener,noreferrer')
   return url
 }
 
 export function openWhatsAppApiLink({ mobile, message, countryCode = DEFAULT_COUNTRY_CODE }) {
   const url = buildWhatsAppApiLink({ mobile, message, countryCode })
+  if (Capacitor.isNativePlatform()) {
+    const phone = normaliseWhatsAppNumber(mobile, countryCode)
+    launchWhatsAppNative(phone, message, url)
+    return url
+  }
   window.open(url, '_blank', 'noopener,noreferrer')
   return url
 }

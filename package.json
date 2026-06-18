@@ -7,13 +7,19 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "android:add": "npx cap add android",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
     "chart.js": "^4.4.0",
     "date-fns": "^2.30.0",
     "file-saver": "^2.0.5",
-    "firebase": "^10.7.0",
+    "firebase": "^12.15.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "react": "^18.2.0",
@@ -24,6 +30,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^6.0.1",

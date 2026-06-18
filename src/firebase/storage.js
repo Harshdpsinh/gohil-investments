@@ -4,6 +4,7 @@
 import { addDocMeta, addDocumentRecord, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app, { firebaseConfig } from './config'
+import { downloadNativeDocument, isNativeAndroid, openNativeDocument } from '../services/nativeDocumentService'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
 const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
@@ -271,6 +272,11 @@ export async function openDocumentPreview(urlOrPath, fileName = 'document.pdf') 
       throw new Error('Invalid document URL. The file may have been deleted or the link has expired.')
     }
 
+    if (isNativeAndroid()) {
+      await openNativeDocument(finalUrl)
+      return
+    }
+
     const isPdf = /\.pdf(\?|#|$)/i.test(finalUrl) || /\.pdf$/i.test(String(fileName || ''))
     if (isPdf) {
       try {
@@ -308,6 +314,10 @@ export async function downloadDocumentFile(urlOrPath, fileName = 'document.pdf')
     const finalUrl = await resolveDocumentUrl(urlOrPath)
     if (!finalUrl || !finalUrl.startsWith('http')) {
       throw new Error('Invalid document URL. The file may have been deleted.')
+    }
+    if (isNativeAndroid()) {
+      await downloadNativeDocument(getDownloadUrl(finalUrl, safeFileName))
+      return
     }
     const blob = await fetchDocumentBlob(finalUrl)
     const blobUrl = URL.createObjectURL(blob)

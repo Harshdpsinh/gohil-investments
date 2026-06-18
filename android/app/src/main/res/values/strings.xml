@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Gohil Investments CRM</string>
+    <string name="title_activity_main">Gohil Investments CRM</string>
+    <string name="package_name">com.gohilinvestments.crm</string>
+    <string name="custom_url_scheme">com.gohilinvestments.crm</string>
+</resources>

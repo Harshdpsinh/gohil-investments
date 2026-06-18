@@ -1,0 +1,23 @@
+{
+  "appId": "com.gohilinvestments.crm",
+  "appName": "Gohil Investments CRM",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://gohil-investments.vercel.app",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#0f172a",
+      "showSpinner": false
+    },
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true,
+      "scrollAssist": true
+    }
+  }
+}

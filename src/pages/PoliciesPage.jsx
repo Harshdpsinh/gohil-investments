@@ -283,22 +283,17 @@ function PolicyPdfUpload({
   if (compact) {
     return (
       <div className="flex items-center justify-center gap-1 min-w-[190px]">
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/pdf,.pdf"
-          onChange={onFileChange}
-          disabled={uploading}
-          className="hidden"
-        />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading}
-          className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100 disabled:opacity-60"
-        >
+        <label className={`relative overflow-hidden px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded hover:bg-indigo-100 ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={onFileChange}
+            disabled={uploading}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
+          />
           {uploading ? `Uploading ${progress || 0}%` : existingUrl ? 'Replace PDF' : 'Upload PDF'}
-        </button>
+        </label>
         {existingUrl && (
           <>
             <button type="button" onClick={async () => {
@@ -333,8 +328,10 @@ function PolicyPdfUpload({
           <span className="text-xs text-green-600 font-semibold">Stored</span>
         </div>
       )}
-      <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFileChange} disabled={uploading}
-             className="text-xs cursor-pointer file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-indigo-100 file:text-indigo-700" />
+      <label className={`btn-secondary relative w-full overflow-hidden text-center sm:w-auto ${uploading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFileChange} disabled={uploading} className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
+        {uploading ? `Uploading ${progress || 0}%` : existingUrl ? 'Replace PDF' : 'Choose PDF'}
+      </label>
       {uploading && (
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-indigo-600"><span>Uploading...</span><span>{progress}%</span></div>
@@ -2317,19 +2314,67 @@ export default function PoliciesPage() {
           </div>
         </div>
       )}
+      <div className="space-y-3 md:hidden">
+        {pagedPolicies.length === 0 ? (
+          <div className="gi-empty-state">No policies found</div>
+        ) : pagedPolicies.map(p => {
+          const isRenewedOut = (p.status || '').trim() === 'Renewed-Out'
+          const isDup = duplicatePolicyIds.has(p.id)
+          const dueDate = getPolicyDueDate(p)
+          const linkedClient = getPolicyClient(p)
+          const phone = p.clientMobile || linkedClient?.mobile || ''
+          const st = isRenewedOut ? { label: 'Renewed', color: 'blue' } : renewalStatus(dueDate)
+          const bm = { green:'badge-green', yellow:'badge-yellow', red:'badge-red', blue:'badge-blue', gray:'badge-gray' }
+          return (
+            <article key={p.id} className="gi-policy-card" style={renewalAlertStyle(p)}>
+              <div className="gi-policy-card-header">
+                <div className="flex min-w-0 items-center gap-2">
+                  <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleOne(p.id)} className="h-5 w-5" />
+                  <span className="badge-blue">{p.policyType}</span>
+                </div>
+                <span className={bm[st.color] || 'badge-gray'}>{st.label}</span>
+              </div>
+              <button type="button" onClick={() => { setSelected(p); setDupWarning(''); setModal('edit') }} className="gi-policy-card-name text-left">
+                {p.clientName || 'Unnamed client'}
+              </button>
+              <p className="gi-policy-card-number">{p.policyNumber || 'No policy number'}</p>
+              <div className="gi-policy-card-meta">
+                <span>{p.insurer || 'No insurer'}</span>
+                <strong>{fmtCurrency(p.premium)}</strong>
+                <span>Due {fmtDate(dueDate)}</span>
+                {phone && <span>{phone}</span>}
+              </div>
+              {isDup && <span className="badge-orange">Possible duplicate</span>}
+              <div className="gi-policy-card-actions">
+                <button type="button" onClick={() => { setSelected(p); setDupWarning(''); setModal('edit') }} className="btn-secondary">Edit</button>
+                <button type="button" onClick={() => openWhatsApp(p)} className="btn-whatsapp">WhatsApp</button>
+                <PolicyPdfUpload
+                  compact policyId={p.id} policyType={p.policyType} documentYear={policyDocumentYear(p)}
+                  existingUrl={p.policyPdfUrl} existingName={p.policyPdfName}
+                  existingStoragePath={p.policyPdfStoragePath} existingStorageBucket={p.policyPdfStorageBucket}
+                  existingStorageProvider={p.policyPdfStorageProvider} existingPublicId={p.policyPdfPublicId}
+                  existingResourceType={p.policyPdfResourceType} existingDeleteToken={p.policyPdfDeleteToken}
+                />
+                {isAdmin && <button type="button" onClick={() => { setSelected(p); setDelOpen(true) }} className="btn-danger">Delete</button>}
+              </div>
+            </article>
+          )
+        })}
+      </div>
+
       {/* Top scrollbar — mirrors the table's horizontal scroll so user
           doesn't have to scroll all the way to the bottom to see right columns */}
       <div
         ref={topScrollRef}
         style={{ overflowX: 'auto', overflowY: 'hidden', height: 14 }}
         onScroll={e => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
-        className="rounded"
+        className="hidden rounded md:block"
       >
         <div style={{ height: 1, minWidth: 2200 }} />
       </div>
       <div
         ref={tableScrollRef}
-        className="table-container"
+        className="table-container hidden md:block"
         onScroll={e => { if (topScrollRef.current) topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
       >
         <table className="min-w-full" style={{ minWidth: 2200 }}>
@@ -2435,6 +2480,9 @@ export default function PoliciesPage() {
           </tbody>
         </table>
       </div>
+      <button type="button" className="gi-fab md:hidden" onClick={() => { resetDeleteState(); setDupWarning(''); setProposalPrefill(null); setModal('add') }} aria-label="Add policy">
+        <span aria-hidden="true">+</span>
+      </button>
       <Modal open={modal==='add'} onClose={()=>{setModal(null);setProposalPrefill(null)}} title="Add New Policy" size="xl">
         {proposals.length > 0 && (
           <div className="mb-4 p-3 rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30">
