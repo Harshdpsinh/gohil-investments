@@ -1,11 +1,11 @@
 // src/pages/CommissionPage.jsx
 // ✅ FIXED: CM1 (debounce on CommCell save), CM2 (safe date parse in filter),
 //           CM3 (NaN% guard in type breakdown bars)
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
 import { useAuth }       from '../hooks/useAuth'
-import { updatePolicy } from '../firebase/firestore'
+import { updatePolicy, getCommissionTransactionsPage } from '../firebase/firestore'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
@@ -110,17 +110,31 @@ export default function CommissionPage() {
   const { clients }           = useClients()
   const { isAdmin }           = useAuth()
 
-  if (!isAdmin) return (
-    <div className="p-8 text-center">
-      <p className="text-2xl mb-2">🔒</p>
-      <p className="text-gray-600 dark:text-gray-400 font-medium">Access restricted to administrators only.</p>
-    </div>
-  )
-
   const [search,      setSearch]      = useState('')
   const [typeFilter,  setTypeFilter]  = useState('All')
   const [yearFilter,  setYearFilter]  = useState('All')
   const [monthFilter, setMonthFilter] = useState('All')
+  const [transactions, setTransactions] = useState([])
+  const [transactionCursor, setTransactionCursor] = useState(null)
+  const [hasMoreTransactions, setHasMoreTransactions] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+
+  useEffect(() => {
+    if (!isAdmin) return
+    getCommissionTransactionsPage({ pageSize: 100 }).then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore) }).catch(err => toast.error(err.message || 'Could not load posted commission.'))
+  }, [isAdmin])
+
+  const loadMoreTransactions = async () => {
+    if (!hasMoreTransactions || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await getCommissionTransactionsPage({ pageSize: 100, cursor: transactionCursor })
+      setTransactions(current => [...current, ...page.rows])
+      setTransactionCursor(page.cursor)
+      setHasMoreTransactions(page.hasMore)
+    } catch (err) { toast.error(err.message || 'Could not load more commission history.') }
+    finally { setLoadingMore(false) }
+  }
 
   const enriched = useMemo(() =>
     policies.map(p => ({
@@ -176,9 +190,20 @@ export default function CommissionPage() {
   }, [filtered])
 
   const maxBar = Math.max(...stats.byMonth, 1)
+  const actualStats = useMemo(() => {
+    const total = transactions.reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0)
+    const byInsurer = transactions.reduce((map, item) => ({ ...map, [item.insurer || 'Other']: (map[item.insurer || 'Other'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
+    const byClient = transactions.reduce((map, item) => ({ ...map, [item.clientName || 'Unknown']: (map[item.clientName || 'Unknown'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
+    const byCategory = transactions.reduce((map, item) => { const category = policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'; return { ...map, [category]: (map[category] || 0) + Number(item.netReceived || item.receivedCommission || 0) } }, {})
+    return { total, byInsurer, byClient, byCategory }
+  }, [transactions, policies])
 
   const TYPES = ['Health','Life','Motor','Home','Travel','Other']
   const TYPE_COLORS = { Health:'bg-blue-500', Life:'bg-purple-500', Motor:'bg-orange-500', Home:'bg-green-500', Travel:'bg-teal-500', Other:'bg-gray-400' }
+
+  if (!isAdmin) return (
+    <div className="p-8 text-center"><p className="text-gray-600 dark:text-gray-400 font-medium">Access restricted to administrators only.</p></div>
+  )
 
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
@@ -217,6 +242,14 @@ export default function CommissionPage() {
           </div>
         ))}
       </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+        <div className="card"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">Actual posted commission</p><p className="mt-2 text-3xl font-black text-emerald-600">{fmtCurrency(actualStats.total)}</p><p className="mt-1 text-xs text-gray-500">From reconciled and manual ledger entries</p></div>
+        <div className="card"><p className="mb-3 text-sm font-bold">Company-wise actual</p>{Object.entries(actualStats.byInsurer).sort((a,b) => b[1]-a[1]).slice(0,5).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span className="truncate">{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
+        <div className="card"><p className="mb-3 text-sm font-bold">Client-wise actual</p>{Object.entries(actualStats.byClient).sort((a,b) => b[1]-a[1]).slice(0,5).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span className="truncate">{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
+        <div className="card"><p className="mb-3 text-sm font-bold">Category-wise actual</p>{Object.entries(actualStats.byCategory).sort((a,b) => b[1]-a[1]).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span>{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
+      </div>
+      {hasMoreTransactions && <div className="text-center"><button className="btn-secondary" disabled={loadingMore} onClick={loadMoreTransactions}>{loadingMore ? 'Loading...' : 'Load 100 more commission records'}</button></div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">

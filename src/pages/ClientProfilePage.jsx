@@ -4,7 +4,7 @@
 //           CP3 (graceful handling of doc fetch errors)
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getClient, getAllClaims, getAllTasks } from '../firebase/firestore'
+import { getClient, getAllClaims, getAllTasks, getCommissionTransactionsForClient } from '../firebase/firestore'
 import { usePolicies } from '../hooks/usePolicies'
 import { useClients } from '../hooks/useClients'
 import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
@@ -63,6 +63,7 @@ export default function ClientProfilePage() {
   const [claims,  setClaims]  = useState([])
   const [tasks,   setTasks]   = useState([])
   const [docs,    setDocs]    = useState([])
+  const [commission, setCommission] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -78,6 +79,8 @@ export default function ClientProfilePage() {
         setClient(c)
         setClaims(allClaims.filter(cl => cl.clientId === id))
         setTasks(allTasks.filter(t => t.clientId === id))
+        try { setCommission(await getCommissionTransactionsForClient(id, c?.name || '')) }
+        catch (commissionErr) { console.warn('Could not load commission history:', commissionErr.message); setCommission([]) }
 
         // Load docs separately — failure doesn't crash the profile
         try {
@@ -124,6 +127,7 @@ export default function ClientProfilePage() {
   const gaps           = computeCoverageGaps(activePolicies)
   const totalPremium   = activePolicies.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
   const totalCoverage  = activePolicies.reduce((s, p) => s + (parseFloat(p.sumInsured || p.sumAssured || p.idv) || 0), 0)
+  const totalCommission = commission.reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0)
 
   const openWhatsApp = () => {
     const mobile = (client?.mobile || '').replace(/\D/g, '')
@@ -195,12 +199,13 @@ export default function ClientProfilePage() {
       </div>
 
       {/* Quick stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
           { icon: '📋', label: 'Active Policies', val: activePolicies.length, color: 'blue'   },
           { icon: '💰', label: 'Total Premium',   val: fmtCurrency(totalPremium), color: 'green'  },
           { icon: '🛡️', label: 'Total Coverage',  val: fmtCurrency(totalCoverage), color: 'purple' },
           { icon: '🔍', label: 'Claims',           val: claims.length,          color: 'orange' },
+          { icon: 'CO', label: 'Commission Earned', val: fmtCurrency(totalCommission), color: 'green' },
         ].map(({ icon, label, val, color }) => (
           <div key={label} className="stat-card">
             <span className="text-2xl">{icon}</span>
@@ -223,6 +228,19 @@ export default function ClientProfilePage() {
           </div>
         </div>
       )}
+
+      <Section title="Commission History" icon="CO" badge={commission.length}>
+        {commission.length === 0 ? <p className="text-sm text-gray-400">No posted commission for this client yet.</p> : (
+          <div className="space-y-2">
+            {commission.map(item => (
+              <div key={item.id} className="flex flex-col gap-2 rounded-lg border border-gray-100 p-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
+                <div><p className="text-sm font-bold">{item.policyNumber || 'Policy'} · {item.insurer || 'Insurer'}</p><p className="text-xs text-gray-500">{item.payoutMonth || fmtDate(item.payoutDate)} · {item.matchingMethod || item.sourceType || 'legacy entry'}</p></div>
+                <div className="flex items-center gap-3"><span className="font-bold text-emerald-600">{fmtCurrency(item.netReceived || item.receivedCommission)}</span>{item.sourceFileUrl && <a href={item.sourceFileUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-600">Source</a>}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Personal details */}

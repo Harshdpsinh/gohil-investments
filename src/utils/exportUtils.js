@@ -5,6 +5,7 @@ import jsPDF          from 'jspdf'
 import autoTable      from 'jspdf-autotable'
 import { fmtDate, getDueDate as getPolicyDueDate, normaliseFrequency } from './dateUtils'
 import { format }     from 'date-fns'
+import { shareGeneratedFile } from '../services/nativeShareService'
 
 const ts = () => format(new Date(), 'dd-MM-yyyy')
 
@@ -39,7 +40,8 @@ export function exportToCSV(rows, columns, filename) {
     }).join(',')
   ).join('\n')
   const blob = new Blob([`${header}\n${body}`], { type: 'text/csv;charset=utf-8;' })
-  saveAs(blob, `${filename}_${ts()}.csv`)
+  const outputName = `${filename}_${ts()}.csv`
+  shareGeneratedFile(blob, outputName, filename).then(shared => { if (!shared) saveAs(blob, outputName) })
 }
 
 // ── Excel export (with logo header rows) ─────────────────────
@@ -85,7 +87,9 @@ export function exportToExcel(rows, columns, sheetName, filename) {
 
   XLSX.utils.book_append_sheet(wb, ws, sheetName)
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), `${filename}_${ts()}.xlsx`)
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const outputName = `${filename}_${ts()}.xlsx`
+  shareGeneratedFile(blob, outputName, sheetName).then(shared => { if (!shared) saveAs(blob, outputName) })
 }
 
 // ── PDF header helper (async — loads logo from /public/g1.jpg) ─
@@ -129,7 +133,9 @@ export async function exportToPDF(rows, columns, title, filename) {
       if (data.pageNumber > 1) await addPdfHeader(doc, title)
     }
   })
-  doc.save(`${filename}_${ts()}.pdf`)
+  const blob = doc.output('blob')
+  const outputName = `${filename}_${ts()}.pdf`
+  if (!await shareGeneratedFile(blob, outputName, title)) doc.save(outputName)
 }
 
 // ── Download blank import template ────────────────────────────

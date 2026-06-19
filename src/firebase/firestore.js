@@ -2,7 +2,7 @@
 import {
   collection, doc, addDoc, getDoc, getDocs, updateDoc,
   deleteDoc, query, where, orderBy, serverTimestamp,
-  onSnapshot, writeBatch, setDoc, limit, runTransaction, Timestamp
+  onSnapshot, writeBatch, setDoc, limit, runTransaction, Timestamp, startAfter
 } from 'firebase/firestore'
 import { db } from './config'
 import { addFrequencyInterval, computeNextPolicyDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
@@ -402,7 +402,7 @@ export async function getAllCommissionMaster() {
 
 export async function addCommissionTransaction(data = {}) {
   if (!data.policyId && !data.policyNumber) throw new Error('Commission transaction must be linked to a policy.')
-  return addFoundationDoc(COMMISSION_TRANSACTIONS, {
+  const payload = normaliseFoundationPayload({
     policyId: data.policyId || '',
     policyNumber: data.policyNumber || '',
     clientId: data.clientId || '',
@@ -421,12 +421,112 @@ export async function addCommissionTransaction(data = {}) {
     referenceNumber: data.referenceNumber || '',
     status: data.status || 'pending',
     reconciliationBatchId: data.reconciliationBatchId || '',
+    reconciliationRowId: data.reconciliationRowId || '',
+    postingKey: data.postingKey || '',
+    grossCommission: Number(data.grossCommission ?? data.receivedCommission ?? 0),
+    commissionRate: Number(data.commissionRate || 0),
+    deduction: Number(data.deduction || 0),
+    matchingMethod: data.matchingMethod || '',
+    sourceType: data.sourceType || 'import',
+    sourceFileName: data.sourceFileName || '',
+    sourceFileUrl: data.sourceFileUrl || '',
+    sourceFileHash: data.sourceFileHash || '',
+    sourceRowHash: data.sourceRowHash || '',
+    createdBy: data.createdBy || '',
+    createdByEmail: data.createdByEmail || '',
     remarks: data.remarks || '',
   })
+  if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
+
+  const transactionRef = doc(db, COMMISSION_TRANSACTIONS, payload.postingKey)
+  await runTransaction(db, async transaction => {
+    const existing = await transaction.get(transactionRef)
+    if (existing.exists()) {
+      const error = new Error('This commission row has already been posted.')
+      error.code = 'commission/duplicate-post'
+      throw error
+    }
+    transaction.set(transactionRef, {
+      ...payload,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      postedAt: serverTimestamp(),
+    })
+  })
+  return transactionRef
 }
 
 export async function getAllCommissionTransactions() {
   return listFoundationDocs(COMMISSION_TRANSACTIONS)
+}
+
+export async function getCommissionTransactionsPage({ pageSize = 100, cursor = null } = {}) {
+  const safeSize = Math.min(250, Math.max(10, Number(pageSize) || 100))
+  const constraints = [orderBy('createdAt', 'desc')]
+  if (cursor) constraints.push(startAfter(cursor))
+  constraints.push(limit(safeSize + 1))
+  const snapshot = await getDocs(query(foundationRef(COMMISSION_TRANSACTIONS), ...constraints))
+  const hasMore = snapshot.docs.length > safeSize
+  const visibleDocs = snapshot.docs.slice(0, safeSize)
+  return {
+    rows: visibleDocs.map(item => ({ id: item.id, ...item.data() })),
+    cursor: visibleDocs.at(-1) || null,
+    hasMore,
+  }
+}
+
+export async function postCommissionReconciliation({ transactionData = {}, rowId, policyId, policySummary = {} }) {
+  if (!rowId || !policyId || !transactionData.postingKey) {
+    throw new Error('Commission posting requires row, policy, and posting keys.')
+  }
+  const transactionRef = doc(db, COMMISSION_TRANSACTIONS, transactionData.postingKey)
+  const rowRef = doc(db, COMMISSION_RECONCILIATION_ROWS, rowId)
+  const policyRef = doc(db, POLICIES, policyId)
+  const payload = normaliseFoundationPayload(transactionData)
+
+  await runTransaction(db, async transaction => {
+    const [existingTransaction, rowSnapshot, policySnapshot] = await Promise.all([
+      transaction.get(transactionRef),
+      transaction.get(rowRef),
+      transaction.get(policyRef),
+    ])
+    if (existingTransaction.exists() || rowSnapshot.data()?.status === 'posted') {
+      const error = new Error('This commission row has already been posted.')
+      error.code = 'commission/duplicate-post'
+      throw error
+    }
+    if (!policySnapshot.exists()) throw new Error('The matched policy no longer exists.')
+
+    transaction.set(transactionRef, {
+      ...payload,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      postedAt: serverTimestamp(),
+    })
+    transaction.set(rowRef, {
+      status: 'posted',
+      transactionId: transactionRef.id,
+      postingKey: transactionData.postingKey,
+      confirmedAt: serverTimestamp(),
+      confirmedBy: transactionData.createdBy || '',
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    transaction.set(policyRef, {
+      ...normaliseFoundationPayload(policySummary),
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+  })
+  return transactionRef
+}
+
+export async function getCommissionTransactionsForClient(clientId, clientName = '') {
+  if (clientId) {
+    const byId = await getDocs(query(foundationRef(COMMISSION_TRANSACTIONS), where('clientId', '==', clientId)))
+    if (!byId.empty) return sortByCreatedAt(byId.docs.map(item => ({ id: item.id, ...item.data() })))
+  }
+  if (!clientName) return []
+  const byName = await getDocs(query(foundationRef(COMMISSION_TRANSACTIONS), where('clientName', '==', clientName)))
+  return sortByCreatedAt(byName.docs.map(item => ({ id: item.id, ...item.data() })))
 }
 
 export async function addCommissionImportTemplate(data = {}) {
@@ -450,6 +550,11 @@ export async function createCommissionReconciliationBatch(data = {}) {
     payoutDate: data.payoutDate || '',
     originalFileUrl: data.originalFileUrl || '',
     originalFileName: data.originalFileName || '',
+    fileHash: data.fileHash || '',
+    fileType: data.fileType || '',
+    uploadedBy: data.uploadedBy || '',
+    uploadedByEmail: data.uploadedByEmail || '',
+    mappingProfileId: data.mappingProfileId || '',
     extractedText: data.extractedText || '',
     status: data.status || 'draft',
     summary: data.summary || {},
@@ -466,6 +571,16 @@ export async function getAllCommissionReconciliationBatches() {
   return listFoundationDocs(COMMISSION_RECONCILIATION_BATCHES)
 }
 
+export async function findCommissionBatchByFileHash(fileHash) {
+  if (!fileHash) return null
+  const snapshot = await getDocs(query(
+    foundationRef(COMMISSION_RECONCILIATION_BATCHES),
+    where('fileHash', '==', fileHash),
+    limit(1),
+  ))
+  return snapshot.empty ? null : { id: snapshot.docs[0].id, ...snapshot.docs[0].data() }
+}
+
 export async function addCommissionReconciliationRow(data = {}) {
   if (!data.batchId) throw new Error('Reconciliation batch is required.')
   return addFoundationDoc(COMMISSION_RECONCILIATION_ROWS, {
@@ -473,17 +588,61 @@ export async function addCommissionReconciliationRow(data = {}) {
     uploadedClientName: data.uploadedClientName || '',
     uploadedPolicyNumber: data.uploadedPolicyNumber || '',
     uploadedProposalNumber: data.uploadedProposalNumber || '',
+    uploadedPlanName: data.uploadedPlanName || '',
+    uploadedInsurer: data.uploadedInsurer || '',
+    uploadedCategory: data.uploadedCategory || '',
+    uploadedMobile: data.uploadedMobile || '',
+    uploadedEmail: data.uploadedEmail || '',
+    uploadedPan: data.uploadedPan || '',
     uploadedPremium: Number(data.uploadedPremium || 0),
     uploadedCommission: Number(data.uploadedCommission || 0),
+    grossCommission: Number(data.grossCommission || 0),
+    commissionRate: Number(data.commissionRate || 0),
+    rewardCommission: Number(data.rewardCommission || 0),
     tds: Number(data.tds || 0),
     gst: Number(data.gst || 0),
+    deduction: Number(data.deduction || 0),
     netPaid: Number(data.netPaid || 0),
+    commissionDate: data.commissionDate || '',
+    policyDate: data.policyDate || '',
+    statementMonth: data.statementMonth || '',
+    agentCode: data.agentCode || '',
+    remarks: data.remarks || '',
+    sourceSheet: data.sourceSheet || '',
+    sourceRowNumber: Number(data.sourceRowNumber || 0),
+    sourceData: data.sourceData || {},
+    rowHash: data.rowHash || '',
     matchedPolicyId: data.matchedPolicyId || '',
     matchedPolicyNumber: data.matchedPolicyNumber || '',
     matchConfidence: data.matchConfidence || 'unmatched',
+    matchScore: Number(data.matchScore || 0),
+    matchReason: data.matchReason || '',
+    matchConflicts: data.matchConflicts || [],
+    candidatePolicyIds: data.candidatePolicyIds || [],
+    calculationNeedsReview: Boolean(data.calculationNeedsReview),
+    transactionId: data.transactionId || '',
+    postingKey: data.postingKey || '',
     status: data.status || 'review',
     note: data.note || '',
   })
+}
+
+export async function addCommissionReconciliationRows(rows = [], onProgress = () => {}) {
+  const safeRows = rows.filter(row => row?.batchId)
+  let completed = 0
+  for (let start = 0; start < safeRows.length; start += 400) {
+    const chunk = safeRows.slice(start, start + 400)
+    const batch = writeBatch(db)
+    chunk.forEach(row => {
+      const rowRef = doc(foundationRef(COMMISSION_RECONCILIATION_ROWS))
+      const payload = normaliseFoundationPayload(row)
+      batch.set(rowRef, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
+    })
+    await batch.commit()
+    completed += chunk.length
+    onProgress(completed, safeRows.length)
+  }
+  return completed
 }
 
 export async function updateCommissionReconciliationRow(id, data = {}) {

@@ -1,32 +1,39 @@
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { usePolicies } from '../hooks/usePolicies'
-import { parseImportFile } from '../utils/exportUtils'
+import { useClients } from '../hooks/useClients'
 import { fmtCurrency, fmtDate } from '../utils/dateUtils'
 import { KNOWN_INSURERS } from '../utils/constants'
 import { uploadSharedDocument } from '../firebase/storage'
 import { useAuth } from '../hooks/useAuth'
 import {
   addClient,
-  addCommissionReconciliationRow,
+  addCommissionReconciliationRows,
+  addCommissionImportTemplate,
   addCommissionTransaction,
   addPolicy,
   createCommissionReconciliationBatch,
+  findCommissionBatchByFileHash,
   findClientByMobileOrName,
   getAllCommissionReconciliationBatches,
+  getAllCommissionTransactions,
+  getAllCommissionImportTemplates,
   getCommissionReconciliationRows,
+  postCommissionReconciliation,
   updateCommissionReconciliationBatch,
   updateCommissionReconciliationRow,
-  updatePolicy,
 } from '../firebase/firestore'
+import {
+  bestCommissionMatches,
+  calculateCommission,
+  hashCommissionFile,
+  hashCommissionRow,
+  parseCommissionFile,
+  validateCommissionRow,
+} from '../utils/commissionUtils'
 
 function clean(value) {
   return String(value || '').trim()
-}
-
-function numberValue(value) {
-  const n = Number(clean(value).replace(/[₹,\s]/g, ''))
-  return Number.isFinite(n) ? n : 0
 }
 
 function friendlyFirebaseError(err, fallback) {
@@ -34,85 +41,6 @@ function friendlyFirebaseError(err, fallback) {
     return 'Permission blocked by Firebase rules. Publish the latest Firestore and Storage rules, then try again.'
   }
   return err?.message || fallback
-}
-
-const AGENT_HEADER_WORDS = ['agent', 'advisor', 'adviser', 'broker', 'subbroker', 'sub broker', 'sm', 'sales manager', 'rm', 'relationship manager', 'posp']
-const NAME_STOP_WORDS = ['mr', 'mrs', 'ms', 'miss', 'shri', 'smt', 'kumari', 'dr', 'late', 'policyholder', 'policy', 'holder']
-
-function headerKey(value) {
-  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-}
-
-function isAgentHeader(header) {
-  const raw = String(header || '').toLowerCase()
-  const compact = headerKey(header)
-  return AGENT_HEADER_WORDS.some(word => raw.includes(word) || compact.includes(headerKey(word)))
-}
-
-function pick(row, names, { ignoreAgentColumns = false } = {}) {
-  const keys = Object.keys(row || {})
-  const wanted = names.map(headerKey)
-  const key = keys.find(k => wanted.includes(headerKey(k)) && (!ignoreAgentColumns || !isAgentHeader(k)))
-  return key ? row[key] : ''
-}
-
-function normaliseName(value) {
-  return clean(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(token => token && !NAME_STOP_WORDS.includes(token))
-    .join(' ')
-}
-
-function nameTokens(value) {
-  return normaliseName(value).split(' ').filter(token => token.length > 1)
-}
-
-function nameMatchScore(a, b) {
-  const aTokens = nameTokens(a)
-  const bTokens = nameTokens(b)
-  if (!aTokens.length || !bTokens.length) return 0
-  const aSet = new Set(aTokens)
-  const bSet = new Set(bTokens)
-  const common = aTokens.filter(token => bSet.has(token)).length
-  const reverseCommon = bTokens.filter(token => aSet.has(token)).length
-  return Math.max(common / aTokens.length, reverseCommon / bTokens.length)
-}
-
-function insurerLooksSame(rowInsurer, policyInsurer) {
-  const a = headerKey(rowInsurer)
-  const b = headerKey(policyInsurer)
-  if (!a || !b) return false
-  return a.includes(b) || b.includes(a)
-}
-
-function confidenceFor(row, policies) {
-  const policyNo = clean(row.uploadedPolicyNumber).toLowerCase()
-  const client = clean(row.uploadedClientName)
-  const premium = Number(row.uploadedPremium || 0)
-  if (!policyNo && !client) return { level: 'unmatched', policy: null }
-
-  const exact = policies.find(p => clean(p.policyNumber).toLowerCase() === policyNo)
-  if (exact) return { level: 'high', policy: exact }
-
-  const partial = policyNo && policies.find(p => clean(p.policyNumber).toLowerCase().includes(policyNo) || policyNo.includes(clean(p.policyNumber).toLowerCase()))
-  if (partial) return { level: 'medium', policy: partial }
-
-  const strongName = policies.find(p => {
-    const score = nameMatchScore(client, p.clientName)
-    const insurerMatch = insurerLooksSame(row.uploadedInsurer, p.insurer)
-    return score >= 0.85 && (insurerMatch || !row.uploadedInsurer)
-  })
-  if (strongName) return { level: 'medium', policy: strongName }
-
-  const fuzzy = policies.find(p => {
-    const score = nameMatchScore(client, p.clientName)
-    const premiumMatch = premium && Math.abs((Number(p.premium) || 0) - premium) <= Math.max(50, premium * 0.02)
-    return score >= 0.5 && premiumMatch
-  })
-  if (fuzzy) return { level: 'medium', policy: fuzzy }
-  return { level: 'unmatched', policy: null }
 }
 
 function monthOptions(count = 36) {
@@ -126,9 +54,32 @@ function monthOptions(count = 36) {
   })
 }
 
+const MAPPING_FIELDS = [
+  ['clientName', 'Client name'], ['policyNumber', 'Policy number'], ['planName', 'Plan name'], ['insurer', 'Insurer'],
+  ['category', 'Category'], ['premium', 'Premium'], ['commission', 'Gross commission'], ['commissionRate', 'Commission rate'],
+  ['reward', 'Reward'], ['gst', 'GST'], ['tds', 'TDS'], ['deduction', 'Deduction'], ['netCommission', 'Net commission'],
+  ['commissionDate', 'Commission date'], ['mobile', 'Mobile'], ['email', 'Email'], ['pan', 'PAN'], ['remarks', 'Remarks'],
+]
+
+const STATUS_STYLES = {
+  'exact-match': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
+  'needs-confirmation': 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  duplicate: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  unmatched: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+  error: 'bg-red-200 text-red-900 dark:bg-red-950 dark:text-red-200',
+  ignored: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+  posted: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300',
+  review: 'bg-amber-100 text-amber-700',
+}
+
+function StatusChip({ status }) {
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${STATUS_STYLES[status] || STATUS_STYLES.review}`}>{String(status || 'review').replace(/-/g, ' ')}</span>
+}
+
 export default function CommissionReconciliationPage() {
   const { policies } = usePolicies()
-  const { isAdmin } = useAuth()
+  const { clients } = useClients()
+  const { isAdmin, user } = useAuth()
   const [batches, setBatches] = useState([])
   const [rows, setRows] = useState([])
   const [selectedBatch, setSelectedBatch] = useState('')
@@ -137,6 +88,18 @@ export default function CommissionReconciliationPage() {
   const [statementMonth, setStatementMonth] = useState('')
   const [progress, setProgress] = useState('')
   const [posting, setPosting] = useState('')
+  const [queryText, setQueryText] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [confidenceMin, setConfidenceMin] = useState(0)
+  const [expandedRow, setExpandedRow] = useState('')
+  const [bulkPosting, setBulkPosting] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
+  const [existingTransactions, setExistingTransactions] = useState([])
+  const [manualForm, setManualForm] = useState({ policyId: '', premium: '', commissionRate: '', grossCommission: '', rewardCommission: '', gst: '', tds: '', deduction: '', netReceived: '', payoutMonth: '', remarks: '' })
+  const [mappingTemplates, setMappingTemplates] = useState([])
+  const [mappingProfileId, setMappingProfileId] = useState('')
+  const [mappingForm, setMappingForm] = useState({})
+  const [showMapping, setShowMapping] = useState(false)
   const [includeRow, setIncludeRow] = useState(null)
   const [matchRow, setMatchRow] = useState(null)
   const [matchQuery, setMatchQuery] = useState('')
@@ -159,34 +122,54 @@ export default function CommissionReconciliationPage() {
   const candidatePolicies = useMemo(() => {
     if (!matchRow) return []
     const q = clean(matchQuery).toLowerCase()
-    return policies
-      .map(policy => ({
-        policy,
-        score: Math.max(
-          nameMatchScore(matchRow.uploadedClientName, policy.clientName),
-          clean(matchRow.uploadedPolicyNumber) && clean(policy.policyNumber).toLowerCase().includes(clean(matchRow.uploadedPolicyNumber).toLowerCase()) ? 1 : 0,
-        ),
-      }))
-      .filter(({ policy, score }) => {
-        const searchable = [policy.policyNumber, policy.clientName, policy.insurer, policy.planName, policy.premium].join(' ').toLowerCase()
-        const insurerOk = !insurer || insurerLooksSame(insurer, policy.insurer) || score >= 0.65
-        return insurerOk && (!q || searchable.includes(q)) && (score >= 0.35 || q)
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 30)
-      .map(({ policy }) => policy)
-  }, [matchRow, matchQuery, policies, insurer])
+    const ranked = bestCommissionMatches(matchRow, policies, clients).map(match => match.policy)
+    const searched = q ? policies.filter(policy => [policy.policyNumber, policy.clientName, policy.insurer, policy.planName, policy.premium].join(' ').toLowerCase().includes(q)) : []
+    return Array.from(new Map([...ranked, ...searched].map(policy => [policy.id, policy])).values()).slice(0, 30)
+  }, [matchRow, matchQuery, policies, clients])
 
   const loadBatches = async () => setBatches(await getAllCommissionReconciliationBatches())
 
   useEffect(() => {
     if (!isAdmin) return
-    loadBatches().catch(err => toast.error(friendlyFirebaseError(err, 'Could not load reconciliation batches.')))
+    Promise.all([getAllCommissionReconciliationBatches(), getAllCommissionTransactions(), getAllCommissionImportTemplates()])
+      .then(([batchRows, transactions, templates]) => { setBatches(batchRows); setExistingTransactions(transactions); setMappingTemplates(templates) })
+      .catch(err => toast.error(friendlyFirebaseError(err, 'Could not load reconciliation batches.')))
   }, [isAdmin])
 
   const loadRows = async batchId => {
     setSelectedBatch(batchId)
+    const batch = batches.find(item => item.id === batchId)
+    if (batch) {
+      setInsurer(batch.insurer || '')
+      setStatementMonth(batch.statementMonth || '')
+    }
     setRows(batchId ? await getCommissionReconciliationRows(batchId) : [])
+  }
+
+  const chooseMappingProfile = profileId => {
+    setMappingProfileId(profileId)
+    const profile = mappingTemplates.find(item => item.id === profileId)
+    setMappingForm(profile?.fieldMap || {})
+    if (profile?.insurer) setInsurer(profile.insurer)
+  }
+
+  const saveMappingProfile = async () => {
+    if (!insurer.trim()) { toast.error('Select an insurer before saving a mapping.'); return }
+    const usefulFields = Object.fromEntries(Object.entries(mappingForm).filter(([, header]) => clean(header)))
+    if (!usefulFields.policyNumber && !usefulFields.clientName) { toast.error('Map at least Policy number or Client name.'); return }
+    setProgress('Saving insurer mapping...')
+    try {
+      await addCommissionImportTemplate({ name: `${insurer} statement mapping`, insurer, fileType: 'statement', fieldMap: usefulFields, active: true })
+      const templates = await getAllCommissionImportTemplates()
+      setMappingTemplates(templates)
+      const saved = templates.find(item => item.insurer === insurer && item.name === `${insurer} statement mapping`)
+      if (saved) setMappingProfileId(saved.id)
+      toast.success('Column mapping saved for future imports.')
+    } catch (err) {
+      toast.error(friendlyFirebaseError(err, 'Could not save mapping profile.'))
+    } finally {
+      setProgress('')
+    }
   }
 
   const createBatch = async e => {
@@ -195,12 +178,32 @@ export default function CommissionReconciliationPage() {
       toast.error('Select a statement file first.')
       return
     }
+    if (!insurer.trim()) {
+      toast.error('Select the insurer for this statement.')
+      return
+    }
+    if (!statementMonth) {
+      toast.error('Select the commission statement month.')
+      return
+    }
     setProgress('Creating reconciliation batch...')
     try {
+      const fileHash = await hashCommissionFile(file)
+      const existingBatch = await findCommissionBatchByFileHash(fileHash)
+      if (existingBatch && !window.confirm(`This exact file was already uploaded on ${fmtDate(existingBatch.createdAt)}. Upload it again for review?`)) {
+        setProgress('')
+        await loadRows(existingBatch.id)
+        return
+      }
       const batchRef = await createCommissionReconciliationBatch({
         insurer,
         statementMonth,
         originalFileName: file.name,
+        fileHash,
+        fileType: file.name.split('.').pop()?.toLowerCase() || '',
+        uploadedBy: user?.uid || '',
+        uploadedByEmail: user?.email || '',
+        mappingProfileId,
         status: 'review',
       })
       const batchId = batchRef.id
@@ -213,57 +216,75 @@ export default function CommissionReconciliationPage() {
         toast.error('File storage was skipped, but reconciliation will continue.')
       }
 
-      let importedRows = []
-      const canParse = /\.(csv|xlsx?|xls)$/i.test(file.name)
       const isPdf = /\.pdf$/i.test(file.name)
-      if (canParse) {
-        setProgress('Reading statement rows...')
-        importedRows = await parseImportFile(file)
-      }
+      const parsed = await parseCommissionFile(file, { insurer, statementMonth, fieldMap: mappingForm }, message => setProgress(message))
+      const importedRows = parsed.rows
 
       if (importedRows.length === 0) {
         await updateCommissionReconciliationBatch(batchId, {
           originalFileUrl: upload.url,
+          extractedText: parsed.extractedText || '',
           status: 'manual-review',
           summary: {
             rows: 0,
             note: uploadError
               ? `Manual entry/review needed. File storage issue: ${uploadError}`
               : isPdf
-                ? 'PDF statement saved for manual review. Free automatic row extraction works with Excel/CSV statements only.'
+                ? 'PDF text/OCR was retained for manual review because no reliable table rows were detected.'
                 : 'File uploaded. Manual entry/review needed for unrecognized statement format.',
           },
         })
       } else {
-        let count = 0
-        for (const source of importedRows) {
-          const draft = {
+        const seenHashes = new Set()
+        const preparedRows = []
+        for (const importedRow of importedRows) {
+          const rowHash = await hashCommissionRow(importedRow)
+          const errors = validateCommissionRow(importedRow)
+          const matches = bestCommissionMatches(importedRow, policies, clients)
+          const best = matches[0]
+          const duplicateInFile = seenHashes.has(rowHash)
+          const duplicatePreviouslyPosted = existingTransactions.some(transaction => transaction.sourceRowHash === rowHash)
+          seenHashes.add(rowHash)
+          const status = duplicateInFile || duplicatePreviouslyPosted
+            ? 'duplicate'
+            : errors.length
+              ? 'error'
+              : best?.autoConfirmable
+                ? 'exact-match'
+                : best
+                  ? 'needs-confirmation'
+                  : 'unmatched'
+          preparedRows.push({
+            ...importedRow,
             batchId,
-            uploadedClientName: pick(source, ['client', 'client name', 'customer name', 'insured name', 'policy holder', 'policyholder'], { ignoreAgentColumns: true }),
-            uploadedPolicyNumber: pick(source, ['policy number', 'policy no', 'policy']),
-            uploadedProposalNumber: pick(source, ['proposal number', 'proposal no']),
-            uploadedInsurer: pick(source, ['insurer', 'insurance company', 'company']) || insurer,
-            uploadedPremium: numberValue(pick(source, ['premium', 'net premium', 'gross premium'])),
-            uploadedCommission: numberValue(pick(source, ['commission', 'gross commission', 'brokerage'])),
-            tds: numberValue(pick(source, ['tds'])),
-            gst: numberValue(pick(source, ['gst'])),
-            netPaid: numberValue(pick(source, ['net paid', 'net amount', 'net commission'])),
-          }
-          const match = confidenceFor(draft, policies)
-          await addCommissionReconciliationRow({
-            ...draft,
-            matchedPolicyId: match.policy?.id || '',
-            matchedPolicyNumber: match.policy?.policyNumber || '',
-            matchConfidence: match.level,
-            status: match.level === 'high' ? 'suggested' : 'review',
+            rowHash,
+            matchedPolicyId: best?.policy?.id || '',
+            matchedPolicyNumber: best?.policy?.policyNumber || '',
+            matchConfidence: best?.autoConfirmable ? 'high' : best ? 'suggested' : 'unmatched',
+            matchScore: best?.score || 0,
+            matchReason: best?.reason || 'No matching policy found',
+            matchConflicts: best?.conflicts || [],
+            candidatePolicyIds: matches.map(match => match.policy.id),
+            status,
+            note: errors.join('; '),
           })
-          count += 1
-          if (count % 25 === 0) setProgress(`Imported ${count}/${importedRows.length} rows...`)
         }
+        await addCommissionReconciliationRows(preparedRows, (done, total) => setProgress(`Importing ${done}/${total} records...`))
+        const countByStatus = status => preparedRows.filter(row => row.status === status).length
         await updateCommissionReconciliationBatch(batchId, {
           originalFileUrl: upload.url,
+          extractedText: parsed.extractedText || '',
           status: 'review',
-          summary: { rows: importedRows.length, uploadError },
+          summary: {
+            rows: importedRows.length,
+            exact: countByStatus('exact-match'),
+            review: countByStatus('needs-confirmation'),
+            duplicates: countByStatus('duplicate'),
+            unmatched: countByStatus('unmatched'),
+            errors: countByStatus('error'),
+            posted: 0,
+            uploadError,
+          },
         })
       }
 
@@ -272,7 +293,7 @@ export default function CommissionReconciliationPage() {
       setFile(null)
       setProgress('')
       if (importedRows.length === 0 && isPdf) {
-        toast.error('PDF saved, but no rows can be extracted on the free setup. Upload Excel/CSV for automatic rows.')
+        toast.error('PDF saved for manual review; no reliable table rows were detected.')
       } else {
         toast.success('Commission statement ready for review.')
       }
@@ -287,13 +308,29 @@ export default function CommissionReconciliationPage() {
       toast.error('This policy is not in CRM yet. Include it first, then reconcile.')
       return
     }
+    if (row.status === 'error') {
+      toast.error(row.note || 'Correct the row validation errors before posting.')
+      return false
+    }
+    if (row.status === 'duplicate' && !window.confirm('A matching commission row already exists. Force import this duplicate?')) return false
     if (posting) return
     setPosting(row.id)
     try {
       const policy = policies.find(p => p.id === row.matchedPolicyId)
-      const expected = Math.round(((Number(policy?.premium) || 0) * (Number(policy?.fyCommission || policy?.ryCommission) || 0)) / 100)
-      const received = Number(row.netPaid || row.uploadedCommission || 0)
-      await addCommissionTransaction({
+      if (!policy) throw new Error('The matched policy no longer exists.')
+      const batch = batches.find(item => item.id === row.batchId)
+      const rate = Number((Number(policy.policyYear || 1) > 1 ? policy.ryCommission : policy.fyCommission) || policy.fyCommission || policy.ryCommission || row.commissionRate || 0)
+      const expected = Math.round(((Number(policy.premium) || 0) * rate) / 100)
+      const calculation = calculateCommission(row)
+      const received = Number(calculation.netPaid || calculation.grossCommission || 0)
+      const errors = validateCommissionRow({ ...row, ...calculation })
+      if (errors.length) throw new Error(errors.join('. '))
+      const basePostingKey = `commission_${row.rowHash || row.id}`.replace(/[^a-zA-Z0-9_-]/g, '')
+      const postingKey = row.postingKey || (row.status === 'duplicate' ? `${basePostingKey}_force_${Date.now()}` : basePostingKey)
+      await postCommissionReconciliation({
+        rowId: row.id,
+        policyId: row.matchedPolicyId,
+        transactionData: {
         policyId: row.matchedPolicyId,
         policyNumber: policy?.policyNumber || row.matchedPolicyNumber,
         clientId: policy?.clientId || '',
@@ -301,26 +338,53 @@ export default function CommissionReconciliationPage() {
         insurer: policy?.insurer || insurer,
         premium: policy?.premium || row.uploadedPremium,
         expectedCommission: expected,
-        receivedCommission: Number(row.uploadedCommission || received),
-        tds: row.tds,
-        gst: row.gst,
+        receivedCommission: calculation.grossCommission,
+        grossCommission: calculation.grossCommission,
+        commissionRate: row.commissionRate || rate,
+        rewardCommission: calculation.rewardCommission,
+        deduction: calculation.deduction,
+        tds: calculation.tds,
+        gst: calculation.gst,
         netReceived: received,
         difference: received - expected,
-        payoutMonth: statementMonth,
+        payoutMonth: row.statementMonth || batch?.statementMonth || '',
         status: received === expected ? 'exact matched' : received < expected ? 'short received' : 'excess received',
         reconciliationBatchId: row.batchId,
+        reconciliationRowId: row.id,
+        postingKey,
+        matchingMethod: row.matchConfidence === 'manual' ? 'manual-confirmed' : 'auto-suggested-confirmed',
+        sourceType: 'import',
+        sourceFileName: batch?.originalFileName || '',
+        sourceFileUrl: batch?.originalFileUrl || '',
+        sourceFileHash: batch?.fileHash || '',
+        sourceRowHash: row.rowHash || '',
+        createdBy: user?.uid || '',
+        createdByEmail: user?.email || '',
+        remarks: row.remarks || row.note || '',
+        },
+        policySummary: {
+          receivedCommission: received,
+          pendingCommission: Math.max(0, expected - received),
+          commissionStatus: received >= expected ? 'received' : 'partial',
+          reconciliationBatchId: row.batchId,
+          lastCommissionTransactionId: postingKey,
+        },
       })
-      await updatePolicy(row.matchedPolicyId, {
-        receivedCommission: received,
-        pendingCommission: Math.max(0, expected - received),
-        commissionStatus: received >= expected ? 'received' : 'partial',
-        reconciliationBatchId: row.batchId,
+      const refreshedRows = await getCommissionReconciliationRows(row.batchId)
+      setRows(refreshedRows)
+      const postedCount = refreshedRows.filter(item => item.status === 'posted').length
+      const ignoredCount = refreshedRows.filter(item => item.status === 'ignored').length
+      await updateCommissionReconciliationBatch(row.batchId, {
+        status: postedCount + ignoredCount >= refreshedRows.length ? 'completed' : 'review',
+        summary: { ...(batch?.summary || {}), rows: refreshedRows.length, posted: postedCount, ignored: ignoredCount },
+        ...(postedCount + ignoredCount >= refreshedRows.length ? { completedAt: new Date() } : {}),
       })
-      await updateCommissionReconciliationRow(row.id, { status: 'posted' })
-      await loadRows(row.batchId)
+      await loadBatches()
       toast.success('Commission posted.')
+      return true
     } catch (err) {
       toast.error(friendlyFirebaseError(err, 'Could not post commission.'))
+      return false
     } finally {
       setPosting('')
     }
@@ -351,7 +415,10 @@ export default function CommissionReconciliationPage() {
         matchedPolicyId: policy.id,
         matchedPolicyNumber: policy.policyNumber,
         matchConfidence: 'manual',
-        status: 'review',
+        matchScore: 100,
+        matchReason: 'Policy selected manually',
+        matchConflicts: [],
+        status: 'needs-confirmation',
       })
       await loadRows(matchRow.batchId)
       setMatchRow(null)
@@ -400,7 +467,10 @@ export default function CommissionReconciliationPage() {
         matchedPolicyId: policyRef.id,
         matchedPolicyNumber: includeForm.policyNumber,
         matchConfidence: 'manual',
-        status: 'review',
+        matchScore: 100,
+        matchReason: 'Policy created and selected manually',
+        matchConflicts: [],
+        status: 'needs-confirmation',
       })
       await loadRows(includeRow.batchId)
       setIncludeRow(null)
@@ -412,10 +482,97 @@ export default function CommissionReconciliationPage() {
     }
   }
 
+  const updateReviewRow = async (row, changes) => {
+    if (posting) return
+    setPosting(row.id)
+    try {
+      const calculated = calculateCommission({ ...row, ...changes })
+      const payload = { ...changes, ...calculated }
+      await updateCommissionReconciliationRow(row.id, payload)
+      setRows(current => current.map(item => item.id === row.id ? { ...item, ...payload } : item))
+      toast.success('Review row updated.')
+    } catch (err) {
+      toast.error(friendlyFirebaseError(err, 'Could not update this row.'))
+    } finally {
+      setPosting('')
+    }
+  }
+
+  const setReviewStatus = async (row, status) => {
+    await updateReviewRow(row, { status })
+  }
+
+  const confirmAllExact = async () => {
+    const exactRows = rows.filter(row => row.status === 'exact-match' && row.matchedPolicyId)
+    if (!exactRows.length) {
+      toast.error('There are no unposted exact matches.')
+      return
+    }
+    if (!window.confirm(`Post ${exactRows.length} exact commission matches?`)) return
+    setBulkPosting(true)
+    let completed = 0
+    try {
+      for (const row of exactRows) {
+        if (await acceptRow(row)) completed += 1
+      }
+      toast.success(`${completed} exact matches posted.`)
+    } finally {
+      setBulkPosting(false)
+    }
+  }
+
+  const saveManualCommission = async e => {
+    e.preventDefault()
+    const policy = policies.find(item => item.id === manualForm.policyId)
+    if (!policy) { toast.error('Select a policy.'); return }
+    if (!manualForm.payoutMonth) { toast.error('Select the commission month.'); return }
+    const calculation = calculateCommission({
+      uploadedPremium: manualForm.premium || policy.premium,
+      commissionRate: manualForm.commissionRate,
+      uploadedCommission: manualForm.grossCommission,
+      rewardCommission: manualForm.rewardCommission,
+      gst: manualForm.gst,
+      tds: manualForm.tds,
+      deduction: manualForm.deduction,
+      netPaid: manualForm.netReceived,
+    })
+    const errors = validateCommissionRow({ ...calculation, uploadedPolicyNumber: policy.policyNumber, commissionRate: manualForm.commissionRate })
+    if (errors.length) { toast.error(errors.join('. ')); return }
+    setPosting('manual')
+    try {
+      const postingKey = `manual_${policy.id}_${manualForm.payoutMonth}_${calculation.netPaid}`.replace(/[^a-zA-Z0-9_-]/g, '')
+      await addCommissionTransaction({
+        policyId: policy.id, policyNumber: policy.policyNumber, clientId: policy.clientId || '', clientName: policy.clientName || '',
+        insurer: policy.insurer || '', premium: Number(manualForm.premium || policy.premium || 0), expectedCommission: calculation.grossCommission,
+        receivedCommission: calculation.grossCommission, grossCommission: calculation.grossCommission, commissionRate: Number(manualForm.commissionRate || 0),
+        rewardCommission: calculation.rewardCommission, gst: calculation.gst, tds: calculation.tds, deduction: calculation.deduction,
+        netReceived: calculation.netPaid, difference: 0, payoutMonth: manualForm.payoutMonth, status: 'manual entry', postingKey,
+        matchingMethod: 'manual-entry', sourceType: 'manual', createdBy: user?.uid || '', createdByEmail: user?.email || '', remarks: manualForm.remarks,
+      })
+      toast.success('Manual commission saved.')
+      setManualOpen(false)
+      setManualForm({ policyId: '', premium: '', commissionRate: '', grossCommission: '', rewardCommission: '', gst: '', tds: '', deduction: '', netReceived: '', payoutMonth: '', remarks: '' })
+    } catch (err) {
+      toast.error(friendlyFirebaseError(err, 'Could not save manual commission.'))
+    } finally {
+      setPosting('')
+    }
+  }
+
+  const filteredRows = useMemo(() => {
+    const query = queryText.trim().toLowerCase()
+    return rows.filter(row => {
+      const searchable = [row.uploadedClientName, row.uploadedPolicyNumber, row.uploadedPlanName, row.uploadedInsurer, row.matchedPolicyNumber, row.status].join(' ').toLowerCase()
+      return (!query || searchable.includes(query))
+        && (statusFilter === 'all' || row.status === statusFilter)
+        && Number(row.matchScore || 0) >= Number(confidenceMin || 0)
+    })
+  }, [rows, queryText, statusFilter, confidenceMin])
+
   const summary = useMemo(() => ({
     total: rows.length,
-    high: rows.filter(r => r.matchConfidence === 'high').length,
-    review: rows.filter(r => r.status === 'review' || r.status === 'suggested').length,
+    high: rows.filter(r => r.status === 'exact-match').length,
+    review: rows.filter(r => r.status === 'needs-confirmation').length,
     posted: rows.filter(r => r.status === 'posted').length,
   }), [rows])
 
@@ -427,9 +584,10 @@ export default function CommissionReconciliationPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Commission Reconciliation</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Upload insurer statements, review matches, and post commission only after confirmation.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div><h1 className="text-2xl font-bold text-gray-900 dark:text-white">Commission Reconciliation</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Upload insurer statements, review matches, and post commission only after confirmation.</p></div>
+        <button type="button" className="btn-secondary" onClick={() => setManualOpen(true)}>+ Manual commission</button>
       </div>
 
       <form onSubmit={createBatch} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
@@ -445,15 +603,34 @@ export default function CommissionReconciliationPage() {
             {insurerOptions.map(name => <option key={name} value={name} />)}
           </datalist>
         </div>
+        <select className="form-input" value={mappingProfileId} onChange={e => chooseMappingProfile(e.target.value)}>
+          <option value="">Automatic column mapping</option>
+          {mappingTemplates.filter(template => !insurer || template.insurer === insurer).map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+        </select>
         <select className="form-input" value={statementMonth} onChange={e => setStatementMonth(e.target.value)}>
           <option value="">Select statement month</option>
           {statementMonthOptions.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}
         </select>
         <input className="form-input md:col-span-2" type="file" accept=".csv,.xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp" onChange={e => setFile(e.target.files?.[0] || null)} />
         <button className="btn-primary" disabled={Boolean(progress)}>{progress ? 'Working...' : 'Upload & Review'}</button>
-        {progress && <p className="md:col-span-5 text-sm text-blue-600">{progress}</p>}
+        <div className="md:col-span-5">
+          <button type="button" className="text-sm font-semibold text-blue-600" onClick={() => setShowMapping(value => !value)}>{showMapping ? 'Hide custom column mapping' : 'Custom column mapping'}</button>
+          {showMapping && (
+            <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+              <p className="mb-3 text-xs text-gray-500">Enter the exact header written in the insurer statement. Empty fields continue using automatic aliases.</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">{MAPPING_FIELDS.map(([field, label]) => <label key={field} className="text-xs font-semibold text-gray-600 dark:text-gray-300">{label}<input className="form-input mt-1" placeholder="Statement column header" value={mappingForm[field] || ''} onChange={e => setMappingForm(current => ({ ...current, [field]: e.target.value }))} /></label>)}</div>
+              <button type="button" className="btn-secondary mt-4" disabled={Boolean(progress)} onClick={saveMappingProfile}>Save mapping for {insurer || 'insurer'}</button>
+            </div>
+          )}
+        </div>
+        {progress && (
+          <div className="md:col-span-5 space-y-2" role="status" aria-live="polite">
+            <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950"><div className="h-full w-2/3 animate-pulse rounded-full bg-blue-600" /></div>
+            <p className="text-sm font-medium text-blue-600">{progress}</p>
+          </div>
+        )}
         <p className="md:col-span-5 text-xs text-gray-500">
-          For automatic commission rows, upload Excel or CSV. PDF statements are saved for reference/manual review in the free version.
+          Excel and CSV statements are mapped locally. PDF text extraction and scanned-page OCR run locally with free open-source engines; every uncertain row still requires confirmation.
         </p>
       </form>
 
@@ -465,13 +642,66 @@ export default function CommissionReconciliationPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-        <select className="form-input max-w-md" value={selectedBatch} onChange={e => loadRows(e.target.value)}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <select className="form-input max-w-xl" value={selectedBatch} onChange={e => loadRows(e.target.value)}>
           <option value="">Select reconciliation batch</option>
           {batches.map(b => <option key={b.id} value={b.id}>{fmtDate(b.createdAt)} - {b.insurer || 'Statement'} - {b.originalFileName || b.id}</option>)}
         </select>
+        {selectedBatch && (() => {
+          const batch = batches.find(item => item.id === selectedBatch)
+          const total = Number(batch?.summary?.rows || rows.length || 0)
+          const resolved = rows.filter(row => ['posted', 'ignored'].includes(row.status)).length
+          return (
+            <div className="min-w-64 space-y-1">
+              <div className="flex justify-between text-xs font-semibold text-gray-500"><span>{resolved}/{total} resolved</span>{batch?.originalFileUrl && <a href={batch.originalFileUrl} target="_blank" rel="noreferrer" className="text-blue-600">Source file</a>}</div>
+              <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full bg-blue-600" style={{ width: `${total ? Math.round((resolved / total) * 100) : 0}%` }} /></div>
+            </div>
+          )
+        })()}
+        </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-auto">
+      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 lg:flex-row lg:items-center">
+        <input className="form-input flex-1" placeholder="Search client, policy, plan, insurer or status..." value={queryText} onChange={e => setQueryText(e.target.value)} />
+        <select className="form-input lg:w-56" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <option value="all">All statuses</option>
+          {['exact-match', 'needs-confirmation', 'duplicate', 'unmatched', 'error', 'ignored', 'posted'].map(status => <option key={status} value={status}>{status.replace(/-/g, ' ')}</option>)}
+        </select>
+        <select className="form-input lg:w-48" value={confidenceMin} onChange={e => setConfidenceMin(Number(e.target.value))}>
+          <option value={0}>Any confidence</option><option value={50}>50%+</option><option value={75}>75%+</option><option value={90}>90%+</option>
+        </select>
+        <button type="button" className="btn-primary whitespace-nowrap" disabled={bulkPosting} onClick={confirmAllExact}>{bulkPosting ? 'Posting...' : 'Confirm all exact'}</button>
+      </div>
+
+      <div className="space-y-3 md:hidden">
+        {filteredRows.map(row => (
+          <article key={row.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0"><p className="truncate font-bold text-gray-900 dark:text-white">{row.uploadedClientName || 'Unnamed client'}</p><p className="mt-1 break-all text-xs text-gray-500">{row.uploadedPolicyNumber || 'No policy number'} · {row.uploadedPlanName || 'Plan not supplied'}</p></div>
+              <StatusChip status={row.status} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div><p className="text-xs text-gray-500">Insurer</p><p className="font-semibold">{row.uploadedInsurer || '-'}</p></div>
+              <div><p className="text-xs text-gray-500">Confidence</p><p className="font-semibold">{Number(row.matchScore || 0)}%</p></div>
+              <div><p className="text-xs text-gray-500">Premium</p><p className="font-semibold">{fmtCurrency(row.uploadedPremium)}</p></div>
+              <div><p className="text-xs text-gray-500">Net commission</p><input className="form-input mt-1" type="number" min="0" value={row.netPaid || ''} onChange={e => setRows(current => current.map(item => item.id === row.id ? { ...item, netPaid: e.target.value } : item))} onBlur={() => updateReviewRow(row, { netPaid: Number(rows.find(item => item.id === row.id)?.netPaid || 0) })} /></div>
+            </div>
+            <p className="mt-3 text-xs text-gray-500">{row.matchReason || row.note || 'Manual review required.'}</p>
+            {row.matchConflicts?.length > 0 && <p className="mt-1 text-xs font-semibold text-red-600">Check: {row.matchConflicts.join(', ')}</p>}
+            <button type="button" className="mt-3 text-xs font-semibold text-blue-600" onClick={() => setExpandedRow(expandedRow === row.id ? '' : row.id)}>Calculation details</button>
+            {expandedRow === row.id && <div className="mt-2 rounded-lg bg-gray-50 p-3 text-xs dark:bg-gray-900">Gross {fmtCurrency(row.grossCommission)} + Reward {fmtCurrency(row.rewardCommission)} + GST {fmtCurrency(row.gst)} - TDS {fmtCurrency(row.tds)} - Deduction {fmtCurrency(row.deduction)} = <strong>{fmtCurrency(row.netPaid)}</strong></div>}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button type="button" className="btn-secondary min-h-11" onClick={() => openMatchPolicy(row)}>Change policy</button>
+              {row.matchedPolicyId && row.status !== 'posted' ? <button type="button" className="btn-primary min-h-11" disabled={posting === row.id} onClick={() => acceptRow(row)}>{posting === row.id ? 'Posting...' : 'Confirm & post'}</button> : <button type="button" className="btn-secondary min-h-11" onClick={() => openIncludePolicy(row)}>Include new</button>}
+              {row.status !== 'posted' && <button type="button" className="btn-secondary min-h-11" onClick={() => setReviewStatus(row, 'unmatched')}>Mark unmatched</button>}
+              {row.status !== 'posted' && <button type="button" className="btn-secondary min-h-11" onClick={() => setReviewStatus(row, 'ignored')}>Ignore</button>}
+            </div>
+          </article>
+        ))}
+        {!filteredRows.length && <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">No reconciliation rows match these filters.</div>}
+      </div>
+
+      <div className="hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-auto md:block">
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 z-10 text-xs uppercase text-gray-500">
             <tr>
@@ -479,10 +709,10 @@ export default function CommissionReconciliationPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(row => (
+            {filteredRows.map(row => (
               <tr key={row.id} className="border-t border-gray-100 dark:border-gray-700">
-                <td className="px-4 py-3">{row.uploadedClientName || '-'}</td>
-                <td className="px-4 py-3">{row.uploadedPolicyNumber || '-'}</td>
+                <td className="px-4 py-3"><p className="font-semibold">{row.uploadedClientName || '-'}</p><p className="text-xs text-gray-500">{row.uploadedInsurer || '-'}</p></td>
+                <td className="px-4 py-3"><p>{row.uploadedPolicyNumber || '-'}</p><p className="text-xs text-gray-500">{row.uploadedPlanName || '-'}</p></td>
                 <td className="px-4 py-3">
                   {row.matchedPolicyNumber || '-'}
                   <button className="ml-2 text-xs text-purple-600 font-semibold" onClick={() => openMatchPolicy(row)}>
@@ -490,14 +720,12 @@ export default function CommissionReconciliationPage() {
                   </button>
                 </td>
                 <td className="px-4 py-3">{fmtCurrency(row.uploadedPremium)}</td>
-                <td className="px-4 py-3">{fmtCurrency(row.netPaid || row.uploadedCommission)}</td>
-                <td className="px-4 py-3"><span className="badge badge-blue">{row.matchConfidence}</span></td>
-                <td className="px-4 py-3">{row.status}</td>
+                <td className="px-4 py-3"><input className="form-input min-w-32" type="number" min="0" value={row.netPaid || ''} onChange={e => setRows(current => current.map(item => item.id === row.id ? { ...item, netPaid: e.target.value } : item))} onBlur={() => updateReviewRow(row, { netPaid: Number(rows.find(item => item.id === row.id)?.netPaid || 0) })} /><button type="button" className="mt-1 text-xs text-blue-600" onClick={() => setExpandedRow(expandedRow === row.id ? '' : row.id)}>Breakdown</button>{expandedRow === row.id && <p className="mt-1 min-w-56 text-xs text-gray-500">Gross {fmtCurrency(row.grossCommission)} + Reward {fmtCurrency(row.rewardCommission)} + GST {fmtCurrency(row.gst)} - TDS {fmtCurrency(row.tds)} - Other {fmtCurrency(row.deduction)}</p>}</td>
+                <td className="px-4 py-3"><span className="badge badge-blue" title={row.matchReason}>{Number(row.matchScore || 0)}%</span><p className="mt-1 max-w-48 text-xs text-gray-500">{row.matchReason}</p>{row.matchConflicts?.length > 0 && <p className="mt-1 text-xs font-semibold text-red-600">{row.matchConflicts.join(', ')}</p>}</td>
+                <td className="px-4 py-3"><StatusChip status={row.status} /></td>
                 <td className="px-4 py-3">
                   {row.matchedPolicyId ? (
-                    <button className="text-blue-600 font-semibold disabled:opacity-50" disabled={row.status === 'posted' || posting === row.id} onClick={() => acceptRow(row)}>
-                      {posting === row.id ? 'Posting...' : row.status === 'posted' ? 'Posted' : 'Accept'}
-                    </button>
+                    <div className="flex min-w-44 flex-wrap gap-2"><button className="text-blue-600 font-semibold disabled:opacity-50" disabled={row.status === 'posted' || posting === row.id} onClick={() => acceptRow(row)}>{posting === row.id ? 'Posting...' : row.status === 'posted' ? 'Posted' : 'Confirm & post'}</button>{row.status !== 'posted' && <button className="text-red-600 font-semibold" onClick={() => setReviewStatus(row, 'unmatched')}>Unmatched</button>}{row.status !== 'posted' && <button className="text-gray-500 font-semibold" onClick={() => setReviewStatus(row, 'ignored')}>Ignore</button>}</div>
                   ) : (
                     <div className="flex gap-3">
                       <button className="text-purple-600 font-semibold disabled:opacity-50" disabled={posting === row.id} onClick={() => openMatchPolicy(row)}>
@@ -511,10 +739,32 @@ export default function CommissionReconciliationPage() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td className="px-4 py-8 text-gray-400" colSpan="8">No rows selected. Upload a statement or select a batch.</td></tr>}
+            {filteredRows.length === 0 && <tr><td className="px-4 py-8 text-gray-400" colSpan="8">No rows selected or no rows match these filters.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {manualOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-0 sm:items-center sm:justify-center sm:p-4">
+          <form onSubmit={saveManualCommission} className="max-h-[92vh] w-full overflow-auto rounded-t-2xl bg-white p-5 shadow-2xl dark:bg-gray-800 sm:max-w-3xl sm:rounded-2xl">
+            <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold">Manual Commission Entry</h2><p className="text-sm text-gray-500">Saved in the same ledger and reports as imported commission.</p></div><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Close</button></div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <select className="form-input sm:col-span-2 lg:col-span-3" value={manualForm.policyId} onChange={e => { const policy = policies.find(item => item.id === e.target.value); setManualForm(current => ({ ...current, policyId: e.target.value, premium: policy?.premium || '', commissionRate: Number(policy?.policyYear || 1) > 1 ? policy?.ryCommission || '' : policy?.fyCommission || '' })) }} required><option value="">Select client and policy</option>{policies.map(policy => <option key={policy.id} value={policy.id}>{policy.clientName} · {policy.policyNumber} · {policy.insurer}</option>)}</select>
+              <input className="form-input" type="number" min="0" placeholder="Premium" value={manualForm.premium} onChange={e => setManualForm({ ...manualForm, premium: e.target.value })} />
+              <input className="form-input" type="number" min="0" max="100" step="0.01" placeholder="Commission rate %" value={manualForm.commissionRate} onChange={e => setManualForm({ ...manualForm, commissionRate: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="Gross commission" value={manualForm.grossCommission} onChange={e => setManualForm({ ...manualForm, grossCommission: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="Reward / incentive" value={manualForm.rewardCommission} onChange={e => setManualForm({ ...manualForm, rewardCommission: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="GST" value={manualForm.gst} onChange={e => setManualForm({ ...manualForm, gst: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="TDS" value={manualForm.tds} onChange={e => setManualForm({ ...manualForm, tds: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="Other deduction" value={manualForm.deduction} onChange={e => setManualForm({ ...manualForm, deduction: e.target.value })} />
+              <input className="form-input" type="number" min="0" step="0.01" placeholder="Net commission (optional)" value={manualForm.netReceived} onChange={e => setManualForm({ ...manualForm, netReceived: e.target.value })} />
+              <select className="form-input" value={manualForm.payoutMonth} onChange={e => setManualForm({ ...manualForm, payoutMonth: e.target.value })} required><option value="">Commission month</option>{statementMonthOptions.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}</select>
+              <textarea className="form-input sm:col-span-2 lg:col-span-3" placeholder="Remarks" value={manualForm.remarks} onChange={e => setManualForm({ ...manualForm, remarks: e.target.value })} />
+            </div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Cancel</button><button className="btn-primary" disabled={posting === 'manual'}>{posting === 'manual' ? 'Saving...' : 'Save commission'}</button></div>
+          </form>
+        </div>
+      )}
 
       {includeRow && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

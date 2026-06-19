@@ -37,3 +37,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </React.StrictMode>
 )
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/commission-ocr-sw.js').catch(error => {
+    console.warn('Commission OCR offline cache unavailable:', error)
+  })
+}

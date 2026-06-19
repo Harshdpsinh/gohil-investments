@@ -6,7 +6,7 @@ import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { fmtCurrency, fmtDate, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { useNavigate } from 'react-router-dom'
-import { subscribeTasks, subscribeClaims } from '../firebase/firestore'
+import { subscribeTasks, subscribeClaims, getAllCommissionTransactions, getAllCommissionReconciliationBatches } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -94,6 +94,9 @@ export default function DashboardPage() {
   const [tasks,   setTasks]   = useState([])
   const [claims,  setClaims]  = useState([])
   const [perfTab, setPerfTab] = useState('commission')
+  const [commissionTransactions, setCommissionTransactions] = useState([])
+  const [commissionBatches, setCommissionBatches] = useState([])
+  const [showCommissionReminder, setShowCommissionReminder] = useState(false)
 
   const openWA = useCallback((policy) => {
     let client = clients.find(c => c.id === policy.clientId)
@@ -127,6 +130,30 @@ export default function DashboardPage() {
     const u2 = subscribeClaims(setClaims, err => console.error('Dashboard claims subscription failed:', err))
     return () => { u1(); u2() }
   }, [])
+
+  useEffect(() => {
+    Promise.all([getAllCommissionTransactions(), getAllCommissionReconciliationBatches()])
+      .then(([transactions, batches]) => { setCommissionTransactions(transactions); setCommissionBatches(batches) })
+      .catch(err => console.warn('Commission dashboard data unavailable:', err.message))
+  }, [])
+
+  const currentCommissionMonth = format(NOW, 'yyyy-MM')
+  const commissionMonthComplete = commissionBatches.some(batch => batch.statementMonth === currentCommissionMonth)
+  useEffect(() => {
+    if (!commissionBatches.length && commissionMonthComplete) return
+    const dismissed = localStorage.getItem('commission-reminder-dismissed-month')
+    if (!commissionMonthComplete && dismissed !== currentCommissionMonth) setShowCommissionReminder(true)
+  }, [commissionBatches, commissionMonthComplete, currentCommissionMonth])
+
+  const actualCommission = useMemo(() => {
+    const previousMonth = format(subMonths(NOW, 1), 'yyyy-MM')
+    const sumMonth = month => commissionTransactions.filter(item => item.payoutMonth === month).reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0)
+    const currentRows = commissionTransactions.filter(item => item.payoutMonth === currentCommissionMonth)
+    const byInsurer = currentRows.reduce((map, item) => ({ ...map, [item.insurer || 'Other']: (map[item.insurer || 'Other'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
+    const topInsurer = Object.entries(byInsurer).sort((a, b) => b[1] - a[1])[0]
+    const unresolved = commissionBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.summary?.rows || 0) - Number(batch.summary?.posted || 0)), 0)
+    return { current: sumMonth(currentCommissionMonth), previous: sumMonth(previousMonth), unresolved, topInsurer }
+  }, [commissionTransactions, commissionBatches, currentCommissionMonth])
 
   const stats = useMemo(() => {
     // ✅ FIX D2: filter active policies FIRST before computing expired
@@ -198,6 +225,15 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      {showCommissionReminder && !commissionMonthComplete && (
+        <div className="fixed inset-0 z-[120] flex items-end bg-black/50 p-0 sm:items-center sm:justify-center sm:p-4">
+          <div className="w-full rounded-t-2xl bg-white p-5 shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl">
+            <h2 className="text-lg font-black">Monthly commission statement</h2>
+            <p className="mt-2 text-sm text-gray-500">Please upload the latest commission PDF, Excel, or CSV statement for reconciliation.</p>
+            <div className="mt-5 flex justify-end gap-2"><button className="btn-secondary" onClick={() => { localStorage.setItem('commission-reminder-dismissed-month', currentCommissionMonth); setShowCommissionReminder(false) }}>Dismiss this month</button><button className="btn-primary" onClick={() => navigate('/commission-reconciliation')}>Upload now</button></div>
+          </div>
+        </div>
+      )}
       <div className="card flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-cyan-300">Gohil Investments · Bhavnagar</p>
@@ -213,6 +249,19 @@ export default function DashboardPage() {
       <div className="hidden">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">{fmtDate(NOW)}</p>
+      </div>
+
+      {!commissionMonthComplete && (
+        <button onClick={() => navigate('/commission-reconciliation')} className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-4 text-left dark:border-amber-800 dark:bg-amber-950/30">
+          <div><p className="font-bold text-amber-800 dark:text-amber-200">Commission statement pending for {format(NOW, 'MMMM yyyy')}</p><p className="text-sm text-amber-700 dark:text-amber-300">Upload the latest PDF, Excel, or CSV statement for reconciliation.</p></div><span className="font-bold text-amber-700">Upload</span>
+        </button>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="stat-card"><div><p className="text-xl font-black text-emerald-600">{fmtCurrency(actualCommission.current)}</p><p className="text-xs text-gray-500">Actual commission this month</p></div></div>
+        <div className="stat-card"><div><p className="text-xl font-black">{fmtCurrency(actualCommission.previous)}</p><p className="text-xs text-gray-500">Previous month</p></div></div>
+        <div className="stat-card cursor-pointer" onClick={() => navigate('/commission-reconciliation')}><div><p className="text-xl font-black text-amber-600">{actualCommission.unresolved}</p><p className="text-xs text-gray-500">Pending reconciliation</p></div></div>
+        <div className="stat-card"><div><p className="truncate text-lg font-black">{actualCommission.topInsurer?.[0] || '-'}</p><p className="text-xs text-gray-500">Top insurer · {fmtCurrency(actualCommission.topInsurer?.[1] || 0)}</p></div></div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
