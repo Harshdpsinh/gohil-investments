@@ -118,10 +118,12 @@ export default function CommissionPage() {
   const [transactionCursor, setTransactionCursor] = useState(null)
   const [hasMoreTransactions, setHasMoreTransactions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [actualView, setActualView] = useState('insurer')
+  const [ledgerError, setLedgerError] = useState('')
 
   useEffect(() => {
     if (!isAdmin) return
-    getCommissionTransactionsPage({ pageSize: 100 }).then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore) }).catch(err => toast.error(err.message || 'Could not load posted commission.'))
+    getCommissionTransactionsPage({ pageSize: 100 }).then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') }).catch(err => { const message = err.message || 'Could not load posted commission.'; setLedgerError(message); toast.error(message) })
   }, [isAdmin])
 
   const loadMoreTransactions = async () => {
@@ -132,7 +134,7 @@ export default function CommissionPage() {
       setTransactions(current => [...current, ...page.rows])
       setTransactionCursor(page.cursor)
       setHasMoreTransactions(page.hasMore)
-    } catch (err) { toast.error(err.message || 'Could not load more commission history.') }
+    } catch (err) { const message = err.message || 'Could not load more commission history.'; setLedgerError(message); toast.error(message) }
     finally { setLoadingMore(false) }
   }
 
@@ -195,8 +197,10 @@ export default function CommissionPage() {
     const byInsurer = transactions.reduce((map, item) => ({ ...map, [item.insurer || 'Other']: (map[item.insurer || 'Other'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
     const byClient = transactions.reduce((map, item) => ({ ...map, [item.clientName || 'Unknown']: (map[item.clientName || 'Unknown'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
     const byCategory = transactions.reduce((map, item) => { const category = policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'; return { ...map, [category]: (map[category] || 0) + Number(item.netReceived || item.receivedCommission || 0) } }, {})
-    return { total, byInsurer, byClient, byCategory }
+    const byMonth = transactions.reduce((map, item) => ({ ...map, [item.payoutMonth || 'Unknown']: (map[item.payoutMonth || 'Unknown'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
+    return { total, byInsurer, byClient, byCategory, byMonth }
   }, [transactions, policies])
+  const actualBreakdown = actualView === 'client' ? actualStats.byClient : actualView === 'category' ? actualStats.byCategory : actualView === 'month' ? actualStats.byMonth : actualStats.byInsurer
 
   const TYPES = ['Health','Life','Motor','Home','Travel','Other']
   const TYPE_COLORS = { Health:'bg-blue-500', Life:'bg-purple-500', Motor:'bg-orange-500', Home:'bg-green-500', Travel:'bg-teal-500', Other:'bg-gray-400' }
@@ -206,17 +210,15 @@ export default function CommissionPage() {
   )
 
   if (loading) return (
-    <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
-      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading…
-    </div>
+    <div className="fintech-page space-y-4"><div className="commission-skeleton h-8 w-64" /><div className="commission-command-grid">{Array.from({ length: 5 }, (_, index) => <div key={index} className="fintech-panel space-y-3 p-4"><div className="commission-skeleton h-3 w-24" /><div className="commission-skeleton h-7 w-32" /><div className="commission-skeleton h-3 w-20" /></div>)}</div><div className="fintech-panel space-y-3 p-5"><div className="commission-skeleton h-5 w-52" />{Array.from({ length: 5 }, (_, index) => <div key={index} className="commission-skeleton h-10 w-full" />)}</div></div>
   )
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Commission Tracker</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{filtered.length} policies · Click any % to edit inline</p>
+    <div className="fintech-page space-y-4 sm:space-y-5">
+      <div className="fintech-header">
+        <div><p className="fintech-kicker">Revenue intelligence</p>
+          <h1 className="fintech-title">Commission Tracker</h1>
+          <p className="fintech-subtitle">{filtered.length} policies · Separate estimated earnings from posted receipts.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={()=>exportToCSV(filtered,COMM_COLS,'commission')} className="btn-secondary text-xs">⬇ CSV</button>
@@ -225,29 +227,23 @@ export default function CommissionPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {ledgerError && <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span><strong>Commission ledger unavailable.</strong> {ledgerError}</span><button className="font-bold" onClick={() => window.location.reload()}>Retry</button></div>}
+
+      <div className="commission-command-grid">
         {[
-          { label:'Total Commission', val: fmtCurrency(stats.total),   color:'blue',   icon:'💰' },
-          { label:'FY Commission',    val: fmtCurrency(stats.fyTotal),  color:'purple', icon:'🆕' },
-          { label:'RY Commission',    val: fmtCurrency(stats.ryTotal),  color:'green',  icon:'🔄' },
-          { label:'Policies',         val: filtered.length,             color:'gray',   icon:'📋' },
-          { label:'Avg per Policy',   val: fmtCurrency(filtered.length ? Math.round(stats.total/filtered.length) : 0), color:'orange', icon:'📊' },
-        ].map(({ label, val, color, icon }) => (
-          <div key={label} className="stat-card">
-            <span className="text-2xl">{icon}</span>
-            <div>
-              <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
-            </div>
-          </div>
+          { label:'Actual posted', val: fmtCurrency(actualStats.total), note: `${transactions.length} ledger entries`, tone:'text-emerald-600' },
+          { label:'Estimated total', val: fmtCurrency(stats.total), note: 'From policy rates' },
+          { label:'FY estimate', val: fmtCurrency(stats.fyTotal), note: 'First-year business' },
+          { label:'RY estimate', val: fmtCurrency(stats.ryTotal), note: 'Renewal business' },
+          { label:'Average estimate', val: fmtCurrency(filtered.length ? Math.round(stats.total/filtered.length) : 0), note: `${filtered.length} policies` },
+        ].map(({ label, val, note, tone }) => (
+          <div key={label} className="commission-metric"><p className="commission-metric-label">{label}</p><p className={`commission-metric-value ${tone || ''}`}>{val}</p><p className="commission-metric-note">{note}</p></div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-        <div className="card"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">Actual posted commission</p><p className="mt-2 text-3xl font-black text-emerald-600">{fmtCurrency(actualStats.total)}</p><p className="mt-1 text-xs text-gray-500">From reconciled and manual ledger entries</p></div>
-        <div className="card"><p className="mb-3 text-sm font-bold">Company-wise actual</p>{Object.entries(actualStats.byInsurer).sort((a,b) => b[1]-a[1]).slice(0,5).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span className="truncate">{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
-        <div className="card"><p className="mb-3 text-sm font-bold">Client-wise actual</p>{Object.entries(actualStats.byClient).sort((a,b) => b[1]-a[1]).slice(0,5).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span className="truncate">{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
-        <div className="card"><p className="mb-3 text-sm font-bold">Category-wise actual</p>{Object.entries(actualStats.byCategory).sort((a,b) => b[1]-a[1]).map(([name, amount]) => <div key={name} className="flex justify-between py-1 text-sm"><span>{name}</span><strong>{fmtCurrency(amount)}</strong></div>)}{!transactions.length && <p className="text-sm text-gray-400">No posted commission yet.</p>}</div>
+      <div className="fintech-panel p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold">Actual commission breakdown</p><p className="text-xs text-gray-500">Posted ledger values only</p></div><div className="commission-segmented">{[['insurer','Insurer'],['category','Category'],['client','Client'],['month','Month']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
+        {transactions.length ? <div className="commission-rank-list mt-4">{Object.entries(actualBreakdown).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name,amount], index) => <div key={name} className="commission-rank-row"><span className="min-w-0 truncate"><span className="mr-2 text-xs font-bold text-gray-400">{String(index + 1).padStart(2,'0')}</span>{name}</span><strong className="tabular-nums">{fmtCurrency(amount)}</strong></div>)}</div> : <div className="commission-empty mt-4"><span className="commission-empty-mark">₹</span><p className="font-bold text-gray-700 dark:text-gray-200">No posted commission yet</p><p className="mt-1 text-sm">Confirm reconciliation rows or add a manual entry.</p></div>}
       </div>
       {hasMoreTransactions && <div className="text-center"><button className="btn-secondary" disabled={loadingMore} onClick={loadMoreTransactions}>{loadingMore ? 'Loading...' : 'Load 100 more commission records'}</button></div>}
 

@@ -150,10 +150,15 @@ export default function DashboardPage() {
     const sumMonth = month => commissionTransactions.filter(item => item.payoutMonth === month).reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0)
     const currentRows = commissionTransactions.filter(item => item.payoutMonth === currentCommissionMonth)
     const byInsurer = currentRows.reduce((map, item) => ({ ...map, [item.insurer || 'Other']: (map[item.insurer || 'Other'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
+    const byCategory = currentRows.reduce((map, item) => { const category = policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'; return { ...map, [category]: (map[category] || 0) + Number(item.netReceived || item.receivedCommission || 0) } }, {})
     const topInsurer = Object.entries(byInsurer).sort((a, b) => b[1] - a[1])[0]
+    const topCategory = Object.entries(byCategory).sort((a, b) => b[1] - a[1])[0]
     const unresolved = commissionBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.summary?.rows || 0) - Number(batch.summary?.posted || 0)), 0)
-    return { current: sumMonth(currentCommissionMonth), previous: sumMonth(previousMonth), unresolved, topInsurer }
-  }, [commissionTransactions, commissionBatches, currentCommissionMonth])
+    const current = sumMonth(currentCommissionMonth)
+    const previous = sumMonth(previousMonth)
+    const changePct = previous ? ((current - previous) / previous) * 100 : current ? 100 : 0
+    return { current, previous, changePct, unresolved, topInsurer, topCategory }
+  }, [commissionTransactions, commissionBatches, currentCommissionMonth, policies])
 
   const stats = useMemo(() => {
     // ✅ FIX D2: filter active policies FIRST before computing expired
@@ -217,14 +222,11 @@ export default function DashboardPage() {
   const greeting = NOW.getHours() < 12 ? 'Good morning' : NOW.getHours() < 17 ? 'Good afternoon' : 'Good evening'
 
   if (loading) return (
-    <div className="p-8 flex items-center gap-3 text-gray-400 dark:text-gray-500">
-      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      Loading dashboard…
-    </div>
+    <div className="fintech-page space-y-4"><div className="commission-skeleton h-9 w-72" /><div className="commission-command-grid">{Array.from({ length: 5 }, (_, index) => <div key={index} className="fintech-panel space-y-3 p-4"><div className="commission-skeleton h-3 w-24" /><div className="commission-skeleton h-7 w-32" /></div>)}</div><div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="fintech-panel h-24 p-4"><div className="commission-skeleton h-full w-full" /></div>)}</div></div>
   )
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+    <div className="fintech-page space-y-4 sm:space-y-5">
       {showCommissionReminder && !commissionMonthComplete && (
         <div className="fixed inset-0 z-[120] flex items-end bg-black/50 p-0 sm:items-center sm:justify-center sm:p-4">
           <div className="w-full rounded-t-2xl bg-white p-5 shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl">
@@ -234,11 +236,11 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-      <div className="card flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="fintech-header border-b border-slate-200 pb-4 dark:border-slate-800">
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-600 dark:text-cyan-300">Gohil Investments · Bhavnagar</p>
-          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950 dark:text-slate-100">{greeting}, Harshdip</h1>
-          <p className="mt-1 text-sm text-slate-500">{fmtDate(NOW)}</p>
+          <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
+          <h1 className="fintech-title">{greeting}, Harshdip</h1>
+          <p className="fintech-subtitle">{fmtDate(NOW)} · Portfolio operations overview</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
@@ -252,17 +254,21 @@ export default function DashboardPage() {
       </div>
 
       {!commissionMonthComplete && (
-        <button onClick={() => navigate('/commission-reconciliation')} className="flex w-full items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-4 text-left dark:border-amber-800 dark:bg-amber-950/30">
+        <button onClick={() => navigate('/commission-reconciliation')} className="flex w-full items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 text-left dark:border-amber-800 dark:bg-amber-950/30">
           <div><p className="font-bold text-amber-800 dark:text-amber-200">Commission statement pending for {format(NOW, 'MMMM yyyy')}</p><p className="text-sm text-amber-700 dark:text-amber-300">Upload the latest PDF, Excel, or CSV statement for reconciliation.</p></div><span className="font-bold text-amber-700">Upload</span>
         </button>
       )}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <div className="stat-card"><div><p className="text-xl font-black text-emerald-600">{fmtCurrency(actualCommission.current)}</p><p className="text-xs text-gray-500">Actual commission this month</p></div></div>
-        <div className="stat-card"><div><p className="text-xl font-black">{fmtCurrency(actualCommission.previous)}</p><p className="text-xs text-gray-500">Previous month</p></div></div>
-        <div className="stat-card cursor-pointer" onClick={() => navigate('/commission-reconciliation')}><div><p className="text-xl font-black text-amber-600">{actualCommission.unresolved}</p><p className="text-xs text-gray-500">Pending reconciliation</p></div></div>
-        <div className="stat-card"><div><p className="truncate text-lg font-black">{actualCommission.topInsurer?.[0] || '-'}</p><p className="text-xs text-gray-500">Top insurer · {fmtCurrency(actualCommission.topInsurer?.[1] || 0)}</p></div></div>
+      <section aria-label="Commission summary">
+        <div className="mb-2 flex items-center justify-between"><div><p className="text-sm font-extrabold">Commission command center</p><p className="text-xs text-gray-500">Actual posted revenue and reconciliation health</p></div><button className="text-xs font-bold text-blue-600" onClick={() => navigate('/commission')}>View details</button></div>
+      <div className="commission-command-grid">
+        <div className="commission-metric"><div className="commission-metric-top"><p className="commission-metric-label">This month</p><span className={`commission-delta ${actualCommission.changePct >= 0 ? 'positive' : 'negative'}`}>{actualCommission.changePct >= 0 ? '+' : ''}{actualCommission.changePct.toFixed(0)}%</span></div><p className="commission-metric-value text-emerald-600">{fmtCurrency(actualCommission.current)}</p><p className="commission-metric-note">Actual posted</p></div>
+        <div className="commission-metric"><p className="commission-metric-label">Previous month</p><p className="commission-metric-value">{fmtCurrency(actualCommission.previous)}</p><p className="commission-metric-note">Comparison baseline</p></div>
+        <button className="commission-metric text-left" onClick={() => navigate('/commission-reconciliation')}><p className="commission-metric-label">Pending review</p><p className="commission-metric-value text-amber-600">{actualCommission.unresolved}</p><p className="commission-metric-note">Reconciliation rows</p></button>
+        <div className="commission-metric"><p className="commission-metric-label">Top insurer</p><p className="commission-metric-value text-lg">{actualCommission.topInsurer?.[0] || '-'}</p><p className="commission-metric-note">{fmtCurrency(actualCommission.topInsurer?.[1] || 0)}</p></div>
+        <div className="commission-metric"><p className="commission-metric-label">Top category</p><p className="commission-metric-value text-lg">{actualCommission.topCategory?.[0] || '-'}</p><p className="commission-metric-note">{fmtCurrency(actualCommission.topCategory?.[1] || 0)}</p></div>
       </div>
+      </section>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard icon="CL" label="Clients"         value={stats.clients}     color="blue"   onClick={() => navigate('/clients')} />

@@ -73,7 +73,7 @@ const STATUS_STYLES = {
 }
 
 function StatusChip({ status }) {
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${STATUS_STYLES[status] || STATUS_STYLES.review}`}>{String(status || 'review').replace(/-/g, ' ')}</span>
+  return <span className={`commission-status capitalize ${STATUS_STYLES[status] || STATUS_STYLES.review}`}>{String(status || 'review').replace(/-/g, ' ')}</span>
 }
 
 export default function CommissionReconciliationPage() {
@@ -100,6 +100,8 @@ export default function CommissionReconciliationPage() {
   const [mappingProfileId, setMappingProfileId] = useState('')
   const [mappingForm, setMappingForm] = useState({})
   const [showMapping, setShowMapping] = useState(false)
+  const [loadingRows, setLoadingRows] = useState(false)
+  const [pageError, setPageError] = useState('')
   const [includeRow, setIncludeRow] = useState(null)
   const [matchRow, setMatchRow] = useState(null)
   const [matchQuery, setMatchQuery] = useState('')
@@ -133,7 +135,7 @@ export default function CommissionReconciliationPage() {
     if (!isAdmin) return
     Promise.all([getAllCommissionReconciliationBatches(), getAllCommissionTransactions(), getAllCommissionImportTemplates()])
       .then(([batchRows, transactions, templates]) => { setBatches(batchRows); setExistingTransactions(transactions); setMappingTemplates(templates) })
-      .catch(err => toast.error(friendlyFirebaseError(err, 'Could not load reconciliation batches.')))
+      .catch(err => { const message = friendlyFirebaseError(err, 'Could not load reconciliation batches.'); setPageError(message); toast.error(message) })
   }, [isAdmin])
 
   const loadRows = async batchId => {
@@ -143,7 +145,11 @@ export default function CommissionReconciliationPage() {
       setInsurer(batch.insurer || '')
       setStatementMonth(batch.statementMonth || '')
     }
-    setRows(batchId ? await getCommissionReconciliationRows(batchId) : [])
+    setLoadingRows(true)
+    setPageError('')
+    try { setRows(batchId ? await getCommissionReconciliationRows(batchId) : []) }
+    catch (err) { const message = friendlyFirebaseError(err, 'Could not load reconciliation rows.'); setPageError(message); toast.error(message) }
+    finally { setLoadingRows(false) }
   }
 
   const chooseMappingProfile = profileId => {
@@ -299,7 +305,9 @@ export default function CommissionReconciliationPage() {
       }
     } catch (err) {
       setProgress('')
-      toast.error(friendlyFirebaseError(err, 'Could not create reconciliation batch.'))
+      const message = friendlyFirebaseError(err, 'Could not create reconciliation batch.')
+      setPageError(message)
+      toast.error(message)
     }
   }
 
@@ -583,14 +591,22 @@ export default function CommissionReconciliationPage() {
   )
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900 dark:text-white">Commission Reconciliation</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Upload insurer statements, review matches, and post commission only after confirmation.</p></div>
+    <div className="fintech-page space-y-4 sm:space-y-5">
+      <div className="fintech-header">
+        <div><p className="fintech-kicker">Commission operations</p><h1 className="fintech-title">Commission Reconciliation</h1>
+        <p className="fintech-subtitle">Upload insurer statements, review confidence and exceptions, then post confirmed commission.</p></div>
         <button type="button" className="btn-secondary" onClick={() => setManualOpen(true)}>+ Manual commission</button>
       </div>
 
-      <form onSubmit={createBatch} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+      <div className="commission-workflow" aria-label="Reconciliation workflow">
+        <div className={`commission-workflow-step ${!selectedBatch ? 'active' : ''}`}><span className="commission-step-number">1</span><span>Upload statement</span></div>
+        <div className={`commission-workflow-step ${selectedBatch && summary.posted < summary.total ? 'active' : ''}`}><span className="commission-step-number">2</span><span>Review matches</span></div>
+        <div className={`commission-workflow-step ${selectedBatch && summary.total > 0 && summary.posted === summary.total ? 'active' : ''}`}><span className="commission-step-number">3</span><span>Post commission</span></div>
+      </div>
+
+      {pageError && <div className="flex items-start justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><div><p className="font-bold">Commission data needs attention</p><p className="mt-0.5">{pageError}</p></div><button className="font-bold" onClick={() => { setPageError(''); loadBatches().catch(err => setPageError(friendlyFirebaseError(err, 'Retry failed.'))) }}>Retry</button></div>}
+
+      <form onSubmit={createBatch} className="fintech-panel commission-upload-panel grid grid-cols-1 items-end gap-3 md:grid-cols-5">
         <div>
           <input
             className="form-input"
@@ -627,6 +643,7 @@ export default function CommissionReconciliationPage() {
           <div className="md:col-span-5 space-y-2" role="status" aria-live="polite">
             <div className="h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950"><div className="h-full w-2/3 animate-pulse rounded-full bg-blue-600" /></div>
             <p className="text-sm font-medium text-blue-600">{progress}</p>
+            <div className="grid grid-cols-3 gap-2" aria-hidden="true"><div className="commission-skeleton h-8" /><div className="commission-skeleton h-8" /><div className="commission-skeleton h-8" /></div>
           </div>
         )}
         <p className="md:col-span-5 text-xs text-gray-500">
@@ -634,14 +651,14 @@ export default function CommissionReconciliationPage() {
         </p>
       </form>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="stat-card"><div><p className="text-xl font-bold">{summary.total}</p><p className="text-xs text-gray-500">Rows</p></div></div>
-        <div className="stat-card"><div><p className="text-xl font-bold text-green-600">{summary.high}</p><p className="text-xs text-gray-500">High Match</p></div></div>
-        <div className="stat-card"><div><p className="text-xl font-bold text-yellow-600">{summary.review}</p><p className="text-xs text-gray-500">Need Review</p></div></div>
-        <div className="stat-card"><div><p className="text-xl font-bold text-blue-600">{summary.posted}</p><p className="text-xs text-gray-500">Posted</p></div></div>
+      <div className="commission-metric-grid">
+        <div className="commission-metric"><p className="commission-metric-label">Rows detected</p><p className="commission-metric-value">{summary.total}</p><p className="commission-metric-note">Current statement</p></div>
+        <div className="commission-metric"><p className="commission-metric-label">Exact matches</p><p className="commission-metric-value text-emerald-600">{summary.high}</p><p className="commission-metric-note">Ready for confirmation</p></div>
+        <div className="commission-metric"><p className="commission-metric-label">Needs review</p><p className="commission-metric-value text-amber-600">{summary.review}</p><p className="commission-metric-note">Manual decision required</p></div>
+        <div className="commission-metric"><p className="commission-metric-label">Posted</p><p className="commission-metric-value text-blue-600">{summary.posted}</p><p className="commission-metric-note">Written to ledger</p></div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
+      <div className="fintech-panel p-3 sm:p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <select className="form-input max-w-xl" value={selectedBatch} onChange={e => loadRows(e.target.value)}>
           <option value="">Select reconciliation batch</option>
@@ -661,7 +678,7 @@ export default function CommissionReconciliationPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 lg:flex-row lg:items-center">
+      <div className="commission-toolbar">
         <input className="form-input flex-1" placeholder="Search client, policy, plan, insurer or status..." value={queryText} onChange={e => setQueryText(e.target.value)} />
         <select className="form-input lg:w-56" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All statuses</option>
@@ -673,9 +690,11 @@ export default function CommissionReconciliationPage() {
         <button type="button" className="btn-primary whitespace-nowrap" disabled={bulkPosting} onClick={confirmAllExact}>{bulkPosting ? 'Posting...' : 'Confirm all exact'}</button>
       </div>
 
-      <div className="space-y-3 md:hidden">
+      {loadingRows && <div className="fintech-panel space-y-3 p-4" aria-label="Loading reconciliation rows"><div className="commission-skeleton h-5 w-40" /><div className="commission-skeleton h-16 w-full" /><div className="commission-skeleton h-16 w-full" /><div className="commission-skeleton h-16 w-full" /></div>}
+
+      <div className={`${loadingRows ? 'hidden' : ''} space-y-3 md:hidden`}>
         {filteredRows.map(row => (
-          <article key={row.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+          <article key={row.id} data-status={row.status} className="commission-mobile-card p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0"><p className="truncate font-bold text-gray-900 dark:text-white">{row.uploadedClientName || 'Unnamed client'}</p><p className="mt-1 break-all text-xs text-gray-500">{row.uploadedPolicyNumber || 'No policy number'} · {row.uploadedPlanName || 'Plan not supplied'}</p></div>
               <StatusChip status={row.status} />
@@ -698,11 +717,11 @@ export default function CommissionReconciliationPage() {
             </div>
           </article>
         ))}
-        {!filteredRows.length && <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">No reconciliation rows match these filters.</div>}
+        {!filteredRows.length && <div className="commission-empty"><span className="commission-empty-mark">0</span><p className="font-bold text-gray-700 dark:text-gray-200">No reconciliation rows</p><p className="mt-1 text-sm">Upload a statement or adjust the current filters.</p></div>}
       </div>
 
-      <div className="hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-auto md:block">
-        <table className="min-w-full text-sm">
+      <div className={`${loadingRows ? 'hidden' : ''} fintech-panel hidden overflow-auto md:block`}>
+        <table className="commission-table min-w-full text-sm">
           <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 z-10 text-xs uppercase text-gray-500">
             <tr>
               <th className="px-4 py-3 text-left">Uploaded Client</th><th className="px-4 py-3 text-left">Uploaded Policy</th><th className="px-4 py-3 text-left">Matched Policy</th><th className="px-4 py-3 text-left">Premium</th><th className="px-4 py-3 text-left">Net Paid</th><th className="px-4 py-3 text-left">Confidence</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
