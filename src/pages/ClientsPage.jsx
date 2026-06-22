@@ -14,6 +14,7 @@ import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput     from '../components/ui/DateInput'
+import AppIcon       from '../components/ui/AppIcon'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import { exportToCSV, exportToExcel, exportToPDF, CLIENT_COLS } from '../utils/exportUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -800,17 +801,17 @@ export default function ClientsPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Clients</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="clients" size={24} /> Clients</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{clients.length} total · {gapCount} with coverage gaps</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button className="btn-primary" onClick={() => { setSelected(null); setModal('add') }}>+ Add Client</button>
+          <button className="btn-primary" onClick={() => { setSelected(null); setModal('add') }}><AppIcon name="userAdd" size={17} /> Add Client</button>
           {isAdmin && (
             <button
               className="px-4 py-2 text-sm font-semibold bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
               onClick={() => setModal('climer')}
               title="Merge duplicate clients">
-              🔀 CliMer
+              <AppIcon name="merge" size={17} /> CliMer
             </button>
           )}
         </div>
@@ -837,13 +838,13 @@ export default function ClientsPage() {
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
               showGapsOnly?'bg-orange-500 text-white border-orange-500':'bg-white dark:bg-gray-700 text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-900/20'
             }`}>
-            🎯 Gaps Only {gapCount>0&&`(${gapCount})`}
+            Gaps Only {gapCount>0&&`(${gapCount})`}
           </button>
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
-          <button onClick={() => exportToCSV(filtered,CLIENT_COLS,'clients')} className="btn-secondary text-xs">⬇ CSV</button>
-          <button onClick={() => exportToExcel(filtered,CLIENT_COLS,'Clients','clients')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={async () => await exportToPDF(filtered,CLIENT_COLS,'Client List','clients')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={() => exportToCSV(filtered,CLIENT_COLS,'clients')} className="btn-secondary text-xs"><AppIcon name="download" size={15} /> CSV</button>
+          <button onClick={() => exportToExcel(filtered,CLIENT_COLS,'Clients','clients')} className="btn-secondary text-xs"><AppIcon name="spreadsheet" size={15} /> Excel</button>
+          <button onClick={async () => await exportToPDF(filtered,CLIENT_COLS,'Client List','clients')} className="btn-secondary text-xs"><AppIcon name="file" size={15} /> PDF</button>
         </div>
       </div>
 
@@ -855,7 +856,7 @@ export default function ClientsPage() {
           </span>
           <button onClick={() => setBulkDelOpen(true)}
                   className="px-4 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">
-            🗑️ Delete Selected
+            <AppIcon name="trash" size={15} /> Delete Selected
           </button>
           <button onClick={clearSelection}
                   className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg hover:bg-red-50">

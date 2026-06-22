@@ -16,6 +16,7 @@ import {
 } from 'chart.js'
 import { Bar, Doughnut, Line } from 'react-chartjs-2'
 import { format, differenceInDays, subMonths, startOfDay } from 'date-fns'
+import AppIcon from '../components/ui/AppIcon'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend, LineElement, PointElement, Filler)
 
@@ -60,12 +61,12 @@ function StatCard({ icon, label, value, sub, color, onClick, badge }) {
   return (
     <div className={`stat-card group relative ${onClick ? 'cursor-pointer' : ''}`} onClick={onClick}>
       {badge > 0 && (
-        <span className="absolute right-3 top-3 z-10 flex h-5 min-w-5 animate-[floatSoft_3s_ease-in-out_infinite] items-center justify-center rounded-full border-2 border-slate-950 bg-gradient-to-br from-red-500 to-red-600 px-1 text-[10px] font-black text-white">{badge}</span>
+        <span className="absolute right-3 top-3 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{badge}</span>
       )}
-      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/20 to-cyan-500/10 text-sm font-black shadow-[0_4px_12px_rgba(37,99,235,0.2),inset_0_1px_0_rgba(255,255,255,0.1)] ${colors[color] || colors.blue}`}>{icon}</div>
+      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40 ${colors[color] || colors.blue}`}><AppIcon name={icon} size={21} /></div>
       <div className="relative z-[1] min-w-0">
-        <p className="bg-gradient-to-br from-slate-950 to-slate-500 bg-clip-text font-mono text-[28px] font-black leading-none tracking-tight text-transparent dark:from-slate-100 dark:to-slate-400">{value}</p>
-        <p className="mt-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-500">{label}</p>
+        <p className="text-[26px] font-bold leading-none text-slate-950 dark:text-slate-100">{value}</p>
+        <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{label}</p>
         {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
       </div>
     </div>
@@ -271,12 +272,12 @@ export default function DashboardPage() {
       </section>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard icon="CL" label="Clients"         value={stats.clients}     color="blue"   onClick={() => navigate('/clients')} />
-        <StatCard icon="PL" label="Active Policies" value={stats.active}      color="green"  onClick={() => navigate('/policies')} />
-        <StatCard icon="RN" label="Expiring (30d)"  value={stats.expiring30}  color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
-        <StatCard icon="OD" label="Overdue"          value={stats.expired}     color="red"    onClick={() => navigate('/renewals')} badge={stats.expired} />
-        <StatCard icon="CO" label="Est. Commission" value={fmtCurrency(stats.totalComm)} color="purple" />
-        <StatCard icon="CM" label="Open Claims"     value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
+        <StatCard icon="clients" label="Clients"         value={stats.clients}     color="blue"   onClick={() => navigate('/clients')} />
+        <StatCard icon="policies" label="Active Policies" value={stats.active}      color="green"  onClick={() => navigate('/policies')} />
+        <StatCard icon="renewals" label="Expiring (30d)"  value={stats.expiring30}  color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
+        <StatCard icon="warning" label="Overdue"          value={stats.expired}     color="red"    onClick={() => navigate('/renewals')} badge={stats.expired} />
+        <StatCard icon="commission" label="Est. Commission" value={fmtCurrency(stats.totalComm)} color="purple" />
+        <StatCard icon="claims" label="Open Claims"     value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -311,7 +312,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="card">
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">🏷️ Policies by Type</p>
+          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">Policies by Type</p>
           <div style={{ height: 180 }}>
             <Doughnut
               data={{ labels: Object.keys(stats.byType), datasets: [{ data: Object.values(stats.byType), backgroundColor: typeColors, borderWidth: 2 }] }}
@@ -320,7 +321,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="card">
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">📅 New Policies (6 months)</p>
+          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">New Policies (6 months)</p>
           <div style={{ height: 180 }}>
             <Bar
               data={{ labels: stats.monthly.map(m => m.label), datasets: [{ label: 'Policies', data: stats.monthly.map(m => m.count), backgroundColor: '#3b82f6', borderRadius: 4 }] }}
@@ -329,7 +330,7 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="card">
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">💰 Commission Trend (6 months)</p>
+          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">Commission Trend (6 months)</p>
           <div style={{ height: 180 }}>
             <Line
               data={{ labels: stats.monthly.map(m => m.label), datasets: [{ label: 'Commission ₹', data: stats.monthly.map(m => m.comm), borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.1)', tension: 0.4, fill: true, pointRadius: 4 }] }}
@@ -341,9 +342,9 @@ export default function DashboardPage() {
 
       <div className="card">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-bold text-gray-800 dark:text-white">📊 Agent Performance</h2>
+            <h2 className="text-base font-bold text-gray-800 dark:text-white">Agent Performance</h2>
           <div className="flex gap-1">
-            {[['commission', '💰 Commission'], ['policies', '📋 Policies'], ['clients', '👥 Clients']].map(([k, l]) => (
+            {[['commission', 'Commission'], ['policies', 'Policies'], ['clients', 'Clients']].map(([k, l]) => (
               <button key={k} onClick={() => setPerfTab(k)}
                       className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${perfTab === k ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
                 {l}
@@ -420,7 +421,7 @@ export default function DashboardPage() {
       {claims.length > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-gray-800 dark:text-white">🔍 Claims Pipeline</h2>
+            <h2 className="text-base font-bold text-gray-800 dark:text-white">Claims Pipeline</h2>
             <button onClick={() => navigate('/claims')} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">View all →</button>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">

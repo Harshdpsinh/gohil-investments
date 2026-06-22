@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
 import useAndroidBack from '../../hooks/useAndroidBack'
+import AppIcon from '../ui/AppIcon'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -74,7 +75,8 @@ export default function Layout({ children }) {
   }, [])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-100 text-slate-950 dark:bg-[#0a0f1e] dark:text-slate-100">
+    <div className="app-shell flex h-screen overflow-hidden text-slate-950 dark:text-slate-100">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:flex-shrink-0">
         <Sidebar />
@@ -84,7 +86,7 @@ export default function Layout({ children }) {
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 flex lg:hidden">
           {/* UI-only verification: this keeps the original backdrop close action mapped to setSidebarOpen(false). */}
-          <div className="fixed inset-0 bg-gray-950/60 backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
+          <div className="fixed inset-0 bg-slate-950/60" onClick={() => setSidebarOpen(false)} />
           <div
             className="mobile-drawer open relative z-50 flex w-72 flex-col shadow-2xl"
             onTouchStart={event => { event.currentTarget.dataset.touchX = String(event.touches[0].clientX) }}
@@ -102,16 +104,14 @@ export default function Layout({ children }) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/90 px-2 shadow-sm backdrop-blur-2xl lg:hidden dark:border-slate-400/10 dark:bg-slate-950/80 dark:shadow-[0_1px_0_rgba(255,255,255,0.04),0_4px_16px_rgba(0,0,0,0.2)]">
+        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between px-2 lg:hidden">
           {/* UI-only verification: the menu button still opens the existing mobile sidebar state. */}
           <button
             onClick={() => setSidebarOpen(true)}
             className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"
             aria-label="Open navigation"
           >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            <AppIcon name="menu" size={22} />
           </button>
           <div className="flex items-center gap-2">
             <span className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -130,15 +130,16 @@ export default function Layout({ children }) {
             if (btn) btn.classList.toggle('visible', e.target.scrollTop > 300)
           }}
         >
-          <div className="page-enter min-h-full">{children}</div>
+          <div className="page-enter min-h-full" id="main-content" tabIndex="-1">{children}</div>
           <button
             id="back-to-top"
             className="back-to-top"
             /* UI-only verification: this keeps the original scroll-to-top target and behavior. */
             onClick={() => document.getElementById('main-scroll')?.scrollTo({ top: 0, behavior: 'smooth' })}
             title="Back to top"
+            aria-label="Back to top"
           >
-            UP
+            <AppIcon name="arrowUp" size={18} />
           </button>
         </main>
       </div>

@@ -12,6 +12,7 @@ import { computeCoverageGaps } from '../utils/policySchemas'
 import { getDocMeta } from '../firebase/firestore'
 import { openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
+import AppIcon from '../components/ui/AppIcon'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -42,7 +43,7 @@ function Section({ title, icon, children, badge }) {
   return (
     <div className="card">
       <div className="flex items-center gap-2 mb-4">
-        <span className="text-xl">{icon}</span>
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-200"><AppIcon name={icon} size={18} /></span>
         <h2 className="text-base font-bold text-gray-800 dark:text-white">{title}</h2>
         {badge > 0 && (
           <span className="ml-auto bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs font-bold px-2 py-0.5 rounded-full">{badge}</span>
@@ -170,7 +171,7 @@ export default function ClientProfilePage() {
         <div className="flex items-start gap-4">
           <button onClick={() => navigate('/clients')}
                   className="mt-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400">
-            ← 
+            <AppIcon name="chevronLeft" size={20} />
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{client.name}</h1>
@@ -187,13 +188,13 @@ export default function ClientProfilePage() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={openWhatsApp} className="btn-whatsapp">📱 WhatsApp</button>
+          <button onClick={openWhatsApp} className="btn-whatsapp"><AppIcon name="message" size={17} /> WhatsApp</button>
           {/* ✅ FIX CP1: navigate to /clients with state to open edit modal for this client */}
           <button
             onClick={() => navigate('/clients', { state: { editClientId: id } })}
             className="btn-secondary"
           >
-            ✏️ Edit Client
+            <AppIcon name="pencil" size={17} /> Edit Client
           </button>
         </div>
       </div>
@@ -201,14 +202,14 @@ export default function ClientProfilePage() {
       {/* Quick stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
-          { icon: '📋', label: 'Active Policies', val: activePolicies.length, color: 'blue'   },
-          { icon: '💰', label: 'Total Premium',   val: fmtCurrency(totalPremium), color: 'green'  },
-          { icon: '🛡️', label: 'Total Coverage',  val: fmtCurrency(totalCoverage), color: 'purple' },
-          { icon: '🔍', label: 'Claims',           val: claims.length,          color: 'orange' },
-          { icon: 'CO', label: 'Commission Earned', val: fmtCurrency(totalCommission), color: 'green' },
+          { icon: 'policies', label: 'Active Policies', val: activePolicies.length, color: 'blue'   },
+          { icon: 'rupee', label: 'Total Premium',   val: fmtCurrency(totalPremium), color: 'green'  },
+          { icon: 'shield', label: 'Total Coverage',  val: fmtCurrency(totalCoverage), color: 'purple' },
+          { icon: 'claims', label: 'Claims',           val: claims.length,          color: 'orange' },
+          { icon: 'commission', label: 'Commission Earned', val: fmtCurrency(totalCommission), color: 'green' },
         ].map(({ icon, label, val, color }) => (
           <div key={label} className="stat-card">
-            <span className="text-2xl">{icon}</span>
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200"><AppIcon name={icon} size={20} /></span>
             <div>
               <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
@@ -229,7 +230,7 @@ export default function ClientProfilePage() {
         </div>
       )}
 
-      <Section title="Commission History" icon="CO" badge={commission.length}>
+      <Section title="Commission History" icon="commission" badge={commission.length}>
         {commission.length === 0 ? <p className="text-sm text-gray-400">No posted commission for this client yet.</p> : (
           <div className="space-y-2">
             {commission.map(item => (
@@ -244,7 +245,7 @@ export default function ClientProfilePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Personal details */}
-        <Section title="Personal Details" icon="👤">
+        <Section title="Personal Details" icon="client">
           <div className="grid grid-cols-2 gap-3 text-sm">
             {[
               ['PAN',         client.pan],
@@ -269,7 +270,7 @@ export default function ClientProfilePage() {
         </Section>
 
         {/* Documents */}
-        <Section title="Documents" icon="📎" badge={docs.length + policyDocuments.length}>
+        <Section title="Documents" icon="folder" badge={docs.length + policyDocuments.length}>
           {docs.length === 0 && policyDocuments.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">No documents uploaded</p>
           ) : (
@@ -314,7 +315,7 @@ export default function ClientProfilePage() {
               {docs.map(d => (
                 <div key={d.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <span className="text-lg flex-shrink-0">{d.type?.includes('pdf') ? '📄' : '🖼️'}</span>
+                    <span className="flex-shrink-0 text-slate-500"><AppIcon name={d.type?.includes('pdf') ? 'file' : 'folder'} size={18} /></span>
                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{d.name}</p>
                   </div>
                   <button
@@ -349,7 +350,7 @@ export default function ClientProfilePage() {
       </div>
 
       {/* Policies */}
-      <Section title="Policy History" icon="📋" badge={clientPolicies.length}>
+      <Section title="Policy History" icon="history" badge={clientPolicies.length}>
         {clientPolicies.length === 0 ? (
           <p className="text-xs text-gray-400 dark:text-gray-500">No policies found</p>
         ) : (
@@ -388,7 +389,7 @@ export default function ClientProfilePage() {
       </Section>
 
       {familyKey && (
-        <Section title="Family Policies" icon="Family" badge={familyPolicies.length}>
+        <Section title="Family Policies" icon="users" badge={familyPolicies.length}>
           <div className="mb-3 flex flex-wrap gap-2 text-xs">
             {familyMembers.map(member => (
               <span key={member.id} className={`px-2 py-1 rounded-full font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
@@ -422,7 +423,7 @@ export default function ClientProfilePage() {
       )}
 
       {/* Claims */}
-      <Section title="Claims" icon="🔍" badge={claims.length}>
+      <Section title="Claims" icon="claims" badge={claims.length}>
         {claims.length === 0 ? (
           <p className="text-xs text-gray-400 dark:text-gray-500">No claims on record</p>
         ) : (
@@ -445,11 +446,11 @@ export default function ClientProfilePage() {
 
       {/* Tasks */}
       {tasks.length > 0 && (
-        <Section title="Pending Tasks" icon="✅" badge={tasks.filter(t => !t.done).length}>
+        <Section title="Pending Tasks" icon="tasks" badge={tasks.filter(t => !t.done).length}>
           <div className="space-y-2">
             {tasks.filter(t => !t.done).map(t => (
               <div key={t.id} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                <span className="text-lg">{t.type === 'Call' ? '📞' : t.type === 'Email' ? '📧' : t.type === 'Meeting' ? '🤝' : '📌'}</span>
+                <span className="text-slate-500"><AppIcon name={t.type === 'Call' ? 'phone' : t.type === 'Email' ? 'mail' : t.type === 'Meeting' ? 'users' : 'tasks'} size={18} /></span>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{t.title}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">Due: {fmtDate(t.dueDate)}</p>

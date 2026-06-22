@@ -1,5 +1,6 @@
 // UI MODERNIZATION - logic unchanged
 import { useEffect } from 'react'
+import AppIcon from './AppIcon'
 
 export default function Modal({ open, onClose, title, children, size = 'md', subtitle = '', footerContent = null }) {
   useEffect(() => {
@@ -29,7 +30,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
   return (
     <div className="gi-modal-overlay fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4">
       {/* UI-only verification: backdrop click still calls the original onClose prop. */}
-      <div className="absolute inset-0 animate-fadeIn bg-slate-950/72 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 animate-fadeIn bg-slate-950/60" onClick={onClose} />
 
       <div className={`gi-modal animate-scaleIn relative flex max-h-[90vh] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/10 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)] dark:bg-gradient-to-br dark:from-slate-900 dark:to-[#101827] dark:shadow-[0_24px_80px_rgba(0,0,0,0.62),0_0_0_1px_rgba(255,255,255,0.04)] ${widths[size]} max-w-[calc(100vw-2rem)]`}>
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-slate-200/80 bg-slate-50/80 px-6 py-4 dark:border-slate-400/10 dark:bg-slate-950/30">
@@ -43,7 +44,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-xl leading-none text-slate-500 shadow-sm hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-red-500/30 dark:hover:bg-red-500/15 dark:hover:text-red-300"
             aria-label="Close modal"
           >
-            &times;
+            <AppIcon name="x" size={20} />
           </button>
         </div>
 

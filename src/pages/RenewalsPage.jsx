@@ -17,6 +17,7 @@ import { openWhatsAppLink } from '../services/whatsappService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
+import AppIcon from '../components/ui/AppIcon'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
@@ -871,27 +872,27 @@ export default function RenewalsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">🔄 Renewals</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="renewals" size={24} /> Renewals</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {filtered.length} policies · Premium due: {fmtCurrency(stats.totalPremium)}
           </p>
         </div>
         <button onClick={exportPDF}
                 className="btn-secondary text-sm">
-          ⬇ Export PDF
+          <AppIcon name="download" size={17} /> Export PDF
         </button>
       </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Overdue',    val: stats.overdue,   color: 'red',    icon: '⏰' },
-          { label: 'Due Today',  val: stats.dueToday,  color: 'orange', icon: '🔴' },
-          { label: 'Critical (≤7d)', val: stats.critical, color: 'yellow', icon: '⚡' },
-          { label: 'Total Premium',  val: fmtCurrency(stats.totalPremium), color: 'blue', icon: '💰' },
+          { label: 'Overdue',    val: stats.overdue,   color: 'red',    icon: 'warning' },
+          { label: 'Due Today',  val: stats.dueToday,  color: 'orange', icon: 'clock' },
+          { label: 'Critical (≤7d)', val: stats.critical, color: 'yellow', icon: 'fileClock' },
+          { label: 'Total Premium',  val: fmtCurrency(stats.totalPremium), color: 'blue', icon: 'rupee' },
         ].map(({ label, val, color, icon }) => (
           <div key={label} className="stat-card">
-            <span className="text-2xl">{icon}</span>
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200"><AppIcon name={icon} size={20} /></span>
             <div>
               <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
@@ -922,7 +923,7 @@ export default function RenewalsPage() {
           { d: 15,  label: '15 days' },
           { d: 30,  label: '30 days' },
           { d: 60,  label: '60 days' },
-          { d: -1,  label: '⏰ Overdue' },
+          { d: -1,  label: 'Overdue' },
         ].map(({ d, label }) => (
           <button key={d}
                   onClick={() => setDayWindow(d)}
@@ -946,7 +947,7 @@ export default function RenewalsPage() {
                  className="form-input text-xs py-1 px-2 w-36" />
           {(dateFrom || dateTo) && (
             <button onClick={() => { setDateFrom(''); setDateTo('') }}
-                    className="text-xs text-red-500 hover:text-red-700">✕ Clear</button>
+                    className="inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-red-600 hover:text-red-700"><AppIcon name="x" size={15} /> Clear</button>
           )}
         </div>
       </div>

@@ -10,6 +10,7 @@ import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar     from '../components/ui/SearchBar'
 import DateInput     from '../components/ui/DateInput'
+import AppIcon       from '../components/ui/AppIcon'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -350,15 +351,15 @@ export default function ClaimsPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Claims</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="claims" size={24} /> Claims</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{claims.length} total claims</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={()=>setView(v=>v==='table'?'pipeline':'table')}
                   className="btn-secondary">
-            {view==='table' ? '🔀 Pipeline View' : '📋 Table View'}
+            {view==='table' ? <><AppIcon name="merge" size={16} /> Pipeline View</> : <><AppIcon name="file" size={16} /> Table View</>}
           </button>
-          <button className="btn-primary" onClick={()=>{setSelected(null);setModal('add')}}>+ Add Claim</button>
+          <button className="btn-primary" onClick={()=>{setSelected(null);setModal('add')}}><AppIcon name="plus" size={17} /> Add Claim</button>
         </div>
       </div>
 
@@ -394,9 +395,9 @@ export default function ClaimsPage() {
           ))}
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
-          <button onClick={()=>exportToCSV(filtered,CLAIM_COLS,'claims')} className="btn-secondary text-xs">⬇ CSV</button>
-          <button onClick={()=>exportToExcel(filtered,CLAIM_COLS,'Claims','claims')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={async()=>await exportToPDF(filtered,CLAIM_COLS,'Claims Register','claims')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={()=>exportToCSV(filtered,CLAIM_COLS,'claims')} className="btn-secondary text-xs"><AppIcon name="download" size={15} /> CSV</button>
+          <button onClick={()=>exportToExcel(filtered,CLAIM_COLS,'Claims','claims')} className="btn-secondary text-xs"><AppIcon name="spreadsheet" size={15} /> Excel</button>
+          <button onClick={async()=>await exportToPDF(filtered,CLAIM_COLS,'Claims Register','claims')} className="btn-secondary text-xs"><AppIcon name="file" size={15} /> PDF</button>
         </div>
       </div>
 

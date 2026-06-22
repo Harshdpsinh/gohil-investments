@@ -15,7 +15,7 @@ export default {
           900: '#1e3a8a',
         }
       },
-      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] }
+      fontFamily: { sans: ['IBM Plex Sans', 'ui-sans-serif', 'system-ui'] }
     }
   },
   plugins: []

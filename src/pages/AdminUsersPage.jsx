@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth }    from '../hooks/useAuth'
 import { getAllUsers, setUserRole } from '../firebase/firestore'
+import AppIcon from '../components/ui/AppIcon'
 import toast from 'react-hot-toast'
 
 export default function AdminUsersPage() {
@@ -75,7 +76,7 @@ export default function AdminUsersPage() {
 
   if (!isAdmin) return (
     <div className="p-8 text-center text-gray-400">
-      <p className="text-4xl mb-3">🔒</p>
+      <p className="mb-3 flex justify-center"><AppIcon name="lock" size={32} /></p>
       <p className="font-semibold">Admin access only</p>
     </div>
   )
@@ -86,11 +87,11 @@ export default function AdminUsersPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">👥 User Management</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="staff" size={24} /> User Management</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">Create and manage staff login accounts</p>
         </div>
         <button className="btn-primary" onClick={() => setShowForm(p => !p)}>
-          {showForm ? '✕ Cancel' : '+ Add Staff Account'}
+          {showForm ? <><AppIcon name="x" size={17} /> Cancel</> : <><AppIcon name="userAdd" size={17} /> Add Staff Account</>}
         </button>
       </div>
 
@@ -125,7 +126,7 @@ export default function AdminUsersPage() {
             </div>
             <div className="flex gap-3">
               <button type="submit" disabled={saving} className="btn-primary">
-                {saving ? '⏳ Creating…' : '✅ Create Account'}
+                {saving ? 'Creating…' : 'Create Account'}
               </button>
               <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
                 Cancel
@@ -135,11 +136,11 @@ export default function AdminUsersPage() {
 
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-              <p className="font-semibold text-green-700 mb-1">✅ Staff can:</p>
+              <p className="font-semibold text-green-700 mb-1">Staff can:</p>
               <p className="text-green-700">View dashboard, Add clients, Add policies, Import policies, Add proposals, Send WhatsApp, View renewals, Upload documents, Export data</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <p className="font-semibold text-blue-700 mb-1">🔑 Admin can do all above plus:</p>
+              <p className="font-semibold text-blue-700 mb-1">Admin can do all above plus:</p>
               <p className="text-blue-700">Delete clients, Delete policies, View commission calculator, Manage user accounts</p>
             </div>
           </div>
@@ -151,11 +152,11 @@ export default function AdminUsersPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setPendingRoleChange(null)} />
           <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h3 className="text-base font-bold text-gray-900 dark:text-white">⚠️ Confirm Role Change</h3>
+            <h3 className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white"><AppIcon name="warning" size={18} /> Confirm Role Change</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Change <strong>{pendingRoleChange.name}</strong>'s role to{' '}
               <strong className={pendingRoleChange.newRole === 'admin' ? 'text-blue-600' : 'text-green-600'}>
-                {pendingRoleChange.newRole === 'admin' ? '🔑 Admin' : '👤 Staff'}
+                {pendingRoleChange.newRole === 'admin' ? 'Admin' : 'Staff'}
               </strong>?
             </p>
             {pendingRoleChange.newRole === 'admin' && (
@@ -197,7 +198,7 @@ export default function AdminUsersPage() {
                             ? 'bg-blue-100 text-blue-700'
                             : 'bg-green-100 text-green-700'
                         }`}>
-                          {u.role === 'admin' ? '🔑 Admin' : '👤 Staff'}
+                          {u.role === 'admin' ? 'Admin' : 'Staff'}
                         </span>
                       </td>
                       <td className="table-cell">

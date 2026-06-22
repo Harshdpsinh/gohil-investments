@@ -10,6 +10,7 @@ import {
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
+import AppIcon from '../components/ui/AppIcon'
 import { fmtDate, parseAnyDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -289,10 +290,10 @@ export default function TasksPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-5 bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tasks & Follow-ups</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="tasks" size={24} /> Tasks & Follow-ups</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{stats.pending} pending · {stats.overdue} overdue</p>
         </div>
-        <button onClick={()=>{setSelected(null);setModal('add')}} className="btn-primary">+ New Task</button>
+        <button onClick={()=>{setSelected(null);setModal('add')}} className="btn-primary"><AppIcon name="plus" size={17} /> New Task</button>
       </div>
 
       {/* Summary */}

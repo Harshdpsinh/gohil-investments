@@ -1,11 +1,10 @@
 // UI MODERNIZATION - logic unchanged
+import AppIcon from './AppIcon'
 export default function SearchBar({ value, onChange, placeholder = 'Search...' }) {
   return (
     <div className="gi-search relative w-full sm:w-auto">
       <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500 dark:text-slate-400">
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
-        </svg>
+        <AppIcon name="search" size={17} />
       </span>
       <input
         type="search"
@@ -18,7 +17,7 @@ export default function SearchBar({ value, onChange, placeholder = 'Search...' }
       {value && (
         <button type="button" onClick={() => onChange('')} aria-label="Clear search"
           className="absolute inset-y-0 right-2 my-auto flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-          &times;
+          <AppIcon name="x" size={15} />
         </button>
       )}
     </div>

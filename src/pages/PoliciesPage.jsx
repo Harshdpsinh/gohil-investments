@@ -22,6 +22,7 @@ import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
 import DateInput    from '../components/ui/DateInput'
+import AppIcon      from '../components/ui/AppIcon'
 import { addPolicyCoverageInterval, computeNextPolicyDue, fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewalStatus, toInputDate, normaliseFrequency, parseAnyDate } from '../utils/dateUtils'
 import {
   exportToCSV, exportToExcel, exportToPDF, POLICY_COLS,
@@ -2243,19 +2244,19 @@ export default function PoliciesPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Policies</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-gray-900 dark:text-white"><AppIcon name="policies" size={24} /> Policies</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">{policies.length} total</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setModal('import')}}>⬆ Import</button>
-          {isAdmin && <button type="button" className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>{resetDeleteState();setShowRecycleBin(true)}}>🗑️ Recycle Bin</button>}
+          <button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setModal('import')}}><AppIcon name="upload" size={17} /> Import</button>
+          {isAdmin && <button type="button" className="btn-secondary text-red-600 dark:text-red-400" onClick={()=>{resetDeleteState();setShowRecycleBin(true)}}><AppIcon name="trash" size={17} /> Recycle Bin</button>}
           <button
             type="button"
             onClick={toggleRenewedVisibility}
             className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
             title="Renewed-Out policies are hidden by default"
-          >{showRenewed ? '🔄 Hide Renewed' : '🔄 Show Renewed'}</button>
-          <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setProposalPrefill(null);setModal('add')}}>+ Add Policy</button>
+          ><AppIcon name="renewals" size={17} /> {showRenewed ? 'Hide Renewed' : 'Show Renewed'}</button>
+          <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setProposalPrefill(null);setModal('add')}}><AppIcon name="plus" size={17} /> Add Policy</button>
         </div>
       </div>
 
@@ -2280,9 +2281,9 @@ export default function PoliciesPage() {
           )}
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
-          <button onClick={()=>exportToCSV(filtered,POLICY_COLS,'policies')} className="btn-secondary text-xs">⬇ CSV</button>
-          <button onClick={()=>exportToExcel(filtered,POLICY_COLS,'Policies','policies')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={async()=>await exportToPDF(filtered,POLICY_COLS,'Policy List','policies')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={()=>exportToCSV(filtered,POLICY_COLS,'policies')} className="btn-secondary text-xs"><AppIcon name="download" size={15} /> CSV</button>
+          <button onClick={()=>exportToExcel(filtered,POLICY_COLS,'Policies','policies')} className="btn-secondary text-xs"><AppIcon name="spreadsheet" size={15} /> Excel</button>
+          <button onClick={async()=>await exportToPDF(filtered,POLICY_COLS,'Policy List','policies')} className="btn-secondary text-xs"><AppIcon name="file" size={15} /> PDF</button>
         </div>
       </div>
       {/* Duplicate warning */}

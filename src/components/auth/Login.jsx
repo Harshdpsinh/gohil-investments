@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth }     from '../../hooks/useAuth'
+import AppIcon         from '../ui/AppIcon'
 import toast           from 'react-hot-toast'
 
 // Module-level timestamp: prevents brute-force by enforcing a 1.5 s gap between attempts.
@@ -62,7 +63,9 @@ export default function Login() {
       <div className="grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
         <section className="hidden flex-col justify-between border-r border-white/10 bg-gray-950 p-10 lg:flex">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-sm font-black text-gray-950">GI</div>
+            <div className="brand-mark h-12 w-12">
+              <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
+            </div>
             <div>
               <p className="text-sm font-black">Gohil Investments</p>
               <p className="text-xs text-gray-400">Wealth Management & Insurance Advisory</p>
@@ -100,8 +103,8 @@ export default function Login() {
         <section className="flex min-h-screen items-center justify-center bg-gray-100 p-4 text-gray-950 dark:bg-gray-950 dark:text-white">
           <div className="w-full max-w-md">
             <div className="mb-6 text-center lg:hidden">
-              <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-lg bg-gray-950 text-sm font-black text-white dark:bg-white dark:text-gray-950">
-                GI
+              <div className="brand-mark mx-auto mb-3 h-14 w-14">
+                <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
               </div>
               <h1 className="text-2xl font-black tracking-tight">Gohil Investments</h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">Insurance CRM</p>
@@ -179,7 +182,8 @@ export default function Login() {
                       onClick={() => setShowPw(p => !p)}
                       className="absolute inset-y-1 right-1 rounded-md px-3 text-xs font-bold text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white"
                     >
-                      {showPw ? 'Hide' : 'Show'}
+                      <span className="sr-only">{showPw ? 'Hide password' : 'Show password'}</span>
+                      <AppIcon name={showPw ? 'lock' : 'key'} size={18} />
                     </button>
                   </div>
                 </div>
