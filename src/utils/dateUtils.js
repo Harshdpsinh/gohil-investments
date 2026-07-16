@@ -184,6 +184,15 @@ export function computeNextPremiumDue(startDate, frequency) {
 }
 
 // ── Format next premium due for display ──────────────────────
+export function getDueDate(policy) {
+  if (!policy) return null
+  if (normaliseFrequency(policy.frequency) === 'Yearly') return policy.expiryDate || null
+  const stored = parseAnyDate(policy.nextPremiumDue)
+  if (stored) return format(stored, 'yyyy-MM-dd')
+  const computed = computeNextPremiumDue(policy.startDate, policy.frequency)
+  return computed ? format(computed, 'yyyy-MM-dd') : policy.expiryDate || null
+}
+
 export function daysUntilPremium(startDate, frequency) {
   const next = computeNextPremiumDue(startDate, frequency)
   if (!next) return null
