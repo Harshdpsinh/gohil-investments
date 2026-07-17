@@ -341,7 +341,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
                 placeholder="e.g. Optima Secure, Smart Select…"
               />
             </div>
-          </div>
+        </div>
         )}
 
         {companySame && (
@@ -483,7 +483,9 @@ function RenewModal({ policy, onConfirm, onClose }) {
 function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
   const currentDue = getPolicyDueDate(policy)
   const initialFrequency = normaliseFrequency(policy.frequency || 'Yearly')
+  const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
   const [frequency, setFrequency] = useState(initialFrequency)
+  const [premium, setPremium] = useState(String(policy.premium || ''))
   const [nextDue, setNextDue] = useState(() => toInputDate(addFrequencyInterval(currentDue, initialFrequency)))
 
   const setFrequencyAndDue = (value) => {
@@ -493,6 +495,10 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
   }
 
   const handleSubmit = () => {
+    if (isLifePolicy && !(Number(premium) > 0)) {
+      toast.error('Renewed premium must be greater than 0.')
+      return
+    }
     const due = parseAnyDate(nextDue)
     if (!due) {
       toast.error('Please select a valid next premium due date.')
@@ -500,7 +506,6 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
     }
 
     const expiry = parseAnyDate(policy.expiryDate)
-    const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
     if (!isLifePolicy && expiry && due > expiry) {
       toast.error('For non-life policies, next premium due cannot be after expiry. Please use Renew.')
       return
@@ -508,6 +513,7 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
 
     onConfirm(policy, {
       frequency,
+      premium: isLifePolicy ? premium : undefined,
       currentDue,
       nextPremiumDue: toInputDate(due),
     })
@@ -539,6 +545,25 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
             {policy.policyNumber || '-'} · {policy.policyType || 'Policy'} · Current due: {fmtDate(currentDue)}
           </p>
         </div>
+
+        {isLifePolicy && (
+          <div>
+            <label className="form-label">Renewed Premium (₹) *</label>
+            <input
+              type="number"
+              min="1"
+              step="0.01"
+              value={premium}
+              onChange={event => setPremium(event.target.value)}
+              className="form-input"
+              disabled={saving}
+              required
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Update the installment premium together with its payment frequency.
+            </p>
+          </div>
+        )}
 
         <div>
           <label className="form-label">Premium Frequency</label>
@@ -573,7 +598,7 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={saving || !nextDue}
+            disabled={saving || !nextDue || (isLifePolicy && !(Number(premium) > 0))}
             className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors inline-flex items-center gap-2"
           >
             {saving && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
