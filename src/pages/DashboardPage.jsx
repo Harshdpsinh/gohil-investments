@@ -6,7 +6,7 @@ import { useClients }  from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { fmtCurrency, fmtDate, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { useNavigate } from 'react-router-dom'
-import { subscribeTasks, subscribeClaims, getAllCommissionTransactions, getAllCommissionReconciliationBatches } from '../firebase/firestore'
+import { subscribeClaims, getAllCommissionTransactions, getAllCommissionReconciliationBatches } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -92,7 +92,6 @@ export default function DashboardPage() {
   const { clients }           = useClients()
   const { policies, loading } = usePolicies()
   const navigate  = useNavigate()
-  const [tasks,   setTasks]   = useState([])
   const [claims,  setClaims]  = useState([])
   const [perfTab, setPerfTab] = useState('commission')
   const [commissionTransactions, setCommissionTransactions] = useState([])
@@ -127,9 +126,8 @@ export default function DashboardPage() {
   }, [clients])
 
   useEffect(() => {
-    const u1 = subscribeTasks(setTasks, err => console.error('Dashboard tasks subscription failed:', err))
-    const u2 = subscribeClaims(setClaims, err => console.error('Dashboard claims subscription failed:', err))
-    return () => { u1(); u2() }
+    const unsubscribe = subscribeClaims(setClaims, err => console.error('Dashboard claims subscription failed:', err))
+    return unsubscribe
   }, [])
 
   useEffect(() => {
@@ -171,7 +169,6 @@ export default function DashboardPage() {
     const totalComm  = active.reduce((s, p) => s + Math.round(((parseFloat(p.premium) || 0) * (parseFloat(p.fyCommission) || 0)) / 100), 0)
     const birthdays  = clients.filter(c => isBirthdayThisWeek(c.dob))
     const openClaims = claims.filter(c => !['Settled', 'Rejected'].includes(c.status))
-    const openTasks  = tasks.filter(t => !t.done)
 
     const byType = {}
     active.forEach(p => { byType[p.policyType] = (byType[p.policyType] || 0) + 1 })
@@ -207,10 +204,10 @@ export default function DashboardPage() {
     return {
       active: active.length, expiring30: expiring30.length,
       expired: expired.length, clients: clients.length,
-      totalPrem, totalComm, birthdays, openClaims, openTasks,
+      totalPrem, totalComm, birthdays, openClaims,
       byType, byInsurer, monthly: months, clientsWithGaps: clientsWithGaps.length
     }
-  }, [policies, clients, tasks, claims])
+  }, [policies, clients, claims])
 
   const urgent = useMemo(() =>
     policies
@@ -289,16 +286,6 @@ export default function DashboardPage() {
                 <p key={c.id} className="text-xs text-pink-600 dark:text-pink-400">• {c.name}</p>
               ))}
               {stats.birthdays.length > 3 && <p className="text-xs text-pink-400">+{stats.birthdays.length - 3} more</p>}
-            </div>
-          </div>
-        )}
-        {stats.openTasks.length > 0 && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4 cursor-pointer" onClick={() => navigate('/tasks')}>
-            <p className="text-sm font-bold text-blue-700 dark:text-blue-300">✅ {stats.openTasks.length} Pending Tasks</p>
-            <div className="mt-2 space-y-1">
-              {stats.openTasks.slice(0, 3).map(t => (
-                <p key={t.id} className="text-xs text-blue-600 dark:text-blue-400">• {t.title}</p>
-              ))}
             </div>
           </div>
         )}

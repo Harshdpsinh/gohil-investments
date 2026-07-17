@@ -14,6 +14,7 @@ import {
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
+import { shareGeneratedFile } from '../services/nativeShareService'
 import SearchBar from '../components/ui/SearchBar'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
@@ -599,6 +600,7 @@ export default function RenewalsPage() {
   const [dateFrom,  setDateFrom]  = useState('')
   const [dateTo,    setDateTo]    = useState('')
   const [policyTab, setPolicyTab] = useState('ALL')
+  const [statusFilter, setStatusFilter] = useState('all')
 
   // ✅ FIX R10: confirmation state instead of firing immediately
   const [renewModal,   setRenewModal]   = useState(null)  // holds policy being renewed
@@ -658,17 +660,25 @@ export default function RenewalsPage() {
         const dueDate = parseAnyDate(dueStr)
         if (isNaN(dueDate.getTime())) return false
 
+        const d = daysUntilPolicyDue(p)
+
+        // Status cards are first-class filters and override date windows.
+        if (statusFilter === 'overdue' && (d === null || d >= 0)) return false
+        if (statusFilter === 'due' && d !== 0) return false
+        if (statusFilter === 'critical' && (d === null || d <= 0 || d > 7)) return false
+
         // Date range filter
         const fromDate = parseAnyDate(dateFrom)
         const toDate = parseAnyDate(dateTo)
-        if (fromDate && dueDate < fromDate) return false
-        if (toDate && dueDate > toDate) return false
+        if (statusFilter === 'all' && fromDate && dueDate < fromDate) return false
+        if (statusFilter === 'all' && toDate && dueDate > toDate) return false
 
         // Day window filter
-        const d = daysUntilPolicyDue(p)
         // ✅ FIX R2: overdue is d < 0 (was incorrectly d >= 0)
         const hasManualDateRange = !!(fromDate || toDate)
-        if (!hasManualDateRange && dayWindow === -1) {
+        if (statusFilter !== 'all') {
+          // Already handled by the selected summary card.
+        } else if (!hasManualDateRange && dayWindow === -1) {
           if (d === null || d >= 0) return false
         } else if (!hasManualDateRange) {
           if (d === null || d < 0 || d > dayWindow) return false
@@ -689,7 +699,7 @@ export default function RenewalsPage() {
         return true
       })
       .sort((a, b) => (daysUntilPolicyDue(a) ?? 9999) - (daysUntilPolicyDue(b) ?? 9999))
-  }, [policies, search, dayWindow, dateFrom, dateTo, policyTab])
+  }, [policies, search, dayWindow, dateFrom, dateTo, policyTab, statusFilter])
 
   // ─── Summary stats ────────────────────────────────────────────
   useEffect(() => {
@@ -718,15 +728,22 @@ export default function RenewalsPage() {
   }, [filtered.length])
 
   const stats = useMemo(() => {
-    const overdue  = filtered.filter(p => (daysUntilPolicyDue(p) ?? 1) < 0).length
-    const dueToday = filtered.filter(p => daysUntilPolicyDue(p) === 0).length
-    const critical = filtered.filter(p => { const d = daysUntilPolicyDue(p); return d !== null && d > 0 && d <= 7 }).length
-    const totalPremium = filtered.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
+    const summaryPolicies = policies.filter(p => {
+      if (['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())) return false
+      if (!getPolicyDueDate(p)) return false
+      if (policyTab !== 'ALL' && (p.policyType || 'Health') !== policyTab) return false
+      const q = search.toLowerCase().trim()
+      return !q || [p.clientName, p.policyNumber, p.insurer].some(value => String(value || '').toLowerCase().includes(q))
+    })
+    const overdue  = summaryPolicies.filter(p => (daysUntilPolicyDue(p) ?? 1) < 0).length
+    const dueToday = summaryPolicies.filter(p => daysUntilPolicyDue(p) === 0).length
+    const critical = summaryPolicies.filter(p => { const d = daysUntilPolicyDue(p); return d !== null && d > 0 && d <= 7 }).length
+    const totalPremium = summaryPolicies.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
     return { overdue, dueToday, critical, totalPremium }
-  }, [filtered])
+  }, [policies, policyTab, search])
 
   // ─── PDF Export ── ✅ FIX R8: uses autoTable ─────────────────
-  function exportPDF() {
+  async function exportPDF() {
     const doc = new jsPDF()
     doc.setFontSize(16)
     doc.text('Renewal List', 14, 16)
@@ -756,7 +773,9 @@ export default function RenewalsPage() {
       alternateRowStyles: { fillColor: [248, 250, 252] },
     })
 
-    doc.save('renewals.pdf')
+    const blob = doc.output('blob')
+    const shared = await shareGeneratedFile(blob, 'renewals.pdf', 'Renewal list')
+    if (!shared) doc.save('renewals.pdf')
   }
 
   // ─── RENEW ACTION — uses atomic writeBatch via saveRenewal ───
@@ -886,18 +905,24 @@ export default function RenewalsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Overdue',    val: stats.overdue,   color: 'red',    icon: 'warning' },
-          { label: 'Due Today',  val: stats.dueToday,  color: 'orange', icon: 'clock' },
-          { label: 'Critical (≤7d)', val: stats.critical, color: 'yellow', icon: 'fileClock' },
-          { label: 'Total Premium',  val: fmtCurrency(stats.totalPremium), color: 'blue', icon: 'rupee' },
-        ].map(({ label, val, color, icon }) => (
-          <div key={label} className="stat-card">
+          { key: 'overdue', label: 'Overdue', val: stats.overdue, valueClass: 'text-red-600 dark:text-red-400', icon: 'warning' },
+          { key: 'due', label: 'Due Today', val: stats.dueToday, valueClass: 'text-orange-600 dark:text-orange-400', icon: 'clock' },
+          { key: 'critical', label: 'Critical (≤7d)', val: stats.critical, valueClass: 'text-amber-600 dark:text-amber-400', icon: 'fileClock' },
+          { key: 'all', label: 'Total Premium', val: fmtCurrency(stats.totalPremium), valueClass: 'text-blue-600 dark:text-blue-400', icon: 'rupee' },
+        ].map(({ key, label, val, valueClass, icon }) => (
+          <button
+            type="button"
+            key={key}
+            aria-pressed={statusFilter === key}
+            onClick={() => { setStatusFilter(key); setDateFrom(''); setDateTo('') }}
+            className={`stat-card w-full text-left transition ${statusFilter === key ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : 'hover:border-blue-300'}`}
+          >
             <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200"><AppIcon name={icon} size={20} /></span>
             <div>
-              <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
+              <p className={`text-xl font-bold ${valueClass}`}>{val}</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
             </div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -926,7 +951,7 @@ export default function RenewalsPage() {
           { d: -1,  label: 'Overdue' },
         ].map(({ d, label }) => (
           <button key={d}
-                  onClick={() => setDayWindow(d)}
+                  onClick={() => { setDayWindow(d); setStatusFilter('all'); setDateFrom(''); setDateTo('') }}
                   className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors
                     ${dayWindow === d
                       ? 'bg-blue-600 text-white'
@@ -939,11 +964,11 @@ export default function RenewalsPage() {
         <div className="flex items-center gap-2 ml-2">
           <span className="text-xs text-gray-400">From:</span>
           <DateInput value={dateFrom}
-                 onChange={setDateFrom}
+                 onChange={value => { setDateFrom(value); setStatusFilter('all') }}
                  className="form-input text-xs py-1 px-2 w-36" />
           <span className="text-xs text-gray-400">To:</span>
           <DateInput value={dateTo}
-                 onChange={setDateTo}
+                 onChange={value => { setDateTo(value); setStatusFilter('all') }}
                  className="form-input text-xs py-1 px-2 w-36" />
           {(dateFrom || dateTo) && (
             <button onClick={() => { setDateFrom(''); setDateTo('') }}

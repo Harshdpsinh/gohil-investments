@@ -4,7 +4,7 @@
 //           CP3 (graceful handling of doc fetch errors)
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { getClient, getAllClaims, getAllTasks, getCommissionTransactionsForClient } from '../firebase/firestore'
+import { getClient, getAllClaims, getCommissionTransactionsForClient } from '../firebase/firestore'
 import { usePolicies } from '../hooks/usePolicies'
 import { useClients } from '../hooks/useClients'
 import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
@@ -62,7 +62,6 @@ export default function ClientProfilePage() {
 
   const [client,  setClient]  = useState(null)
   const [claims,  setClaims]  = useState([])
-  const [tasks,   setTasks]   = useState([])
   const [docs,    setDocs]    = useState([])
   const [commission, setCommission] = useState([])
   const [loading, setLoading] = useState(true)
@@ -71,26 +70,17 @@ export default function ClientProfilePage() {
     if (!id) return
     const load = async () => {
       try {
-        // ✅ FIX CP3: split Promise.all so a doc fetch failure doesn't blank the whole profile
-        const [c, allClaims, allTasks] = await Promise.all([
-          getClient(id),
-          getAllClaims(),
-          getAllTasks(),
-        ])
+        const c = await getClient(id)
+        if (!c) throw new Error('Client not found.')
         setClient(c)
-        setClaims(allClaims.filter(cl => cl.clientId === id))
-        setTasks(allTasks.filter(t => t.clientId === id))
-        try { setCommission(await getCommissionTransactionsForClient(id, c?.name || '')) }
-        catch (commissionErr) { console.warn('Could not load commission history:', commissionErr.message); setCommission([]) }
-
-        // Load docs separately — failure doesn't crash the profile
-        try {
-          const clientDocs = await getDocMeta(id)
-          setDocs(clientDocs || [])
-        } catch (docErr) {
-          console.warn('Could not load documents:', docErr.message)
-          setDocs([])
-        }
+        const [claimsResult, commissionResult, docsResult] = await Promise.allSettled([
+          getAllClaims(),
+          getCommissionTransactionsForClient(id, c.name || ''),
+          getDocMeta(id),
+        ])
+        setClaims(claimsResult.status === 'fulfilled' ? claimsResult.value.filter(cl => cl.clientId === id) : [])
+        setCommission(commissionResult.status === 'fulfilled' ? commissionResult.value : [])
+        setDocs(docsResult.status === 'fulfilled' ? (docsResult.value || []) : [])
       } catch (err) {
         toast.error('Could not load profile: ' + err.message)
       } finally {
@@ -202,16 +192,16 @@ export default function ClientProfilePage() {
       {/* Quick stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
-          { icon: 'policies', label: 'Active Policies', val: activePolicies.length, color: 'blue'   },
-          { icon: 'rupee', label: 'Total Premium',   val: fmtCurrency(totalPremium), color: 'green'  },
-          { icon: 'shield', label: 'Total Coverage',  val: fmtCurrency(totalCoverage), color: 'purple' },
-          { icon: 'claims', label: 'Claims',           val: claims.length,          color: 'orange' },
-          { icon: 'commission', label: 'Commission Earned', val: fmtCurrency(totalCommission), color: 'green' },
-        ].map(({ icon, label, val, color }) => (
+          { icon: 'policies', label: 'Active Policies', val: activePolicies.length, valueClass: 'text-blue-700 dark:text-blue-300' },
+          { icon: 'rupee', label: 'Total Premium', val: fmtCurrency(totalPremium), valueClass: 'text-emerald-700 dark:text-emerald-300' },
+          { icon: 'shield', label: 'Total Coverage', val: fmtCurrency(totalCoverage), valueClass: 'text-violet-700 dark:text-violet-300' },
+          { icon: 'claims', label: 'Claims', val: claims.length, valueClass: 'text-orange-700 dark:text-orange-300' },
+          { icon: 'commission', label: 'Commission Earned', val: fmtCurrency(totalCommission), valueClass: 'text-emerald-700 dark:text-emerald-300' },
+        ].map(({ icon, label, val, valueClass }) => (
           <div key={label} className="stat-card">
             <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200"><AppIcon name={icon} size={20} /></span>
             <div>
-              <p className={`text-xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
+              <p className={`text-xl font-bold ${valueClass}`}>{val}</p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
             </div>
           </div>
@@ -444,28 +434,6 @@ export default function ClientProfilePage() {
         )}
       </Section>
 
-      {/* Tasks */}
-      {tasks.length > 0 && (
-        <Section title="Pending Tasks" icon="tasks" badge={tasks.filter(t => !t.done).length}>
-          <div className="space-y-2">
-            {tasks.filter(t => !t.done).map(t => (
-              <div key={t.id} className="flex items-center gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                <span className="text-slate-500"><AppIcon name={t.type === 'Call' ? 'phone' : t.type === 'Email' ? 'mail' : t.type === 'Meeting' ? 'users' : 'tasks'} size={18} /></span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{t.title}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Due: {fmtDate(t.dueDate)}</p>
-                </div>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0
-                  ${t.priority === 'High' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300' :
-                    t.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200' :
-                    'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}>
-                  {t.priority}
-                </span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
     </div>
   )
 }

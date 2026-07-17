@@ -355,7 +355,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
     setMerging(true)
     try {
       const r = await mergeClients(dupClientId, masterClientId)
-      toast.success(`✅ Merged! ${r.policiesMoved} policies, ${r.claimsMoved} claims, ${r.tasksMoved} tasks moved.`)
+      toast.success(`✅ Merged! ${r.policiesMoved} policies and ${r.claimsMoved} claims moved.`)
       onMerged()
     } catch(err) { toast.error('Merge failed: ' + err.message) }
     finally { setMerging(false) }
@@ -372,7 +372,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
     setMerging(true)
     try {
       const r = await mergeClients(dupId, masterId)
-      toast.success(`✅ Merged! ${r.policiesMoved} policies, ${r.claimsMoved} claims, ${r.tasksMoved} tasks, ${r.docsMoved} docs moved.`)
+      toast.success(`✅ Merged! ${r.policiesMoved} policies, ${r.claimsMoved} claims, and ${r.docsMoved} documents moved.`)
       onMerged()
       onClose()
     } catch(err) { toast.error('Merge failed: ' + err.message) }
@@ -418,7 +418,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
       {/* Info banner */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
         <p className="font-semibold">How CliMer works:</p>
-        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves policies, claims, tasks, and documents into the master client, then archives the duplicate record instead of deleting it.</p>
+        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves policies, claims, and documents into the master client, then archives the duplicate record instead of deleting it.</p>
       </div>
 
       {/* ── SUGGESTED DUPLICATES TAB ── */}
@@ -469,7 +469,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
         <div className="space-y-4">
           <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-3 text-xs text-green-700 dark:text-green-300">
             <p className="font-semibold">Safe family grouping</p>
-            <p className="mt-1">This only adds the same Family ID/Name to selected clients. It does not move, delete, or rewrite any policies, claims, tasks, PDFs, or client history.</p>
+            <p className="mt-1">This only adds the same Family ID/Name to selected clients. It does not move, delete, or rewrite any policies, claims, PDFs, or client history.</p>
           </div>
           <input type="text" placeholder="Search clients..." value={search}
                  onChange={e => setSearch(e.target.value)} className="form-input" />
@@ -577,7 +577,7 @@ function CliMerModal({ clients, onClose, onMerged }) {
                 <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-3 text-sm">
                   <p className="font-semibold text-orange-700 dark:text-orange-300">Confirm merge:</p>
                   <p className="text-orange-600 dark:text-orange-400 mt-1">
-                    Move all linked policies, claims, tasks, and documents from <strong>{dupClient?.name}</strong> to <strong>{masterClient?.name}</strong>, then archive {dupClient?.name}. Original policy details remain unchanged.
+                    Move all linked policies, claims, and documents from <strong>{dupClient?.name}</strong> to <strong>{masterClient?.name}</strong>, then archive {dupClient?.name}. Original policy details remain unchanged.
                   </p>
                 </div>
               )}
@@ -842,9 +842,9 @@ export default function ClientsPage() {
           </button>
         </div>
         <div className="flex gap-2 ml-auto flex-wrap">
-          <button onClick={() => exportToCSV(filtered,CLIENT_COLS,'clients')} className="btn-secondary text-xs"><AppIcon name="download" size={15} /> CSV</button>
-          <button onClick={() => exportToExcel(filtered,CLIENT_COLS,'Clients','clients')} className="btn-secondary text-xs"><AppIcon name="spreadsheet" size={15} /> Excel</button>
-          <button onClick={async () => await exportToPDF(filtered,CLIENT_COLS,'Client List','clients')} className="btn-secondary text-xs"><AppIcon name="file" size={15} /> PDF</button>
+          <button onClick={() => exportToCSV(clients,CLIENT_COLS,'clients')} className="btn-secondary text-xs"><AppIcon name="download" size={15} /> Full CSV</button>
+          <button onClick={() => exportToExcel(clients,CLIENT_COLS,'Clients','clients')} className="btn-secondary text-xs"><AppIcon name="spreadsheet" size={15} /> Full Excel</button>
+          <button onClick={() => exportToPDF(clients,CLIENT_COLS,'Complete Client List','clients')} className="btn-secondary text-xs"><AppIcon name="file" size={15} /> Full PDF</button>
         </div>
       </div>
 

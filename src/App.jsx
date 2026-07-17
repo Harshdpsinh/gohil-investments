@@ -13,8 +13,6 @@ import ProposalsPage         from './pages/ProposalsPage'
 import CommissionPage        from './pages/CommissionPage'
 import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
-import TasksPage             from './pages/TasksPage'
-import CalendarPage          from './pages/CalendarPage'
 import BackupPage            from './pages/BackupPage'
 import LeadsPage             from './pages/LeadsPage'
 import EndorsementsPage      from './pages/EndorsementsPage'
@@ -51,12 +49,10 @@ export default function App() {
                 <Route path="/clients/:id"         element={<ClientProfilePage />} />
                 <Route path="/policies"            element={<PoliciesPage />} />
                 <Route path="/renewals"            element={<RenewalsPage />} />
-                <Route path="/calendar"            element={<CalendarPage />} />
                 <Route path="/proposals"           element={<ProposalsPage />} />
                 <Route path="/claims"              element={<ClaimsPage />} />
                 <Route path="/leads"               element={<LeadsPage />} />
                 <Route path="/endorsements"        element={<EndorsementsPage />} />
-                <Route path="/tasks"               element={<TasksPage />} />
                 <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/commission-reconciliation" element={<CommissionReconciliationPage />} />
                 <Route path="/masters"             element={<MastersPage />} />

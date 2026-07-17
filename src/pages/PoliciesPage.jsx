@@ -7,9 +7,9 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, addClient,
   importPoliciesBatch,
-  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicatePolicyNumber, checkDuplicate,
+  savePolicyPdfUrl, bulkDeletePolicies, checkDuplicate,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
-  subscribeProposals, updateProposal, findClientByMobileOrName,
+  subscribeProposals, updateProposal, updateLead, findClientByMobileOrName,
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset, downloadDocumentFile, openDocumentPreview, uploadPolicyPdf } from '../firebase/storage'
 import {
@@ -165,6 +165,34 @@ function proposalToPolicyInitial(proposal, clients = []) {
     base.familyIllness = proposal.familyIllness || ''
   }
   return base
+}
+
+function leadToPolicyInitial(lead, clients = []) {
+  if (!lead) return null
+  const client = clients.find(item => item.id === lead.clientId)
+  const need = `${lead.insuranceNeed || ''} ${lead.leadType || ''}`.toLowerCase()
+  const policyType = need.includes('life') || need.includes('term') ? 'Life'
+    : need.includes('motor') || need.includes('vehicle') || need.includes('car') ? 'Motor'
+      : need.includes('home') ? 'Home'
+        : need.includes('travel') ? 'Travel'
+          : 'Health'
+  const mobile = lead.mobile || client?.mobile || ''
+  const email = lead.email || client?.email || ''
+  return {
+    ...BASE_EMPTY,
+    ...getTypeDefaults(policyType),
+    policyType,
+    clientId: lead.clientId || '',
+    clientName: lead.clientName || lead.name || client?.name || '',
+    clientMobile: mobile,
+    clientEmail: email,
+    _clientMobile: mobile,
+    _clientEmail: email,
+    premium: lead.leadValue || '',
+    leadId: lead.id || '',
+    source: 'lead',
+    notes: `Converted from lead${lead.source ? ` (${lead.source})` : ''}${lead.remarks ? `: ${lead.remarks}` : ''}`,
+  }
 }
 
 // ── Quick Add Client overlay ──────────────────────────────────
@@ -1152,14 +1180,8 @@ function TypedImportModal({ policyType, icon, color, headers, sample, parseRow, 
       const matchedClient = findImportClientMatch(data)
       if (matchedClient) clientMatches.push({ rowIndex: i, data, pNo, matchedClient })
 
-      // Comprehensive duplicate check: policy number + registration + client+premium+insurer
-      const dupResult = await checkDuplicate({
-        policyNumber:   pNo,
-        clientName:     data.clientName,
-        premium:        data.premium,
-        insurer:        data.insurer,
-        registrationNo: data.registrationNo,
-      })
+      // Only a fully identical row is a duplicate; one changed field is allowed.
+      const dupResult = await checkDuplicate(data)
       if (dupResult.isDup) dups.push({ rowIndex: i, data, pNo, reason: dupResult.reason, existing: dupResult.existing })
 
       // Check lapsed (expiry more than 30 days in the past)
@@ -2083,10 +2105,20 @@ export default function PoliciesPage() {
     resetDeleteState()
     setModal('add')
   }, [location.state, clients])
+
+  useEffect(() => {
+    const lead = location.state?.leadToPolicy
+    const consumeKey = lead?.id ? `lead:${lead.id}` : ''
+    if (!consumeKey || consumedProposalRef.current === consumeKey) return
+    if (lead.clientId && !clients.some(client => client.id === lead.clientId)) return
+    consumedProposalRef.current = consumeKey
+    setProposalPrefill(leadToPolicyInitial(lead, clients))
+    setDupWarning('')
+    resetDeleteState()
+    setModal('add')
+  }, [location.state, clients])
   const checkDup = useCallback(async (policyNumber) => {
-    if (!policyNumber?.trim()) { setDupWarning(''); return }
-    const exists = await checkDuplicatePolicyNumber(policyNumber)
-    setDupWarning(exists ? `⚠️ Policy number "${policyNumber}" already exists in your database!` : '')
+    setDupWarning('')
   }, [])
 
   // ── WhatsApp helper ──────────────────────────────────────
@@ -2197,6 +2229,13 @@ export default function PoliciesPage() {
       if (form.proposalId) {
         await updateProposal(form.proposalId, {
           status: 'Converted',
+          convertedPolicyNumber: form.policyNumber || '',
+          convertedAt: new Date().toISOString(),
+        })
+      }
+      if (form.leadId) {
+        await updateLead(form.leadId, {
+          status: 'converted',
           convertedPolicyNumber: form.policyNumber || '',
           convertedAt: new Date().toISOString(),
         })

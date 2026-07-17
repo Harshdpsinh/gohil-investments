@@ -14,7 +14,6 @@ const FAMILIES  = 'families'
 const DOCS_META = 'documents'
 const USERS     = 'users'
 const CLAIMS    = 'claims'
-const TASKS     = 'tasks'
 const AUDIT_LOGS = 'audit_logs'
 const DOCUMENTS = 'documents'
 const MESSAGE_LOGS = 'message_logs'
@@ -36,7 +35,7 @@ const CLIENT_FIELDS = [
   'familyRole', 'notes',
 ]
 const BACKUP_COLLECTIONS = [
-  CLIENTS, POLICIES, PROPOSALS, CLAIMS, TASKS, USERS, FAMILIES,
+  CLIENTS, POLICIES, PROPOSALS, CLAIMS, USERS, FAMILIES,
   AUDIT_LOGS, DOCUMENTS, MESSAGE_LOGS, LEADS, LEAD_FOLLOWUPS, ENDORSEMENTS,
   COMMISSION_MASTER, COMMISSION_TRANSACTIONS, COMMISSION_IMPORT_TEMPLATES,
   COMMISSION_RECONCILIATION_BATCHES, COMMISSION_RECONCILIATION_ROWS,
@@ -50,7 +49,6 @@ export const CRM_COLLECTIONS = Object.freeze({
   FAMILIES,
   USERS,
   CLAIMS,
-  TASKS,
   AUDIT_LOGS,
   DOCUMENTS,
   MESSAGE_LOGS,
@@ -329,8 +327,13 @@ export async function updateLead(id, data = {}) {
   return updateFoundationDoc(LEADS, id, data)
 }
 
+export async function deleteLead(id) {
+  if (!id) throw new Error('Lead is required.')
+  return updateFoundationDoc(LEADS, id, { deleted: true, deletedAt: new Date().toISOString() })
+}
+
 export async function getAllLeads() {
-  return listFoundationDocs(LEADS)
+  return (await listFoundationDocs(LEADS)).filter(lead => !lead.deleted)
 }
 
 export async function addLeadFollowup(data = {}) {
@@ -821,13 +824,9 @@ async function deleteRefsInChunks(refs) {
 
 async function policyCascadeRefs(policyId) {
   if (!policyId) return []
-  const [claimsByPolicy, tasksByPolicy] = await Promise.all([
-    getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId))),
-    getDocs(query(collection(db, TASKS),  where('policyId', '==', policyId))),
-  ])
+  const claimsByPolicy = await getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId)))
   return [
     ...claimsByPolicy.docs.map(d => d.ref),
-    ...tasksByPolicy.docs.map(d => d.ref),
     doc(db, POLICIES, policyId),
   ]
 }
@@ -850,14 +849,8 @@ async function cascadeUpdatePolicyLinks(policyId, policyData = {}) {
   if (Object.keys(linkedUpdate).length === 0) return
 
   linkedUpdate.updatedAt = serverTimestamp()
-  const [claimsByPolicy, tasksByPolicy] = await Promise.all([
-    getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId))),
-    getDocs(query(collection(db, TASKS),  where('policyId', '==', policyId))),
-  ])
-  const refs = [
-    ...claimsByPolicy.docs.map(d => d.ref),
-    ...tasksByPolicy.docs.map(d => d.ref),
-  ]
+  const claimsByPolicy = await getDocs(query(collection(db, CLAIMS), where('policyId', '==', policyId)))
+  const refs = claimsByPolicy.docs.map(d => d.ref)
 
   for (let i = 0; i < refs.length; i += 400) {
     const batch = writeBatch(db)
@@ -869,7 +862,7 @@ async function cascadeUpdatePolicyLinks(policyId, policyData = {}) {
 /**
  * cascadeUpdateClient(id, data)
  * Updates the client record AND propagates name/mobile/email changes
- * to every linked policy, claim, and task. Uses chunked batches of
+ * to every linked policy and claim. Uses chunked batches of
  * 400 to stay well under Firestore's 500-write-per-batch limit.
  */
 export async function cascadeUpdateClient(id, data) {
@@ -892,10 +885,9 @@ export async function cascadeUpdateClient(id, data) {
   const hasEmail  = payload.email  !== undefined
 
   if (hasName || hasMobile || hasEmail) {
-    const [pols, cls, tsk] = await Promise.all([
+    const [pols, cls] = await Promise.all([
       getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
       getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
-      getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
     ])
 
     const polPairs = pols.docs.map(d => {
@@ -911,21 +903,14 @@ export async function cascadeUpdateClient(id, data) {
       if (hasMobile) upd.clientMobile = payload.mobile
       return { ref: d.ref, upd }
     })
-    const tskPairs = tsk.docs.map(d => {
-      const upd = { updatedAt: serverTimestamp() }
-      if (hasName) upd.clientName = payload.name
-      return { ref: d.ref, upd }
-    })
-
-    await commitInChunks([...polPairs, ...clsPairs, ...tskPairs])
+    await commitInChunks([...polPairs, ...clsPairs])
   }
 }
 
 export async function deleteClient(id) {
-  const [pols, cls, tsk, docs] = await Promise.all([
+  const [pols, cls, docs] = await Promise.all([
     getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
     getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
-    getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
     getDocs(collection(db, CLIENTS, id, DOCS_META)),
   ])
   const policyLinkedRefs = (await Promise.all(pols.docs.map(d => policyCascadeRefs(d.id)))).flat()
@@ -934,7 +919,6 @@ export async function deleteClient(id) {
     ...policyLinkedRefs,
     ...pols.docs.map(d => d.ref),
     ...cls.docs.map(d => d.ref),
-    ...tsk.docs.map(d => d.ref),
     ...docs.docs.map(d => d.ref),
     doc(db, CLIENTS, id),
   ])
@@ -943,10 +927,9 @@ export async function deleteClient(id) {
 export async function bulkDeleteClients(ids) {
   const allRefs = []
   for (const id of ids) {
-    const [pols, cls, tsk, docs] = await Promise.all([
+    const [pols, cls, docs] = await Promise.all([
       getDocs(query(collection(db, POLICIES), where('clientId', '==', id))),
       getDocs(query(collection(db, CLAIMS),   where('clientId', '==', id))),
-      getDocs(query(collection(db, TASKS),    where('clientId', '==', id))),
       getDocs(collection(db, CLIENTS, id, DOCS_META)),
     ])
     const policyLinkedRefs = (await Promise.all(pols.docs.map(d => policyCascadeRefs(d.id)))).flat()
@@ -954,7 +937,6 @@ export async function bulkDeleteClients(ids) {
       ...policyLinkedRefs,
       ...pols.docs.map(d => d.ref),
       ...cls.docs.map(d => d.ref),
-      ...tsk.docs.map(d => d.ref),
       ...docs.docs.map(d => d.ref),
       doc(db, CLIENTS, id),
     )
@@ -1010,10 +992,9 @@ export async function mergeClients(duplicateId, masterId) {
   const dup = await getClient(duplicateId)
   if (!dup) throw new Error('Duplicate client not found')
 
-  const [dupPolicies, dupClaims, dupTasks, dupDocs] = await Promise.all([
+  const [dupPolicies, dupClaims, dupDocs] = await Promise.all([
     getDocs(query(collection(db, POLICIES), where('clientId', '==', duplicateId))),
     getDocs(query(collection(db, CLAIMS),   where('clientId', '==', duplicateId))),
-    getDocs(query(collection(db, TASKS),    where('clientId', '==', duplicateId))),
     getDocs(collection(db, CLIENTS, duplicateId, DOCS_META)),
   ])
 
@@ -1034,13 +1015,6 @@ export async function mergeClients(duplicateId, masterId) {
     }})
   })
   dupClaims.docs.forEach(d => {
-    ops.push({ ref: d.ref, data: {
-      clientId:   masterId,
-      clientName: master.name,
-      updatedAt:  serverTimestamp(),
-    }})
-  })
-  dupTasks.docs.forEach(d => {
     ops.push({ ref: d.ref, data: {
       clientId:   masterId,
       clientName: master.name,
@@ -1087,7 +1061,6 @@ export async function mergeClients(duplicateId, masterId) {
   return {
     policiesMoved: dupPolicies.size,
     claimsMoved:   dupClaims.size,
-    tasksMoved:    dupTasks.size,
     docsMoved,
   }
 }
@@ -1179,16 +1152,61 @@ function assertPolicyDateOrder(startDate, expiryDate) {
   }
 }
 
-async function assertUniquePolicyNumber(policyNumber, currentId = null) {
-  const number = String(policyNumber || '').trim()
-  if (!number) return
-  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', number), limit(5)))
-  const duplicate = s.docs.find(d => d.id !== currentId && !d.data().deleted)
-  if (duplicate) throw new Error(`Policy number "${number}" already exists.`)
+const POLICY_DUPLICATE_SYSTEM_FIELDS = new Set([
+  'id', 'createdAt', 'updatedAt', 'deleted', 'deletedAt', 'renewedAt',
+])
+
+function comparablePolicyValue(value) {
+  if (Array.isArray(value)) return value.map(comparablePolicyValue)
+  if (value && typeof value === 'object') {
+    if (typeof value.toDate === 'function') return value.toDate().toISOString()
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, comparablePolicyValue(value[key])]))
+  }
+  return value
+}
+
+function comparablePolicyRecord(policy = {}) {
+  return Object.fromEntries(
+    Object.keys(policy)
+      .filter(key => !POLICY_DUPLICATE_SYSTEM_FIELDS.has(key) && policy[key] !== undefined)
+      .sort()
+      .map(key => [key, comparablePolicyValue(policy[key])])
+  )
+}
+
+function exactPolicyKey(policy) {
+  return JSON.stringify(comparablePolicyRecord(policy))
+}
+
+function withPolicyDefaults(payload) {
+  return {
+    ...payload,
+    parentPolicyId: payload.parentPolicyId || null,
+    policyYear: payload.policyYear || 1,
+    nextPremiumDue: resolvePolicyDueStr(payload) || null,
+    renewedAt: null,
+  }
+}
+
+async function findExactPolicyDuplicate(payload, currentId = null) {
+  const number = String(payload?.policyNumber || '').trim()
+  if (!number) return null
+  const snapshot = await getDocs(query(policiesRef(), where('policyNumber', '==', number), limit(100)))
+  const candidateKey = exactPolicyKey(payload)
+  const match = snapshot.docs.find(item => (
+    item.id !== currentId && !item.data().deleted && exactPolicyKey(item.data()) === candidateKey
+  ))
+  return match ? { id: match.id, ...match.data() } : null
+}
+
+async function assertNoExactPolicyDuplicate(payload, currentId = null) {
+  const duplicate = await findExactPolicyDuplicate(payload, currentId)
+  if (duplicate) throw new Error('An identical policy already exists. Change at least one policy field before saving.')
 }
 
 function normalisePolicyPayload(data, { partial = false } = {}) {
-  const next = { ...data }
+  const next = { ...(data || {}) }
+  ;['id', 'createdAt', 'updatedAt', 'deleted', 'deletedAt', 'renewedAt'].forEach(field => delete next[field])
 
   if (!partial || next.policyNumber !== undefined) {
     next.policyNumber = assertString(next.policyNumber, 'Policy number', 80)
@@ -1333,14 +1351,10 @@ async function syncClientPolicySummary(clientId, policyHint = {}) {
 export async function addPolicy(data) {
   const payload = normalisePolicyPayload(data)
   assertPolicyDateOrder(payload.startDate, payload.expiryDate)
-  await assertUniquePolicyNumber(payload.policyNumber)
-  const nextPremiumDue = resolvePolicyDueStr(payload)
+  const policyRecord = withPolicyDefaults(payload)
+  await assertNoExactPolicyDuplicate(policyRecord)
   const ref = await addDoc(policiesRef(), cleanFirestoreData({
-    ...payload,
-    parentPolicyId: payload.parentPolicyId || null,
-    policyYear:     payload.policyYear     || 1,
-    nextPremiumDue: nextPremiumDue || null,
-    renewedAt:      null,
+    ...policyRecord,
     createdAt:      serverTimestamp(),
     updatedAt:      serverTimestamp()
   }))
@@ -1350,19 +1364,17 @@ export async function addPolicy(data) {
 
 export async function importPoliciesBatch(rows, onProgress = () => {}) {
   const prepared = []
-  const seenPolicyNumbers = new Set()
+  const seenPolicies = new Set()
   for (const row of rows) {
     const payload = normalisePolicyPayload(row)
     assertPolicyDateOrder(payload.startDate, payload.expiryDate)
-    const policyKey = String(payload.policyNumber || '').trim().toLowerCase()
-    if (seenPolicyNumbers.has(policyKey)) throw new Error(`Policy number "${payload.policyNumber}" appears more than once in this import.`)
-    seenPolicyNumbers.add(policyKey)
-    await assertUniquePolicyNumber(payload.policyNumber)
+    const policyRecord = withPolicyDefaults(payload)
+    const policyKey = exactPolicyKey(policyRecord)
+    if (seenPolicies.has(policyKey)) throw new Error('An identical policy appears more than once in this import.')
+    seenPolicies.add(policyKey)
+    await assertNoExactPolicyDuplicate(policyRecord)
     prepared.push({
-      ...payload,
-      parentPolicyId: payload.parentPolicyId || null,
-      policyYear:     payload.policyYear     || 1,
-      nextPremiumDue: resolvePolicyDueStr(payload) || null,
+      ...policyRecord,
       deleted:        false,
       deletedAt:      null,
       renewedAt:      null,
@@ -1402,7 +1414,6 @@ export async function updatePolicy(id, data) {
   if ((data.startDate && data.expiryDate) || data.startDate || data.expiryDate) {
     assertPolicyDateOrder(payload.startDate || existing.startDate, payload.expiryDate || existing.expiryDate)
   }
-  if (payload.policyNumber !== undefined) await assertUniquePolicyNumber(payload.policyNumber, id)
   const update = { ...payload, updatedAt: serverTimestamp() }
   const mergedPolicy = { ...existing, ...payload }
   const isLifePolicy = String(mergedPolicy.policyType || '').trim().toLowerCase() === 'life'
@@ -1414,6 +1425,7 @@ export async function updatePolicy(id, data) {
       update.nextPremiumDue = _policyDueStr({ ...existing, ...payload, startDate: start, frequency: freq }) || null
     }
   }
+  await assertNoExactPolicyDuplicate({ ...mergedPolicy, ...update }, id)
   await updateDoc(doc(db,POLICIES,id), update)
   await cascadeUpdatePolicyLinks(id, update)
   const clientIds = [...new Set([existing.clientId, update.clientId].filter(Boolean))]
@@ -1481,25 +1493,12 @@ export async function permanentDeletePolicy(id) {
 }
 
 export async function checkDuplicate(data) {
-  const { policyNumber, registrationNo } = data
-
-  if (policyNumber?.trim()) {
-    const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(5)))
-    const match = s.docs.find(d => !d.data().deleted)
-    if (match) return { isDup: true, reason: `Policy number "${policyNumber}" already exists`, existing: { id: match.id, ...match.data() } }
-  }
-  if (registrationNo?.trim()) {
-    const s = await getDocs(query(policiesRef(), where('registrationNo', '==', registrationNo.trim()), limit(5)))
-    const match = s.docs.find(d => !d.data().deleted)
-    if (match) return { isDup: true, reason: `Registration number "${registrationNo}" already exists`, existing: { id: match.id, ...match.data() } }
-  }
-  return { isDup: false, reason: '', existing: null }
-}
-
-export async function checkDuplicatePolicyNumber(policyNumber, currentId = null) {
-  if (!policyNumber?.trim()) return false
-  const s = await getDocs(query(policiesRef(), where('policyNumber', '==', policyNumber.trim()), limit(5)))
-  return s.docs.some(d => d.id !== currentId && !d.data().deleted)
+  if (!data?.policyNumber) return { isDup: false, reason: '', existing: null }
+  const payload = withPolicyDefaults(cleanFirestoreData({ ...data }))
+  const match = await findExactPolicyDuplicate(payload, data.id || null)
+  return match
+    ? { isDup: true, reason: 'Every field matches an existing policy.', existing: match }
+    : { isDup: false, reason: '', existing: null }
 }
 
 // FIX BUG 2: error callback added
@@ -1547,15 +1546,6 @@ export async function saveRenewal(oldPolicyId, newData) {
   const newRef = doc(db, POLICIES, `${oldPolicyId}_renewal`)
 
   assertPolicyDateOrder(newData.startDate, newData.expiryDate)
-  const requestedPolicyNumber = (newData.newPolicyNumber || '').trim()
-  if (requestedPolicyNumber) {
-    const dupSnap = await getDocs(query(policiesRef(), where('policyNumber', '==', requestedPolicyNumber), limit(5)))
-    const duplicate = dupSnap.docs.find(d => d.id !== oldPolicyId && d.id !== newRef.id && !d.data().deleted)
-    if (duplicate) {
-      throw new Error(`Policy number "${requestedPolicyNumber}" already exists. Use a unique renewal policy number or leave it blank to keep the existing number.`)
-    }
-  }
-
   const ref = await runTransaction(db, async tx => {
     const oldSnap = await tx.get(oldRef)
     if (!oldSnap.exists()) throw new Error('Original policy not found.')
@@ -1780,40 +1770,5 @@ export function subscribeClaims(callback, onError) {
 }
 export async function getAllClaims() {
   const s = await getDocs(query(claimsRef(), orderBy('createdAt','desc')))
-  return s.docs.map(d => ({ id:d.id, ...d.data() }))
-}
-
-// ── TASKS ─────────────────────────────────────────────────────
-export const TASK_PRIORITIES = ['High','Medium','Low']
-export const TASK_TYPES      = ['Call','Email','Meeting','Follow-up','Document Collection','Other']
-export const tasksRef = () => collection(db, TASKS)
-export async function addTask(data) {
-  const title = assertString(data.title, 'Task title')
-  assertInList(data.type || 'Call', TASK_TYPES, 'Task type')
-  assertInList(data.priority || 'Medium', TASK_PRIORITIES, 'Task priority')
-  assertOptionalDate(data.dueDate, 'Due date')
-  if (data.policyId && !data.clientId) throw new Error('A policy-linked task must also be linked to a client.')
-  return addDoc(tasksRef(), cleanFirestoreData({ ...data, title, done: false, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }))
-}
-export async function updateTask(id, data) {
-  if (data.title !== undefined) data.title = assertString(data.title, 'Task title')
-  if (data.type !== undefined) assertInList(data.type, TASK_TYPES, 'Task type')
-  if (data.priority !== undefined) assertInList(data.priority, TASK_PRIORITIES, 'Task priority')
-  assertOptionalDate(data.dueDate, 'Due date')
-  if (data.policyId && !data.clientId) throw new Error('A policy-linked task must also be linked to a client.')
-  return updateDoc(doc(db,TASKS,id), cleanFirestoreData({ ...data, updatedAt: serverTimestamp() }))
-}
-export async function deleteTask(id) { return deleteDoc(doc(db,TASKS,id)) }
-
-// FIX BUG 2: error callback added
-export function subscribeTasks(callback, onError) {
-  return onSnapshot(
-    query(tasksRef(), orderBy('dueDate','asc')),
-    s => callback(s.docs.map(d => ({ id:d.id, ...d.data() }))),
-    onError || (err => console.error('subscribeTasks:', err.code, err.message))
-  )
-}
-export async function getAllTasks() {
-  const s = await getDocs(query(tasksRef(), orderBy('dueDate','asc')))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
 }

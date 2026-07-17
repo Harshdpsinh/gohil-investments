@@ -16,6 +16,7 @@
   "dependencies": {
     "@capacitor/android": "^7.0.0",
     "@capacitor/core": "^7.0.0",
+    "@capacitor/local-notifications": "7.0.0",
     "@fontsource/ibm-plex-sans": "^5.1.1",
     "chart.js": "^4.4.0",
     "date-fns": "^2.30.0",

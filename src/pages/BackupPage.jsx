@@ -123,7 +123,7 @@ export default function BackupPage() {
           <div>
             <p className="font-semibold text-gray-900 dark:text-white">Create Backup</p>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Saves clients, policies, proposals, claims, tasks, staff roles, and document/PDF links into one file.
+              Saves clients, policies, proposals, claims, staff roles, and document/PDF links into one file.
             </p>
           </div>
           <button onClick={onDownloadBackup} disabled={backupLoading || restoreLoading} className="btn-primary">
