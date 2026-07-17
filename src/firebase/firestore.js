@@ -1632,12 +1632,17 @@ export async function markPremiumPaid(policyId, options = {}) {
 
     const expiry = parseAnyDate(policy.expiryDate)
     const isLifePolicy = String(policy.policyType || '').trim().toLowerCase() === 'life'
+    const renewedPremium = options.premium !== undefined ? Number(options.premium) : null
+    if (isLifePolicy && options.premium !== undefined && (!Number.isFinite(renewedPremium) || renewedPremium <= 0)) {
+      throw new Error('Renewed premium must be greater than 0.')
+    }
     if (!isLifePolicy && expiry && nextInstallmentDue > expiry) {
       throw new Error('Premium due date cannot be after policy expiry for non-life policies. Use Renew instead.')
     }
 
     tx.update(policyRef, {
       frequency: nextFrequency,
+      ...(isLifePolicy && renewedPremium !== null ? { premium: renewedPremium } : {}),
       lastPremiumPaidAt: serverTimestamp(),
       lastPremiumPaidDueDate: currentDue,
       nextPremiumDue: toInputDate(nextInstallmentDue),
