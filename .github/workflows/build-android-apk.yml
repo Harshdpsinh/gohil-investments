@@ -34,6 +34,9 @@ jobs:
       - name: Build web application
         run: npm run build
 
+      - name: Bundle web application inside APK
+        run: node -e 'const fs=require("fs");const p="capacitor.config.json";const c=JSON.parse(fs.readFileSync(p));delete c.server;fs.writeFileSync(p,JSON.stringify(c,null,2))'
+
       - name: Synchronize Capacitor Android project
         run: npx cap sync android
 
@@ -46,7 +49,7 @@ jobs:
       - name: Upload sideloadable APK
         uses: actions/upload-artifact@v4
         with:
-          name: gohil-investments-debug-apk
+          name: gohil-investments-fixed-bundled-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
