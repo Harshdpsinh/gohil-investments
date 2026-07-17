@@ -366,15 +366,15 @@ export default function ClaimsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label:'Total',    val: stats.total,    color:'blue'    },
-          { label:'Active',   val: stats.active,   color:'yellow'  },
-          { label:'Settled',  val: stats.settled,  color:'green'   },
-          { label:'Rejected', val: stats.rejected, color:'red'     },
-          { label:'Claimed',  val: `₹${(stats.totalClaimed/1000).toFixed(0)}K`,  color:'purple' },
-          { label:'Approved', val: `₹${(stats.totalApproved/1000).toFixed(0)}K`, color:'emerald'},
-        ].map(({ label, val, color }) => (
+          { label:'Total', val: stats.total, valueClass:'text-blue-700 dark:text-blue-300' },
+          { label:'Active', val: stats.active, valueClass:'text-amber-700 dark:text-amber-300' },
+          { label:'Settled', val: stats.settled, valueClass:'text-green-700 dark:text-green-300' },
+          { label:'Rejected', val: stats.rejected, valueClass:'text-red-700 dark:text-red-300' },
+          { label:'Claimed', val: `₹${(stats.totalClaimed/1000).toFixed(0)}K`, valueClass:'text-violet-700 dark:text-violet-300' },
+          { label:'Approved', val: `₹${(stats.totalApproved/1000).toFixed(0)}K`, valueClass:'text-emerald-700 dark:text-emerald-300' },
+        ].map(({ label, val, valueClass }) => (
           <div key={label} className="card-sm text-center">
-            <p className={`text-2xl font-bold text-${color}-600 dark:text-${color}-400`}>{val}</p>
+            <p className={`text-2xl font-bold ${valueClass}`}>{val}</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{label}</p>
           </div>
         ))}

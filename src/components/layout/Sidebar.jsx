@@ -15,12 +15,10 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/clients',    icon:'clients', label:'Clients'     },
     { to:'/policies',   icon:'policies', label:'Policies'    },
     { to:'/renewals',   icon:'renewals', label:'Renewals'    },
-    { to:'/calendar',   icon:'calendar', label:'Calendar'    },
     { to:'/claims',     icon:'claims', label:'Claims'      },
     { to:'/leads',      icon:'leads', label:'Leads'       },
     { to:'/endorsements', icon:'endorsements', label:'Endorsements' },
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
-    { to:'/tasks',      icon:'tasks', label:'Tasks'       },
     ...(isAdmin ? [
       { to:'/commission',  icon:'commission', label:'Commission'  },
       { to:'/commission-reconciliation', icon:'reconcile', label:'Reconcile' },

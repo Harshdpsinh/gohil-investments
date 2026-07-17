@@ -1,8 +1,8 @@
 import {
   Activity, ArchiveRestore, ArrowDownToLine, ArrowUp, BadgeIndianRupee,
-  BarChart3, BriefcaseBusiness, Building2, CalendarDays, Check, CheckCircle2,
+  BarChart3, BriefcaseBusiness, Building2, Check, CheckCircle2,
   ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleDollarSign,
-  ClipboardCheck, ClipboardList, Clock3, CloudDownload, CloudUpload,
+  ClipboardList, Clock3, CloudDownload, CloudUpload,
   DatabaseBackup, Download, FileCheck2, FileClock, FilePenLine, FileSearch,
   FileSpreadsheet, FileText, FolderOpen, HeartPulse, History, House, KeyRound,
   LayoutDashboard, Lightbulb, LockKeyhole, LogOut, Mail, Menu, Merge,
@@ -13,7 +13,7 @@ import {
 
 const ICONS = {
   activity: Activity, archiveRestore: ArchiveRestore, arrowDown: ArrowDownToLine,
-  arrowUp: ArrowUp, backup: DatabaseBackup, calendar: CalendarDays, check: Check,
+  arrowUp: ArrowUp, backup: DatabaseBackup, check: Check,
   checkCircle: CheckCircle2, chevronDown: ChevronDown, chevronLeft: ChevronLeft,
   chevronRight: ChevronRight, claims: FileSearch, client: User, clients: UsersRound,
   clock: Clock3, commission: CircleDollarSign, dashboard: LayoutDashboard,
@@ -26,7 +26,7 @@ const ICONS = {
   policies: WalletCards, proposals: ClipboardList, reconcile: RefreshCw,
   renewals: RotateCcw, reports: BarChart3, rupee: BadgeIndianRupee,
   search: Search, settings: Settings2, shield: ShieldCheck, sparkles: Sparkles,
-  spreadsheet: FileSpreadsheet, staff: UserCog, sun: Sun, tasks: ClipboardCheck,
+  spreadsheet: FileSpreadsheet, staff: UserCog, sun: Sun,
   trash: Trash2, upload: Upload, uploadCloud: CloudUpload,
   downloadCloud: CloudDownload, userAdd: UserRoundPlus, users: Users,
   warning: CircleAlert, work: BriefcaseBusiness, x: X,

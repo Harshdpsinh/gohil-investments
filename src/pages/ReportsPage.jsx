@@ -5,7 +5,7 @@ import { usePolicies } from '../hooks/usePolicies'
 import DateInput from '../components/ui/DateInput'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, parseAnyDate } from '../utils/dateUtils'
-import { getAllCommissionTransactions, getAllEndorsements, getAllLeads, subscribeClaims, subscribeTasks } from '../firebase/firestore'
+import { getAllCommissionTransactions, getAllEndorsements, getAllLeads, subscribeClaims } from '../firebase/firestore'
 
 const reportTypes = [
   'Business',
@@ -32,7 +32,6 @@ export default function ReportsPage() {
   const { clients } = useClients()
   const { policies } = usePolicies()
   const [claims, setClaims] = useState([])
-  const [tasks, setTasks] = useState([])
   const [leads, setLeads] = useState([])
   const [endorsements, setEndorsements] = useState([])
   const [commissionTx, setCommissionTx] = useState([])
@@ -44,11 +43,10 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const unsubClaims = subscribeClaims(setClaims, err => toast.error(err.message || 'Claims load failed.'))
-    const unsubTasks = subscribeTasks(setTasks, err => toast.error(err.message || 'Tasks load failed.'))
     Promise.all([getAllLeads(), getAllEndorsements(), getAllCommissionTransactions()])
       .then(([l, e, c]) => { setLeads(l); setEndorsements(e); setCommissionTx(c) })
       .catch(err => toast.error(err.message || 'Report data load failed.'))
-    return () => { unsubClaims(); unsubTasks() }
+    return unsubClaims
   }, [])
 
   const rows = useMemo(() => {
@@ -124,17 +122,6 @@ export default function ReportsPage() {
         detail: c.familyName || '',
       })),
       'Pending Work': [
-        ...tasks.filter(t => !t.done).map(t => ({
-          type: 'Task',
-          date: t.dueDate || t.createdAt,
-          client: t.clientName || '',
-          policyNumber: t.policyNumber || '',
-          insurer: t.priority || '',
-          product: t.type || '',
-          status: 'Pending',
-          amount: 0,
-          detail: t.title || t.note || '',
-        })),
         ...endorsements.filter(e => !['completed', 'approved', 'rejected'].includes(e.status)).map(e => ({
           type: 'Endorsement',
           date: e.requestedDate,
@@ -171,7 +158,7 @@ export default function ReportsPage() {
       const text = Object.values(row).join(' ').toLowerCase()
       return (!q || text.includes(q)) && (status === 'All' || row.status === status) && isBetween(row.date, from, to)
     })
-  }, [clients, policies, claims, tasks, leads, endorsements, commissionTx, report, query, from, to, status])
+  }, [clients, policies, claims, leads, endorsements, commissionTx, report, query, from, to, status])
 
   const statuses = useMemo(() => ['All', ...Array.from(new Set(rows.map(r => r.status).filter(Boolean)))], [rows])
   const totalAmount = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)

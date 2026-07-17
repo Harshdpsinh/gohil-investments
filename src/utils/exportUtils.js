@@ -31,7 +31,7 @@ async function getLogoData() {
 }
 
 // ── CSV export ────────────────────────────────────────────────
-export function exportToCSV(rows, columns, filename) {
+export async function exportToCSV(rows, columns, filename) {
   const header = columns.map(c => c.header).join(',')
   const body   = rows.map(r =>
     columns.map(c => {
@@ -41,11 +41,11 @@ export function exportToCSV(rows, columns, filename) {
   ).join('\n')
   const blob = new Blob([`${header}\n${body}`], { type: 'text/csv;charset=utf-8;' })
   const outputName = `${filename}_${ts()}.csv`
-  shareGeneratedFile(blob, outputName, filename).then(shared => { if (!shared) saveAs(blob, outputName) })
+  if (!await shareGeneratedFile(blob, outputName, filename)) saveAs(blob, outputName)
 }
 
 // ── Excel export (with logo header rows) ─────────────────────
-export function exportToExcel(rows, columns, sheetName, filename) {
+export async function exportToExcel(rows, columns, sheetName, filename) {
   const generated = format(new Date(), 'dd/MM/yyyy HH:mm')
   // Logo row: merge cell A1 with company name text (image not supported in xlsx-js without paid lib)
   // We add 3 branded header rows instead
@@ -89,7 +89,7 @@ export function exportToExcel(rows, columns, sheetName, filename) {
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   const outputName = `${filename}_${ts()}.xlsx`
-  shareGeneratedFile(blob, outputName, sheetName).then(shared => { if (!shared) saveAs(blob, outputName) })
+  if (!await shareGeneratedFile(blob, outputName, sheetName)) saveAs(blob, outputName)
 }
 
 // ── PDF header helper (async — loads logo from /public/g1.jpg) ─
