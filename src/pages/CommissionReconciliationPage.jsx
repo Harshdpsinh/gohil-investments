@@ -765,9 +765,9 @@ export default function CommissionReconciliationPage() {
 
       {manualOpen && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-0 sm:items-center sm:justify-center sm:p-4">
-          <form onSubmit={saveManualCommission} className="max-h-[92vh] w-full overflow-auto rounded-t-2xl bg-white p-5 shadow-2xl dark:bg-gray-800 sm:max-w-3xl sm:rounded-2xl">
-            <div className="mb-4 flex items-center justify-between"><div><h2 className="text-lg font-bold">Manual Commission Entry</h2><p className="text-sm text-gray-500">Saved in the same ledger and reports as imported commission.</p></div><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Close</button></div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <form onSubmit={saveManualCommission} className="gi-standalone-modal max-h-[92dvh] w-full overflow-hidden rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-3xl sm:rounded-2xl">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700"><div><h2 className="text-lg font-bold">Manual Commission Entry</h2><p className="text-sm text-gray-500">Saved in the same ledger and reports as imported commission.</p></div><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Close</button></div>
+            <div className="gi-standalone-modal-body grid grid-cols-1 gap-3 overflow-y-auto p-4 sm:grid-cols-2 lg:grid-cols-3">
               <select className="form-input sm:col-span-2 lg:col-span-3" value={manualForm.policyId} onChange={e => { const policy = policies.find(item => item.id === e.target.value); setManualForm(current => ({ ...current, policyId: e.target.value, premium: policy?.premium || '', commissionRate: Number(policy?.policyYear || 1) > 1 ? policy?.ryCommission || '' : policy?.fyCommission || '' })) }} required><option value="">Select client and policy</option>{policies.map(policy => <option key={policy.id} value={policy.id}>{policy.clientName} · {policy.policyNumber} · {policy.insurer}</option>)}</select>
               <input className="form-input" type="number" min="0" placeholder="Premium" value={manualForm.premium} onChange={e => setManualForm({ ...manualForm, premium: e.target.value })} />
               <input className="form-input" type="number" min="0" max="100" step="0.01" placeholder="Commission rate %" value={manualForm.commissionRate} onChange={e => setManualForm({ ...manualForm, commissionRate: e.target.value })} />
@@ -780,7 +780,7 @@ export default function CommissionReconciliationPage() {
               <select className="form-input" value={manualForm.payoutMonth} onChange={e => setManualForm({ ...manualForm, payoutMonth: e.target.value })} required><option value="">Commission month</option>{statementMonthOptions.map(month => <option key={month.value} value={month.value}>{month.label}</option>)}</select>
               <textarea className="form-input sm:col-span-2 lg:col-span-3" placeholder="Remarks" value={manualForm.remarks} onChange={e => setManualForm({ ...manualForm, remarks: e.target.value })} />
             </div>
-            <div className="mt-5 flex justify-end gap-2"><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Cancel</button><button className="btn-primary" disabled={posting === 'manual'}>{posting === 'manual' ? 'Saving...' : 'Save commission'}</button></div>
+            <div className="gi-modal-footer flex shrink-0 justify-end gap-2 border-t border-gray-200 p-4 dark:border-gray-700"><button type="button" className="btn-secondary" onClick={() => setManualOpen(false)}>Cancel</button><button className="btn-primary" disabled={posting === 'manual'}>{posting === 'manual' ? 'Saving...' : 'Save commission'}</button></div>
           </form>
         </div>
       )}

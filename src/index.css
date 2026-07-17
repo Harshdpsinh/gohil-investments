@@ -1142,9 +1142,52 @@ textarea::placeholder {
   }
 
   .gi-modal > div:first-of-type { padding: 0.875rem 1rem; }
-  .gi-modal-body { padding: 1rem !important; -webkit-overflow-scrolling: touch; }
+  .gi-modal-body {
+    min-height: 0;
+    overscroll-behavior-y: contain;
+    padding: 1rem !important;
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
+  .gi-modal-body:has(> .gi-fixed-action-form) {
+    overflow: hidden;
+    padding: 0 !important;
+  }
+  .gi-fixed-action-form {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+  }
+  .gi-fixed-action-form-body {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    padding: 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .gi-mobile-form-actions {
+    flex-shrink: 0;
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--gi-border);
+    background: var(--surface);
+    box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.08);
+  }
+  .gi-mobile-form-actions > button { flex: 1; }
   .gi-modal-footer { position: sticky; bottom: 0; padding: 0.75rem 1rem !important; }
   .gi-modal-footer > button { flex: 1; }
+
+  .gi-standalone-modal {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+  }
+  .gi-standalone-modal-body {
+    min-height: 0;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
 
   .form-input,
   .form-select,
