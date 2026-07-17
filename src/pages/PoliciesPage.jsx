@@ -838,7 +838,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
   return (
     <>
       {showQA && <QuickAddClientModal onCreated={onClientCreated} onClose={()=>setShowQA(false)} />}
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form onSubmit={onSubmit} className="gi-fixed-action-form">
+        <div className="gi-fixed-action-form-body space-y-4">
         {/* Base fields */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {inp('policyNumber','Policy Number *','text',{
@@ -992,7 +993,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
 
         <div><label className="form-label">Notes</label>
           <textarea rows={2} value={form.notes||''} onChange={e=>set('notes',e.target.value)} className="form-input" /></div>
-        <div className="flex gap-3 pt-2">
+        </div>
+        <div className="gi-mobile-form-actions flex gap-3 pt-2">
           <button type="submit" disabled={saving} className="btn-primary">{saving?'⏳ Saving…':'💾 Save Policy'}</button>
           <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
         </div>
