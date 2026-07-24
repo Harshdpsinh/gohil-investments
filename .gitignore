@@ -7,3 +7,5 @@ dist/
 *token*.txt
 *uid*.txt
 node-*-x64.msi
+openwa/
+evolution-api/

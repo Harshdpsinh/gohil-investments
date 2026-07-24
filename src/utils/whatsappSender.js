@@ -1,103 +1,91 @@
 // src/utils/whatsappSender.js
-// ─────────────────────────────────────────────────────────────
-// OpenWA HTTP client — sends WhatsApp messages via the gateway.
-// Config (baseUrl, sessionId, apiKey) is stored in localStorage
-// under key "openwa_config" — NEVER in Firestore or .env.
-//
-// This module NEVER throws. Every function returns a result object:
-//   { ok: boolean, messageId?: string, error?: string }
-//
-// OpenWA endpoint (confirmed from source):
-//   POST {baseUrl}/api/sessions/{sessionId}/messages/send-text
-//   Headers: Content-Type: application/json, X-API-Key: <key>
-//   Body: { chatId: "91XXXXXXXXXX@c.us", text: "..." }
-//   Success: 201  { messageId, timestamp }
-//   Errors: 400 (session not active), 404 (session not found), 401/403 (auth)
-// ─────────────────────────────────────────────────────────────
+// Evolution API client. Config is stored only in this browser.
 
-const STORAGE_KEY = 'openwa_config'
+const STORAGE_KEY = 'evolution_api_config'
+const LEGACY_STORAGE_KEY = 'openwa_config'
 
-/** Read OpenWA config from localStorage. Returns null if not set. */
-export function getOpenWAConfig() {
+export function getEvolutionConfig() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)
     return raw ? JSON.parse(raw) : null
-  } catch { return null }
+  } catch {
+    return null
+  }
 }
 
-/** Save OpenWA config to localStorage. */
-export function saveOpenWAConfig(config) {
+export function saveEvolutionConfig(config) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    baseUrl:  config.baseUrl  || 'http://localhost:2785',
-    sessionId: config.sessionId || 'DEFAULT',
-    apiKey:   config.apiKey || '',
+    baseUrl: config.baseUrl || 'http://localhost:8080',
+    instanceName: config.instanceName || config.sessionId || 'default',
+    apiKey: config.apiKey || '',
   }))
+  localStorage.removeItem(LEGACY_STORAGE_KEY)
 }
 
-/** Clear OpenWA config from localStorage. */
-export function clearOpenWAConfig() {
+export function clearEvolutionConfig() {
   localStorage.removeItem(STORAGE_KEY)
+  localStorage.removeItem(LEGACY_STORAGE_KEY)
 }
 
-/**
- * phoneToChatId(phone: string) → string | null
- * Converts E.164 "+91XXXXXXXXXX" to WhatsApp chatId "91XXXXXXXXXX@c.us".
- * Returns null if input is not a valid E.164 phone string.
- */
-export function phoneToChatId(phone) {
+export function phoneToNumber(phone) {
   if (!phone || typeof phone !== 'string') return null
-  const digits = phone.replace(/[^0-9]/g, '')
-  if (digits.length < 10) return null
-  return `${digits}@c.us`
+  const digits = phone.replace(/\D/g, '')
+  return digits.length >= 10 ? digits : null
 }
 
-/**
- * sendWhatsApp({ chatId, text })
- * Sends a text message via OpenWA. Uses config from localStorage.
- * Returns { ok, messageId?, error? }. Never throws.
- */
-export async function sendWhatsApp({ chatId, text }) {
-  const config = getOpenWAConfig()
+export async function sendWhatsApp({ number, chatId, text }) {
+  const config = getEvolutionConfig()
   if (!config?.baseUrl) {
-    return { ok: false, error: 'OpenWA not configured. Go to ⚙️ Settings to set it up.' }
+    return { ok: false, error: 'Evolution API not configured. Open WhatsApp settings first.' }
   }
-  if (!config.sessionId) {
-    return { ok: false, error: 'No session ID configured.' }
+  if (!config.instanceName) {
+    return { ok: false, error: 'No Evolution instance name configured.' }
   }
 
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/api/sessions/${encodeURIComponent(config.sessionId)}/messages/send-text`
+  const to = phoneToNumber(number || chatId)
+  if (!to) return { ok: false, error: 'Invalid WhatsApp phone number.' }
 
+  const url = `${config.baseUrl.replace(/\/+$/, '')}/message/sendText/${encodeURIComponent(config.instanceName)}`
   const headers = { 'Content-Type': 'application/json' }
-  if (config.apiKey) {
-    headers['X-API-Key'] = config.apiKey
-  }
+  if (config.apiKey) headers.apikey = config.apiKey
 
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ chatId, text }),
+      body: JSON.stringify({ number: to, text }),
     })
 
+    const body = await res.text()
+    const data = body ? safeJson(body) : null
+
     if (res.ok) {
-      const data = await res.json()
-      return { ok: true, messageId: data?.messageId }
+      return { ok: true, messageId: data?.key?.id || data?.messageId || data?.id }
     }
-
-    let errorBody = ''
-    try { errorBody = await res.text() } catch { /* ignore */ }
-
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: `Authentication failed (HTTP ${res.status}). Check API key.` }
+      return { ok: false, error: `Authentication failed (HTTP ${res.status}). Check the Evolution API key.` }
     }
     if (res.status === 400) {
-      return { ok: false, error: `Session not active or invalid request (HTTP 400). Make sure the WhatsApp session is started in OpenWA dashboard.` }
+      return { ok: false, error: 'Evolution rejected the message. Check the phone number and message text.' }
     }
     if (res.status === 404) {
-      return { ok: false, error: `Session "${config.sessionId}" not found. Create it in OpenWA dashboard.` }
+      return { ok: false, error: `Evolution instance "${config.instanceName}" was not found.` }
     }
-    return { ok: false, error: `OpenWA returned HTTP ${res.status}: ${errorBody.slice(0, 200)}` }
+    return { ok: false, error: `Evolution API returned HTTP ${res.status}: ${body.slice(0, 200)}` }
   } catch (err) {
-    return { ok: false, error: `Cannot reach OpenWA at ${config.baseUrl}. Is the service running? (${err.message})` }
+    return { ok: false, error: `Cannot reach Evolution API at ${config.baseUrl}. Is it running? (${err.message})` }
   }
 }
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+export const getOpenWAConfig = getEvolutionConfig
+export const saveOpenWAConfig = saveEvolutionConfig
+export const clearOpenWAConfig = clearEvolutionConfig
+export const phoneToChatId = phoneToNumber

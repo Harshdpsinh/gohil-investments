@@ -25,8 +25,8 @@ import { processTransaction }                             from '../utils/transac
 import { ocrImage }                                       from '../utils/receiptOcr'
 import { extractPdfText }                                 from '../utils/pdfExtract'
 import {
-  sendWhatsApp, getOpenWAConfig, saveOpenWAConfig,
-  phoneToChatId,
+  sendWhatsApp, getEvolutionConfig, saveEvolutionConfig,
+  phoneToNumber,
 } from '../utils/whatsappSender'
 
 const TABS = [
@@ -151,9 +151,9 @@ export default function CommissionAgentPage() {
     }
     setSending(true)
     try {
-      const chatId = phoneToChatId(result.transaction_details.phone_number)
+      const number = phoneToNumber(result.transaction_details.phone_number)
       const res = await sendWhatsApp({
-        chatId,
+        number,
         text: result.whatsapp_reply_draft,
       })
       if (res.ok) {
@@ -205,7 +205,7 @@ export default function CommissionAgentPage() {
     }
   }
 
-  const openwaReady = !!getOpenWAConfig()?.baseUrl
+  const evolutionReady = !!getEvolutionConfig()?.baseUrl
   const phoneValid = !!result?.transaction_details?.phone_number
 
   // ─────────────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ export default function CommissionAgentPage() {
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setTierModal(true)} className="btn-secondary text-xs">⚙️ Tiers ({tiers.length})</button>
           <button onClick={() => setCfgModal(true)} className="btn-secondary text-xs">
-            {openwaReady ? '🟢 WhatsApp' : '⚪ WhatsApp'}
+            {evolutionReady ? '🟢 WhatsApp' : '⚪ WhatsApp'}
           </button>
         </div>
       </div>
@@ -394,7 +394,7 @@ export default function CommissionAgentPage() {
                 onClick={handleSendWhatsApp}
                 disabled={!phoneValid || sending}
                 className="btn-success disabled:opacity-50">
-                {sending ? '⏳ Sending…' : !phoneValid ? 'No valid phone' : '🚀 Send via OpenWA'}
+                {sending ? '⏳ Sending…' : !phoneValid ? 'No valid phone' : '🚀 Send via Evolution API'}
               </button>
               <button
                 onClick={() => {
@@ -404,9 +404,9 @@ export default function CommissionAgentPage() {
                 className="btn-secondary">
                 ⧉ Copy draft manually
               </button>
-              {!openwaReady && (
+              {!evolutionReady && (
                 <p className="text-xs text-gray-400 text-center">
-                  OpenWA not configured. Click ⚪ WhatsApp in the header to set it up for direct sending.
+                  Evolution API not configured. Click ⚪ WhatsApp in the header to set it up for direct sending.
                 </p>
               )}
             </div>
@@ -443,8 +443,8 @@ export default function CommissionAgentPage() {
         </div>
       </Modal>
 
-      {/* ── OPENWA CONFIG MODAL ── */}
-      <OpenWAConfigModal open={cfgModal} onClose={() => setCfgModal(false)} />
+      {/* ── EVOLUTION API CONFIG MODAL ── */}
+      <EvolutionConfigModal open={cfgModal} onClose={() => setCfgModal(false)} />
     </div>
   )
 }
@@ -461,37 +461,37 @@ function Detail({ label, value }) {
   )
 }
 
-function OpenWAConfigModal({ open, onClose }) {
-  const existing = getOpenWAConfig()
+function EvolutionConfigModal({ open, onClose }) {
+  const existing = getEvolutionConfig()
   const [cfg, setCfg] = useState({
-    baseUrl:   existing?.baseUrl   || 'http://localhost:2785',
-    sessionId: existing?.sessionId || 'DEFAULT',
+    baseUrl:      existing?.baseUrl      || 'http://localhost:8080',
+    instanceName: existing?.instanceName || existing?.sessionId || 'default',
     apiKey:    existing?.apiKey    || '',
   })
   const set = (k, v) => setCfg(p => ({ ...p, [k]: v }))
   const save = () => {
-    saveOpenWAConfig(cfg)
+    saveEvolutionConfig(cfg)
     toast.success('WhatsApp config saved (browser only)')
     onClose()
   }
   return (
-    <Modal open={open} onClose={onClose} title="WhatsApp (OpenWA) Settings" size="md">
+    <Modal open={open} onClose={onClose} title="WhatsApp (Evolution API) Settings" size="md">
       <div className="space-y-3">
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Stored in this browser only — never sent to Firestore or committed to git.
-          Leave API key blank if your OpenWA instance has no master key set.
+          Use the API key and instance name from your Evolution API server.
         </p>
         <div>
           <label className="form-label">Base URL</label>
-          <input value={cfg.baseUrl} onChange={e => set('baseUrl', e.target.value)} className="form-input" placeholder="http://localhost:2785" />
+          <input value={cfg.baseUrl} onChange={e => set('baseUrl', e.target.value)} className="form-input" placeholder="http://localhost:8080" />
         </div>
         <div>
-          <label className="form-label">Session ID</label>
-          <input value={cfg.sessionId} onChange={e => set('sessionId', e.target.value)} className="form-input" placeholder="DEFAULT" />
+          <label className="form-label">Instance Name</label>
+          <input value={cfg.instanceName} onChange={e => set('instanceName', e.target.value)} className="form-input" placeholder="default" />
         </div>
         <div>
-          <label className="form-label">API Key (optional)</label>
-          <input value={cfg.apiKey} onChange={e => set('apiKey', e.target.value)} className="form-input" placeholder="from OpenWA dashboard" />
+          <label className="form-label">API Key</label>
+          <input value={cfg.apiKey} onChange={e => set('apiKey', e.target.value)} className="form-input" placeholder="AUTHENTICATION_API_KEY" />
         </div>
         <div className="flex gap-2 pt-2">
           <button onClick={save} className="btn-primary flex-1">💾 Save</button>
