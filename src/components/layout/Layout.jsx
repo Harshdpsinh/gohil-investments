@@ -1,21 +1,18 @@
 // UI MODERNIZATION - logic unchanged
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import useAndroidBack from '../../hooks/useAndroidBack'
 import AppIcon from '../ui/AppIcon'
-import { listenForCommissionReminder, scheduleMonthlyCommissionReminder } from '../../services/commissionReminderService'
+import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
 
 export default function Layout({ children }) {
-  const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   useAndroidBack({ sidebarOpen, closeSidebar })
 
   useEffect(() => {
-    scheduleMonthlyCommissionReminder().catch(error => console.warn('Monthly commission reminder unavailable:', error))
-    return listenForCommissionReminder(() => navigate('/commission-reconciliation'))
-  }, [navigate])
+    return startRenewalReminderAutomation()
+  }, [])
 
   useEffect(() => {
     if (!sidebarOpen) return undefined

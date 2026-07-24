@@ -21,9 +21,7 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
     ...(isAdmin ? [
       { to:'/commission',  icon:'commission', label:'Commission'  },
-      { to:'/commission-agent', icon:'commission-agent', label:'Commission Agent' },
-      { to:'/commission-reconciliation', icon:'reconcile', label:'Reconcile' },
-    { to:'/masters',     icon:'masters', label:'Masters'      },
+      { to:'/masters',     icon:'masters', label:'Masters'      },
       { to:'/reports',     icon:'reports', label:'Reports'      },
       { to:'/admin-users', icon:'staff', label:'Manage Staff' },
       { to:'/backup',      icon:'backup', label:'Backup'       },

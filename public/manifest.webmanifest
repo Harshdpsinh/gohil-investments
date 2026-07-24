@@ -1,7 +1,7 @@
 {
   "name": "Gohil Investments CRM",
   "short_name": "Gohil CRM",
-  "description": "Insurance CRM for clients, policies, renewals, claims, tasks, commissions, and documents.",
+  "description": "Insurance CRM for clients, policies, renewals, reminders, claims, tasks, and documents.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

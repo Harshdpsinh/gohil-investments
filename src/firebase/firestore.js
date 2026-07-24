@@ -22,9 +22,8 @@ const LEAD_FOLLOWUPS = 'lead_followups'
 const ENDORSEMENTS = 'endorsements'
 const COMMISSION_MASTER = 'commission_master'
 const COMMISSION_TRANSACTIONS = 'commission_transactions'
-const COMMISSION_IMPORT_TEMPLATES = 'commission_import_templates'
-const COMMISSION_RECONCILIATION_BATCHES = 'commission_reconciliation_batches'
-const COMMISSION_RECONCILIATION_ROWS = 'commission_reconciliation_rows'
+const RENEWAL_REMINDER_SETTINGS = 'renewal_reminder_settings'
+const RENEWAL_REMINDER_LOGS = 'renewal_reminder_logs'
 const SUB_BROKERS = 'sub_brokers'
 const SALES_MANAGERS = 'sales_managers'
 const REPORTS_SAVED_FILTERS = 'reports_saved_filters'
@@ -37,8 +36,8 @@ const CLIENT_FIELDS = [
 const BACKUP_COLLECTIONS = [
   CLIENTS, POLICIES, PROPOSALS, CLAIMS, USERS, FAMILIES,
   AUDIT_LOGS, DOCUMENTS, MESSAGE_LOGS, LEADS, LEAD_FOLLOWUPS, ENDORSEMENTS,
-  COMMISSION_MASTER, COMMISSION_TRANSACTIONS, COMMISSION_IMPORT_TEMPLATES,
-  COMMISSION_RECONCILIATION_BATCHES, COMMISSION_RECONCILIATION_ROWS,
+  COMMISSION_MASTER, COMMISSION_TRANSACTIONS,
+  RENEWAL_REMINDER_SETTINGS, RENEWAL_REMINDER_LOGS,
   SUB_BROKERS, SALES_MANAGERS, REPORTS_SAVED_FILTERS,
 ]
 
@@ -57,9 +56,8 @@ export const CRM_COLLECTIONS = Object.freeze({
   ENDORSEMENTS,
   COMMISSION_MASTER,
   COMMISSION_TRANSACTIONS,
-  COMMISSION_IMPORT_TEMPLATES,
-  COMMISSION_RECONCILIATION_BATCHES,
-  COMMISSION_RECONCILIATION_ROWS,
+  RENEWAL_REMINDER_SETTINGS,
+  RENEWAL_REMINDER_LOGS,
   SUB_BROKERS,
   SALES_MANAGERS,
   REPORTS_SAVED_FILTERS,
@@ -305,6 +303,98 @@ export async function addMessageLog(data = {}) {
   })
 }
 
+export async function getRenewalReminderSettings() {
+  const snap = await getDoc(doc(db, RENEWAL_REMINDER_SETTINGS, 'active'))
+  return snap.exists() ? { id: snap.id, ...snap.data() } : null
+}
+
+export function subscribeRenewalReminderSettings(callback, onError) {
+  return onSnapshot(
+    doc(db, RENEWAL_REMINDER_SETTINGS, 'active'),
+    snap => callback(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    onError || (err => console.error('subscribeRenewalReminderSettings:', err.code, err.message))
+  )
+}
+
+export async function saveRenewalReminderSettings(data = {}) {
+  const intervals = (data.intervals || []).map(item => ({
+    id: item.id || `d${Number(item.days) || 0}`,
+    days: Math.max(0, Number(item.days) || 0),
+    enabled: item.enabled !== false,
+  }))
+  return setDoc(doc(db, RENEWAL_REMINDER_SETTINGS, 'active'), cleanFirestoreData({
+    enabled: data.enabled !== false,
+    prompt: String(data.prompt || '').trim(),
+    intervals,
+    updatedAt: serverTimestamp(),
+  }), { merge: true })
+}
+
+export function subscribeRenewalReminderLogs(callback, onError) {
+  return onSnapshot(
+    query(collection(db, RENEWAL_REMINDER_LOGS), orderBy('createdAt', 'desc'), limit(100)),
+    snap => callback(snap.docs.map(item => ({ id: item.id, ...item.data() }))),
+    onError || (err => console.error('subscribeRenewalReminderLogs:', err.code, err.message))
+  )
+}
+
+export async function claimRenewalReminder(data = {}) {
+  if (!data.id) throw new Error('Reminder id is required.')
+  const ref = doc(db, RENEWAL_REMINDER_LOGS, data.id)
+  return runTransaction(db, async tx => {
+    const existing = await tx.get(ref)
+    if (existing.exists()) return { claimed: false, id: ref.id }
+    tx.set(ref, cleanFirestoreData({
+      ...renewalReminderLogPayload(data),
+      status: 'sending',
+      manual: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }))
+    return { claimed: true, id: ref.id }
+  })
+}
+
+export async function finishRenewalReminderLog(id, data = {}) {
+  return setDoc(doc(db, RENEWAL_REMINDER_LOGS, id), cleanFirestoreData({
+    status: data.status || 'sent',
+    messageId: data.messageId || '',
+    error: data.error || '',
+    sentAt: data.status === 'sent' ? serverTimestamp() : null,
+    updatedAt: serverTimestamp(),
+  }), { merge: true })
+}
+
+export async function addManualRenewalReminderLog(data = {}) {
+  return addDoc(collection(db, RENEWAL_REMINDER_LOGS), cleanFirestoreData({
+    ...renewalReminderLogPayload(data),
+    status: data.status || 'sent',
+    manual: true,
+    messageId: data.messageId || '',
+    error: data.error || '',
+    sentAt: data.status === 'sent' ? serverTimestamp() : null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }))
+}
+
+function renewalReminderLogPayload(data = {}) {
+  const policy = data.policy || {}
+  const client = data.client || {}
+  return {
+    policyId: policy.id || data.policyId || '',
+    policyNumber: policy.policyNumber || '',
+    policyType: policy.policyType || '',
+    insurer: policy.insurer || '',
+    clientId: policy.clientId || client.id || '',
+    clientName: client.name || policy.clientName || '',
+    recipientMobile: data.mobile || policy.clientMobile || client.mobile || '',
+    dueDate: data.dueDate || '',
+    daysBefore: data.daysBefore ?? null,
+    messagePreview: String(data.message || '').slice(0, 500),
+  }
+}
+
 export async function addLead(data = {}) {
   return addFoundationDoc(LEADS, {
     name: data.name || '',
@@ -423,18 +513,7 @@ export async function addCommissionTransaction(data = {}) {
     payoutMonth: data.payoutMonth || '',
     referenceNumber: data.referenceNumber || '',
     status: data.status || 'pending',
-    reconciliationBatchId: data.reconciliationBatchId || '',
-    reconciliationRowId: data.reconciliationRowId || '',
     postingKey: data.postingKey || '',
-    grossCommission: Number(data.grossCommission ?? data.receivedCommission ?? 0),
-    commissionRate: Number(data.commissionRate || 0),
-    deduction: Number(data.deduction || 0),
-    matchingMethod: data.matchingMethod || '',
-    sourceType: data.sourceType || 'import',
-    sourceFileName: data.sourceFileName || '',
-    sourceFileUrl: data.sourceFileUrl || '',
-    sourceFileHash: data.sourceFileHash || '',
-    sourceRowHash: data.sourceRowHash || '',
     createdBy: data.createdBy || '',
     createdByEmail: data.createdByEmail || '',
     remarks: data.remarks || '',
@@ -476,189 +555,6 @@ export async function getCommissionTransactionsPage({ pageSize = 100, cursor = n
     cursor: visibleDocs.at(-1) || null,
     hasMore,
   }
-}
-
-export async function postCommissionReconciliation({ transactionData = {}, rowId, policyId, policySummary = {} }) {
-  if (!rowId || !policyId || !transactionData.postingKey) {
-    throw new Error('Commission posting requires row, policy, and posting keys.')
-  }
-  const transactionRef = doc(db, COMMISSION_TRANSACTIONS, transactionData.postingKey)
-  const rowRef = doc(db, COMMISSION_RECONCILIATION_ROWS, rowId)
-  const policyRef = doc(db, POLICIES, policyId)
-  const payload = normaliseFoundationPayload(transactionData)
-
-  await runTransaction(db, async transaction => {
-    const [existingTransaction, rowSnapshot, policySnapshot] = await Promise.all([
-      transaction.get(transactionRef),
-      transaction.get(rowRef),
-      transaction.get(policyRef),
-    ])
-    if (existingTransaction.exists() || rowSnapshot.data()?.status === 'posted') {
-      const error = new Error('This commission row has already been posted.')
-      error.code = 'commission/duplicate-post'
-      throw error
-    }
-    if (!policySnapshot.exists()) throw new Error('The matched policy no longer exists.')
-
-    transaction.set(transactionRef, {
-      ...payload,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      postedAt: serverTimestamp(),
-    })
-    transaction.set(rowRef, {
-      status: 'posted',
-      transactionId: transactionRef.id,
-      postingKey: transactionData.postingKey,
-      confirmedAt: serverTimestamp(),
-      confirmedBy: transactionData.createdBy || '',
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
-    transaction.set(policyRef, {
-      ...normaliseFoundationPayload(policySummary),
-      updatedAt: serverTimestamp(),
-    }, { merge: true })
-  })
-  return transactionRef
-}
-
-export async function getCommissionTransactionsForClient(clientId, clientName = '') {
-  if (clientId) {
-    const byId = await getDocs(query(foundationRef(COMMISSION_TRANSACTIONS), where('clientId', '==', clientId)))
-    if (!byId.empty) return sortByCreatedAt(byId.docs.map(item => ({ id: item.id, ...item.data() })))
-  }
-  if (!clientName) return []
-  const byName = await getDocs(query(foundationRef(COMMISSION_TRANSACTIONS), where('clientName', '==', clientName)))
-  return sortByCreatedAt(byName.docs.map(item => ({ id: item.id, ...item.data() })))
-}
-
-export async function addCommissionImportTemplate(data = {}) {
-  return addFoundationDoc(COMMISSION_IMPORT_TEMPLATES, {
-    name: data.name || '',
-    insurer: data.insurer || '',
-    fileType: data.fileType || 'excel',
-    fieldMap: data.fieldMap || {},
-    active: data.active !== false,
-  }, { requireName: true })
-}
-
-export async function getAllCommissionImportTemplates() {
-  return listFoundationDocs(COMMISSION_IMPORT_TEMPLATES)
-}
-
-export async function createCommissionReconciliationBatch(data = {}) {
-  return addFoundationDoc(COMMISSION_RECONCILIATION_BATCHES, {
-    insurer: data.insurer || '',
-    statementMonth: data.statementMonth || '',
-    payoutDate: data.payoutDate || '',
-    originalFileUrl: data.originalFileUrl || '',
-    originalFileName: data.originalFileName || '',
-    fileHash: data.fileHash || '',
-    fileType: data.fileType || '',
-    uploadedBy: data.uploadedBy || '',
-    uploadedByEmail: data.uploadedByEmail || '',
-    mappingProfileId: data.mappingProfileId || '',
-    extractedText: data.extractedText || '',
-    status: data.status || 'draft',
-    summary: data.summary || {},
-    confirmedAt: null,
-    rolledBackAt: null,
-  })
-}
-
-export async function updateCommissionReconciliationBatch(id, data = {}) {
-  return updateFoundationDoc(COMMISSION_RECONCILIATION_BATCHES, id, data)
-}
-
-export async function getAllCommissionReconciliationBatches() {
-  return listFoundationDocs(COMMISSION_RECONCILIATION_BATCHES)
-}
-
-export async function findCommissionBatchByFileHash(fileHash) {
-  if (!fileHash) return null
-  const snapshot = await getDocs(query(
-    foundationRef(COMMISSION_RECONCILIATION_BATCHES),
-    where('fileHash', '==', fileHash),
-    limit(1),
-  ))
-  return snapshot.empty ? null : { id: snapshot.docs[0].id, ...snapshot.docs[0].data() }
-}
-
-export async function addCommissionReconciliationRow(data = {}) {
-  if (!data.batchId) throw new Error('Reconciliation batch is required.')
-  return addFoundationDoc(COMMISSION_RECONCILIATION_ROWS, {
-    batchId: data.batchId,
-    uploadedClientName: data.uploadedClientName || '',
-    uploadedPolicyNumber: data.uploadedPolicyNumber || '',
-    uploadedProposalNumber: data.uploadedProposalNumber || '',
-    uploadedPlanName: data.uploadedPlanName || '',
-    uploadedInsurer: data.uploadedInsurer || '',
-    uploadedCategory: data.uploadedCategory || '',
-    uploadedMobile: data.uploadedMobile || '',
-    uploadedEmail: data.uploadedEmail || '',
-    uploadedPan: data.uploadedPan || '',
-    uploadedPremium: Number(data.uploadedPremium || 0),
-    uploadedCommission: Number(data.uploadedCommission || 0),
-    grossCommission: Number(data.grossCommission || 0),
-    commissionRate: Number(data.commissionRate || 0),
-    rewardCommission: Number(data.rewardCommission || 0),
-    tds: Number(data.tds || 0),
-    gst: Number(data.gst || 0),
-    deduction: Number(data.deduction || 0),
-    netPaid: Number(data.netPaid || 0),
-    commissionDate: data.commissionDate || '',
-    policyDate: data.policyDate || '',
-    statementMonth: data.statementMonth || '',
-    agentCode: data.agentCode || '',
-    remarks: data.remarks || '',
-    sourceSheet: data.sourceSheet || '',
-    sourceRowNumber: Number(data.sourceRowNumber || 0),
-    sourceData: data.sourceData || {},
-    rowHash: data.rowHash || '',
-    matchedPolicyId: data.matchedPolicyId || '',
-    matchedPolicyNumber: data.matchedPolicyNumber || '',
-    matchConfidence: data.matchConfidence || 'unmatched',
-    matchScore: Number(data.matchScore || 0),
-    matchReason: data.matchReason || '',
-    matchConflicts: data.matchConflicts || [],
-    candidatePolicyIds: data.candidatePolicyIds || [],
-    calculationNeedsReview: Boolean(data.calculationNeedsReview),
-    transactionId: data.transactionId || '',
-    postingKey: data.postingKey || '',
-    status: data.status || 'review',
-    note: data.note || '',
-  })
-}
-
-export async function addCommissionReconciliationRows(rows = [], onProgress = () => {}) {
-  const safeRows = rows.filter(row => row?.batchId)
-  let completed = 0
-  for (let start = 0; start < safeRows.length; start += 400) {
-    const chunk = safeRows.slice(start, start + 400)
-    const batch = writeBatch(db)
-    chunk.forEach(row => {
-      const rowRef = doc(foundationRef(COMMISSION_RECONCILIATION_ROWS))
-      const payload = normaliseFoundationPayload(row)
-      batch.set(rowRef, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
-    })
-    await batch.commit()
-    completed += chunk.length
-    onProgress(completed, safeRows.length)
-  }
-  return completed
-}
-
-export async function updateCommissionReconciliationRow(id, data = {}) {
-  return updateFoundationDoc(COMMISSION_RECONCILIATION_ROWS, id, data)
-}
-
-export async function getCommissionReconciliationRows(batchId) {
-  if (!batchId) return []
-  const s = await getDocs(query(
-    foundationRef(COMMISSION_RECONCILIATION_ROWS),
-    where('batchId', '==', batchId),
-  ))
-  return sortByCreatedAt(s.docs.map(d => ({ id: d.id, ...d.data() })), 'asc')
 }
 
 export async function addSubBroker(data = {}) {

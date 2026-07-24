@@ -10,15 +10,23 @@ import { useAuth }      from '../hooks/useAuth'
 import {
   saveRenewal,        // atomic batch: marks old as Renewed-Out AND creates new policy
   markPremiumPaid,
+  saveRenewalReminderSettings,
+  subscribeRenewalReminderLogs,
+  subscribeRenewalReminderSettings,
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
+import {
+  defaultRenewalReminderSettings,
+  normaliseReminderSettings,
+  sendManualRenewalReminder,
+} from '../services/renewalReminderService'
 import { shareGeneratedFile } from '../services/nativeShareService'
 import SearchBar from '../components/ui/SearchBar'
-import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
 import AppIcon from '../components/ui/AppIcon'
+import Modal from '../components/ui/Modal'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
@@ -610,6 +618,124 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
   )
 }
 
+function ReminderSettingsModal({ open, onClose, draft, setDraft, logs, onSave, saving }) {
+  const set = (key, value) => setDraft(prev => ({ ...prev, [key]: value }))
+  const updateInterval = (index, patch) => setDraft(prev => ({
+    ...prev,
+    intervals: prev.intervals.map((item, i) => i === index ? { ...item, ...patch } : item),
+  }))
+  const addInterval = () => setDraft(prev => ({
+    ...prev,
+    intervals: [...prev.intervals, { id: `d${Date.now()}`, days: 45, enabled: true }]
+      .sort((a, b) => b.days - a.days),
+  }))
+  const removeInterval = index => setDraft(prev => ({
+    ...prev,
+    intervals: prev.intervals.filter((_, i) => i !== index),
+  }))
+
+  return (
+    <Modal open={open} onClose={onClose} title="Renewal Reminder Settings" size="xl">
+      <div className="space-y-5">
+        <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold dark:border-slate-700 dark:bg-slate-900">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={e => set('enabled', e.target.checked)}
+            className="h-4 w-4"
+          />
+          Automatic reminders enabled
+        </label>
+
+        <div>
+          <label className="form-label">Basic Message Prompt</label>
+          <textarea
+            value={draft.prompt}
+            onChange={e => set('prompt', e.target.value)}
+            rows={4}
+            className="form-input"
+            placeholder="Please renew your policy on time..."
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Optional tokens: {'{clientName}'}, {'{policyNumber}'}, {'{insurer}'}, {'{dueDate}'}, {'{premium}'}, {'{days}'}.
+          </p>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">Reminder Intervals</p>
+            <button type="button" onClick={addInterval} className="btn-secondary text-xs">
+              <AppIcon name="plus" size={15} /> Add
+            </button>
+          </div>
+          <div className="space-y-2">
+            {draft.intervals.map((item, index) => (
+              <div key={item.id || index} className="grid grid-cols-12 items-center gap-2 rounded-xl border border-slate-200 p-2 dark:border-slate-700">
+                <label className="col-span-2 flex items-center gap-2 text-xs font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={item.enabled}
+                    onChange={e => updateInterval(index, { enabled: e.target.checked })}
+                  />
+                  On
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={item.days}
+                  onChange={e => updateInterval(index, { days: Math.max(0, Number(e.target.value) || 0) })}
+                  className="form-input col-span-7 text-sm"
+                />
+                <span className="col-span-2 text-xs text-gray-500">{Number(item.days) === 0 ? 'due date' : 'days before'}</span>
+                <button type="button" onClick={() => removeInterval(index)} className="col-span-1 text-red-500 hover:text-red-700">
+                  <AppIcon name="trash" size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-bold text-slate-800 dark:text-slate-100">Reminder History</p>
+          <div className="max-h-72 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr>
+                  {['Date', 'Client', 'Policy', 'Interval', 'Status'].map(h => <th key={h} className="table-header">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {logs.length === 0 ? (
+                  <tr><td colSpan={5} className="p-4 text-center text-gray-400">No reminders sent yet.</td></tr>
+                ) : logs.map(log => (
+                  <tr key={log.id} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="table-cell">{fmtDate(log.createdAt)}</td>
+                    <td className="table-cell">{log.clientName || '-'}</td>
+                    <td className="table-cell font-mono">{log.policyNumber || '-'}</td>
+                    <td className="table-cell">{log.manual ? 'Manual' : `${log.daysBefore ?? '-'}d`}</td>
+                    <td className="table-cell">
+                      <span className={`rounded-full px-2 py-0.5 font-bold ${log.status === 'sent' ? 'bg-green-100 text-green-700' : log.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {log.status || 'sent'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="btn-secondary">Close</button>
+          <button type="button" onClick={onSave} disabled={saving} className="btn-primary">
+            {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 const POLICY_TABS = ['ALL', 'Health', 'Life', 'Motor', 'Home', 'Travel', 'Other']
 
 // ─────────────────────────────────────────────────────────────
@@ -630,10 +756,29 @@ export default function RenewalsPage() {
   // ✅ FIX R10: confirmation state instead of firing immediately
   const [renewModal,   setRenewModal]   = useState(null)  // holds policy being renewed
   const [premiumPaidModal, setPremiumPaidModal] = useState(null)
+  const [reminderModal, setReminderModal] = useState(false)
+  const [reminderSettings, setReminderSettings] = useState(defaultRenewalReminderSettings())
+  const [reminderDraft, setReminderDraft] = useState(defaultRenewalReminderSettings())
+  const [reminderLogs, setReminderLogs] = useState([])
+  const [savingReminders, setSavingReminders] = useState(false)
+  const [manualSendingId, setManualSendingId] = useState('')
   const [saving,       setSaving]       = useState(false)
   const submittingRef  = useRef(false)
   const topScrollRef = useRef(null)
   const tableScrollRef = useRef(null)
+
+  useEffect(() => {
+    const unsubSettings = subscribeRenewalReminderSettings(data => {
+      const settings = normaliseReminderSettings(data || {})
+      setReminderSettings(settings)
+      setReminderDraft(settings)
+    })
+    const unsubLogs = subscribeRenewalReminderLogs(setReminderLogs)
+    return () => {
+      unsubSettings()
+      unsubLogs()
+    }
+  }, [])
 
   // ─── WhatsApp ───────────────────────────────────────────────
   const openWhatsApp = useCallback((policy) => {
@@ -902,6 +1047,31 @@ export default function RenewalsPage() {
     }
   }, [])
 
+  const handleSaveReminderSettings = useCallback(async () => {
+    setSavingReminders(true)
+    try {
+      const settings = normaliseReminderSettings(reminderDraft)
+      await saveRenewalReminderSettings(settings)
+      toast.success('Renewal reminder settings saved.')
+      setReminderModal(false)
+    } catch (error) {
+      toast.error(error.message || 'Could not save reminder settings.')
+    } finally {
+      setSavingReminders(false)
+    }
+  }, [reminderDraft])
+
+  const handleManualReminder = useCallback(async (policy) => {
+    setManualSendingId(policy.id)
+    try {
+      const result = await sendManualRenewalReminder(policy, clients, reminderSettings)
+      if (result.ok) toast.success('Reminder sent on WhatsApp.')
+      else toast.error(result.error || 'Reminder send failed.')
+    } finally {
+      setManualSendingId('')
+    }
+  }, [clients, reminderSettings])
+
   // ─── UI ───────────────────────────────────────────────────────
   if (loading) return (
     <div className="p-8 text-gray-400 dark:text-gray-500 flex items-center gap-2">
@@ -921,10 +1091,14 @@ export default function RenewalsPage() {
             {filtered.length} policies · Premium due: {fmtCurrency(stats.totalPremium)}
           </p>
         </div>
-        <button onClick={exportPDF}
-                className="btn-secondary text-sm">
-          <AppIcon name="download" size={17} /> Export PDF
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setReminderModal(true)} className="btn-secondary text-sm">
+            <AppIcon name="settings" size={17} /> Reminders
+          </button>
+          <button onClick={exportPDF} className="btn-secondary text-sm">
+            <AppIcon name="download" size={17} /> Export PDF
+          </button>
+        </div>
       </div>
 
       {/* Summary cards */}
@@ -1070,10 +1244,17 @@ export default function RenewalsPage() {
                       </span>
                     </td>
                     <td className="table-cell">
-                      <button onClick={() => openWhatsApp(p)}
-                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
-                        WA
-                      </button>
+                      <div className="flex gap-1">
+                        <button onClick={() => openWhatsApp(p)}
+                                className="bg-green-500 hover:bg-green-600 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
+                          WA
+                        </button>
+                        <button onClick={() => handleManualReminder(p)}
+                                disabled={manualSendingId === p.id}
+                                className="bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-xs px-3 py-1 rounded-lg font-medium transition-colors">
+                          {manualSendingId === p.id ? '...' : 'Resend'}
+                        </button>
+                      </div>
                     </td>
                     <td className="table-cell">
                       <button onClick={() => termRenewalDue ? setRenewModal(p) : setPremiumPaidModal(p)}
@@ -1106,6 +1287,15 @@ export default function RenewalsPage() {
           onClose={() => { if (!saving) setPremiumPaidModal(null) }}
         />
       )}
+      <ReminderSettingsModal
+        open={reminderModal}
+        onClose={() => setReminderModal(false)}
+        draft={reminderDraft}
+        setDraft={setReminderDraft}
+        logs={reminderLogs}
+        onSave={handleSaveReminderSettings}
+        saving={savingReminders}
+      />
     </div>
   )
 }

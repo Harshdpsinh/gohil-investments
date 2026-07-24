@@ -74,9 +74,12 @@ service cloud.firestore {
       allow read, create, update: if isAuth();
       allow delete: if isAdmin();
     }
-    match /audit_logs/{auditId} {
-      allow read, create: if isAdmin();
-      allow update, delete: if false;
+    match /renewal_reminder_settings/{docId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+    match /renewal_reminder_logs/{docId} {
+      allow read, create, update: if isAuth();
+      allow delete: if isAdmin();
     }
     match /commission_master/{commissionMasterId} {
       allow read, create, update, delete: if isAdmin();
@@ -85,16 +88,9 @@ service cloud.firestore {
       allow read, create, update: if isAuth();
       allow delete: if isAdmin();
     }
-    match /commission_import_templates/{templateId} {
-      allow read, create, update, delete: if isAdmin();
-    }
-    match /commission_reconciliation_batches/{batchId} {
-      allow read, create, update: if isAuth();
-      allow delete: if isAdmin();
-    }
-    match /commission_reconciliation_rows/{rowId} {
-      allow read, create, update: if isAuth();
-      allow delete: if isAdmin();
+    match /audit_logs/{auditId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
     }
     match /sub_brokers/{subBrokerId} {
       allow read, create, update, delete: if isAdmin();
@@ -117,9 +113,6 @@ service cloud.firestore {
           .hasOnly(['name', 'email', 'role', 'updatedAt']);
       allow delete: if false;
     }
-    // Commission Agent — new collections (admin-gated in UI, auth-gated here)
-    match /commissionTiers/{docId} { allow read, write: if isAuth(); }
-    match /transactionLogs/{docId} { allow read, write: if isAuth(); }
     match /{document=**}          { allow read, write: if false; }
   }
 }

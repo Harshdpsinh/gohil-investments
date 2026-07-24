@@ -141,7 +141,7 @@ export default function AdminUsersPage() {
             </div>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="font-semibold text-blue-700 mb-1">Admin can do all above plus:</p>
-              <p className="text-blue-700">Delete clients, Delete policies, View commission calculator, Manage user accounts</p>
+              <p className="text-blue-700">Delete clients, delete policies, manage renewal reminders, manage user accounts</p>
             </div>
           </div>
         </div>

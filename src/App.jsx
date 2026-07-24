@@ -11,7 +11,6 @@ import PoliciesPage          from './pages/PoliciesPage'
 import RenewalsPage          from './pages/RenewalsPage'
 import ProposalsPage         from './pages/ProposalsPage'
 import CommissionPage        from './pages/CommissionPage'
-import CommissionAgentPage   from './pages/CommissionAgentPage'
 import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
 import BackupPage            from './pages/BackupPage'
@@ -19,7 +18,6 @@ import LeadsPage             from './pages/LeadsPage'
 import EndorsementsPage      from './pages/EndorsementsPage'
 import MastersPage           from './pages/MastersPage'
 import ReportsPage           from './pages/ReportsPage'
-import CommissionReconciliationPage from './pages/CommissionReconciliationPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -51,12 +49,10 @@ export default function App() {
                 <Route path="/policies"            element={<PoliciesPage />} />
                 <Route path="/renewals"            element={<RenewalsPage />} />
                 <Route path="/proposals"           element={<ProposalsPage />} />
+                <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/claims"              element={<ClaimsPage />} />
                 <Route path="/leads"               element={<LeadsPage />} />
                 <Route path="/endorsements"        element={<EndorsementsPage />} />
-                <Route path="/commission"          element={<CommissionPage />} />
-                <Route path="/commission-agent"    element={<CommissionAgentPage />} />
-                <Route path="/commission-reconciliation" element={<CommissionReconciliationPage />} />
                 <Route path="/masters"             element={<MastersPage />} />
                 <Route path="/reports"             element={<ReportsPage />} />
                 <Route path="/admin-users"         element={<AdminUsersPage />} />

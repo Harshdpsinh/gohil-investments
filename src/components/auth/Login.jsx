@@ -80,7 +80,7 @@ export default function Login() {
               Clean operations for policies, renewals, claims, and clients.
             </h1>
             <p className="mt-5 max-w-lg text-base leading-7 text-gray-300">
-              Secure team access with real-time policy data, renewal tracking, commission workflows, and client records in one place.
+              Secure team access with real-time policy data, renewal tracking, reminder automation, and client records in one place.
             </p>
           </div>
 

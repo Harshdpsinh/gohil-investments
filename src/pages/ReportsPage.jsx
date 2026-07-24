@@ -5,13 +5,12 @@ import { usePolicies } from '../hooks/usePolicies'
 import DateInput from '../components/ui/DateInput'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, parseAnyDate } from '../utils/dateUtils'
-import { getAllCommissionTransactions, getAllEndorsements, getAllLeads, subscribeClaims } from '../firebase/firestore'
+import { getAllEndorsements, getAllLeads, subscribeClaims } from '../firebase/firestore'
 
 const reportTypes = [
   'Business',
   'Renewals',
   'Claims',
-  'Commission',
   'Leads',
   'Clients',
   'Pending Work',
@@ -34,7 +33,6 @@ export default function ReportsPage() {
   const [claims, setClaims] = useState([])
   const [leads, setLeads] = useState([])
   const [endorsements, setEndorsements] = useState([])
-  const [commissionTx, setCommissionTx] = useState([])
   const [report, setReport] = useState('Business')
   const [query, setQuery] = useState('')
   const [from, setFrom] = useState('')
@@ -43,8 +41,8 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const unsubClaims = subscribeClaims(setClaims, err => toast.error(err.message || 'Claims load failed.'))
-    Promise.all([getAllLeads(), getAllEndorsements(), getAllCommissionTransactions()])
-      .then(([l, e, c]) => { setLeads(l); setEndorsements(e); setCommissionTx(c) })
+    Promise.all([getAllLeads(), getAllEndorsements()])
+      .then(([l, e]) => { setLeads(l); setEndorsements(e) })
       .catch(err => toast.error(err.message || 'Report data load failed.'))
     return unsubClaims
   }, [])
@@ -87,17 +85,6 @@ export default function ReportsPage() {
         status: c.status || '',
         amount: Number(c.claimAmount || c.amount || 0),
         detail: c.claimNumber || '',
-      })),
-      Commission: commissionTx.map(c => ({
-        type: 'Commission',
-        date: c.payoutDate || c.createdAt,
-        client: c.clientName,
-        policyNumber: c.policyNumber,
-        insurer: c.insurer,
-        product: c.referenceNumber || '',
-        status: c.status || '',
-        amount: Number(c.netReceived || c.receivedCommission || 0),
-        detail: `Expected ${fmtCurrency(c.expectedCommission)} | Diff ${fmtCurrency(c.difference)}`,
       })),
       Leads: leads.map(l => ({
         type: 'Lead',
@@ -158,7 +145,7 @@ export default function ReportsPage() {
       const text = Object.values(row).join(' ').toLowerCase()
       return (!q || text.includes(q)) && (status === 'All' || row.status === status) && isBetween(row.date, from, to)
     })
-  }, [clients, policies, claims, leads, endorsements, commissionTx, report, query, from, to, status])
+  }, [clients, policies, claims, leads, endorsements, report, query, from, to, status])
 
   const statuses = useMemo(() => ['All', ...Array.from(new Set(rows.map(r => r.status).filter(Boolean)))], [rows])
   const totalAmount = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
@@ -180,7 +167,7 @@ export default function ReportsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dynamic Reports</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Business, renewal, claim, commission, lead, client, pending work, and cross-sell views.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Business, renewal, claim, lead, client, pending work, and cross-sell views.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-secondary text-xs" onClick={() => exportToCSV(rows, columns, `${report.toLowerCase()}_report`)}>CSV</button>
