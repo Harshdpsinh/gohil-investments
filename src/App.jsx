@@ -11,6 +11,7 @@ import PoliciesPage          from './pages/PoliciesPage'
 import RenewalsPage          from './pages/RenewalsPage'
 import ProposalsPage         from './pages/ProposalsPage'
 import CommissionPage        from './pages/CommissionPage'
+import CommissionAgentPage   from './pages/CommissionAgentPage'
 import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
 import BackupPage            from './pages/BackupPage'
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/leads"               element={<LeadsPage />} />
                 <Route path="/endorsements"        element={<EndorsementsPage />} />
                 <Route path="/commission"          element={<CommissionPage />} />
+                <Route path="/commission-agent"    element={<CommissionAgentPage />} />
                 <Route path="/commission-reconciliation" element={<CommissionReconciliationPage />} />
                 <Route path="/masters"             element={<MastersPage />} />
                 <Route path="/reports"             element={<ReportsPage />} />

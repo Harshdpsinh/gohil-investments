@@ -117,6 +117,9 @@ service cloud.firestore {
           .hasOnly(['name', 'email', 'role', 'updatedAt']);
       allow delete: if false;
     }
+    // Commission Agent — new collections (admin-gated in UI, auth-gated here)
+    match /commissionTiers/{docId} { allow read, write: if isAuth(); }
+    match /transactionLogs/{docId} { allow read, write: if isAuth(); }
     match /{document=**}          { allow read, write: if false; }
   }
 }

@@ -3,7 +3,19 @@ import { format, differenceInDays, parseISO, isValid, addMonths, startOfDay } fr
 
 // ── Universal date parser ─────────────────────────────────────
 // Handles: Firestore Timestamp {seconds,nanoseconds}, ISO string,
-// plain Date object, dd/MM/yyyy string, yyyy-MM-dd string
+// plain Date object, dd/MM/yyyy, yyyy-MM-dd, plus Indian-friendly
+// fallbacks (d-M-yyyy, yyyy/MM/dd, dd-MM-yyyy, d MMM yyyy, MMM d yyyy).
+// NOTE: storage stays yyyy-MM-dd (load-bearing for orderBy). This parser
+// only affects DISPLAY via fmtDate()/fmtDateTime(). It never writes back.
+const MONTHS_SHORT = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+
+function ymd(y, m, d) {
+  // Build a local-midnight date string to avoid TZ shifting the day.
+  const iso = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+  const dt = parseISO(iso)
+  return isValid(dt) ? dt : null
+}
+
 export function parseAnyDate(val) {
   if (!val) return null
   // Firestore Timestamp
@@ -12,13 +24,29 @@ export function parseAnyDate(val) {
   if (val instanceof Date) return isValid(val) ? val : null
   const s = String(val).trim()
   if (!s) return null
-  // dd/MM/yyyy
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (dmy) {
-    const d = new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]))
-    return isValid(d) ? d : null
+
+  // dd/MM/yyyy  or  dd-MM-yyyy  (Indian day-first formats)
+  const dmy = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/)
+  if (dmy) return ymd(+dmy[3], +dmy[2], +dmy[1])
+
+  // yyyy/MM/dd  or  yyyy-MM-dd  (year-first formats)
+  const ymdm = s.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/)
+  if (ymdm) return ymd(+ymdm[1], +ymdm[2], +ymdm[3])
+
+  // d MMM yyyy   e.g. 5 Apr 2024  /  05 April 2024
+  const dmon = s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\.?\s+(\d{4})$/)
+  if (dmon) {
+    const mi = MONTHS_SHORT.indexOf(dmon[2].slice(0,3).toLowerCase())
+    if (mi >= 0) return ymd(+dmon[3], mi + 1, +dmon[1])
   }
-  // ISO / yyyy-MM-dd
+  // MMM d, yyyy  e.g. Apr 5, 2024
+  const mond = s.match(/^([A-Za-z]{3,})\.?\s+(\d{1,2}),?\s+(\d{4})$/)
+  if (mond) {
+    const mi = MONTHS_SHORT.indexOf(mond[1].slice(0,3).toLowerCase())
+    if (mi >= 0) return ymd(+mond[3], mi + 1, +mond[2])
+  }
+
+  // ISO / anything date-fns can parse (full ISO with time, etc.)
   try { const d = parseISO(s); return isValid(d) ? d : null } catch { return null }
 }
 
@@ -184,15 +212,9 @@ export function computeNextPremiumDue(startDate, frequency) {
 }
 
 // ── Format next premium due for display ──────────────────────
-export function getDueDate(policy) {
-  if (!policy) return null
-  if (normaliseFrequency(policy.frequency) === 'Yearly') return policy.expiryDate || null
-  const stored = parseAnyDate(policy.nextPremiumDue)
-  if (stored) return format(stored, 'yyyy-MM-dd')
-  const computed = computeNextPremiumDue(policy.startDate, policy.frequency)
-  return computed ? format(computed, 'yyyy-MM-dd') : policy.expiryDate || null
-}
-
+// NOTE: the full policy-aware getDueDate() is defined further below;
+// it supersedes this older frequency-only helper. daysUntilPremium is
+// retained for callers that still use it.
 export function daysUntilPremium(startDate, frequency) {
   const next = computeNextPremiumDue(startDate, frequency)
   if (!next) return null
