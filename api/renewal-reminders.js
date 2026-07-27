@@ -7,7 +7,14 @@ const STOP_STATUSES = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
 
 export default async function handler(req, res) {
   if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: 'Method not allowed' })
-  if (process.env.CRON_SECRET && req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+
+  // Fail closed. A missing secret must never mean "no auth required" — this endpoint
+  // sends WhatsApp messages to the entire client book.
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) {
+    return res.status(503).json({ error: 'CRON_SECRET is not configured. Refusing to run.' })
+  }
+  if (req.headers.authorization !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
@@ -17,15 +24,15 @@ export default async function handler(req, res) {
     if (!settings.enabled) return res.status(200).json({ sent: 0, skipped: 0, disabled: true })
 
     const evolution = getEvolutionConfig()
-    const [policySnap, clientSnap] = await Promise.all([
-      db.collection('policies').get(),
-      db.collection('clients').get(),
-    ])
-    const clients = clientSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    const policySnap = await db.collection('policies').get()
     const enabledDays = new Set(settings.intervals.filter(item => item.enabled).map(item => item.days))
     let sent = 0
     let skipped = 0
 
+    // Pass 1 — decide which policies are due today. The whole collection still has to be
+    // scanned: the due date can come from nextPremiumDue, expiryDate or renewalDate, and
+    // legacy rows store dates as DD/MM/YYYY, so no single indexed range query is safe here.
+    const due = []
     for (const doc of policySnap.docs) {
       const policy = { id: doc.id, ...doc.data() }
       const dueDate = getPolicyDueDate(policy)
@@ -35,7 +42,14 @@ export default async function handler(req, res) {
         skipped += 1
         continue
       }
+      due.push({ policy, dueDate, daysBefore })
+    }
 
+    // Only load the clients those policies actually need, instead of the whole collection.
+    const clients = due.length ? await loadClientsForPolicies(db, due.map(item => item.policy)) : []
+
+    // Pass 2 — send.
+    for (const { policy, dueDate, daysBefore } of due) {
       const client = findPolicyClient(policy, clients)
       const mobile = policy.clientMobile || client?.mobile || ''
       if (!digits(mobile)) {
@@ -125,6 +139,34 @@ function normaliseSettings(settings = {}) {
     prompt: String(settings.prompt || DEFAULT_PROMPT).trim(),
     intervals,
   }
+}
+
+// Fetches only the client docs referenced by the given policies. Policies written before
+// clientId existed are matched by name instead, and that fallback needs the full
+// collection — so it is loaded only when at least one such policy is actually due.
+async function loadClientsForPolicies(db, policies) {
+  const ids = [...new Set(policies.map(policy => policy.clientId).filter(Boolean))]
+  const loadAll = async () => {
+    const snap = await db.collection('clients').get()
+    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+  }
+
+  // A policy with no clientId can only be matched by name, which needs every client.
+  if (policies.some(policy => !policy.clientId && clean(policy.clientName))) return await loadAll()
+  if (!ids.length) return []
+
+  const clients = []
+  for (let i = 0; i < ids.length; i += 300) {
+    const refs = ids.slice(i, i + 300).map(id => db.collection('clients').doc(id))
+    const docs = await db.getAll(...refs)
+    docs.filter(doc => doc.exists).forEach(doc => clients.push({ id: doc.id, ...doc.data() }))
+  }
+
+  // A clientId can dangle after a client merge or delete. If any due policy did not
+  // resolve, fall back to the full collection so the name match still gets its chance.
+  const resolved = new Set(clients.map(client => client.id))
+  const unresolved = policies.some(policy => !resolved.has(policy.clientId) && clean(policy.clientName))
+  return unresolved ? await loadAll() : clients
 }
 
 function findPolicyClient(policy, clients) {

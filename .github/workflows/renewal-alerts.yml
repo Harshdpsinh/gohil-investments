@@ -62,4 +62,4 @@ jobs:
           GMAIL_USER:            ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD:    ${{ secrets.GMAIL_APP_PASSWORD }}
           ALERT_EMAIL_TO:        ${{ secrets.ALERT_EMAIL_TO }}
-        run: node .github/scripts/send-renewal-alerts.js
+        run: node .github/scripts/send-renewal-alerts.cjs

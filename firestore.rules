@@ -9,12 +9,23 @@ service cloud.firestore {
           'harshdpsinh@gmail.com'
         ];
     }
-    function isAdmin() {
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function hasProfile() {
       return isAuth()
-        && (
-          isOwnerAdminEmail()
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
-        );
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+    // Being signed in is NOT enough. The Firebase API key ships in the client bundle,
+    // so anyone can mint an auth account against this project; only users an admin has
+    // provisioned in /users with a valid role may touch business data.
+    function isStaff() {
+      return isOwnerAdminEmail()
+        || (hasProfile() && userProfile().role in ['admin', 'staff']);
+    }
+    function isAdmin() {
+      return isOwnerAdminEmail()
+        || (hasProfile() && userProfile().role == 'admin');
     }
     function isSelf(userId) { return isAuth() && request.auth.uid == userId; }
     function validRole(role) { return role in ['admin', 'staff']; }
@@ -30,62 +41,62 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
       match /documents/{docId} {
-        allow read, create, update: if isAuth();
+        allow read, create, update: if isStaff();
         allow delete: if isAdmin();
       }
     }
     match /families/{familyId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /policies/{policyId} {
-      allow read, create: if isAuth();
-      allow update: if isAuth() && (!isSoftDeleteChange() || isAdmin());
+      allow read, create: if isStaff();
+      allow update: if isStaff() && (!isSoftDeleteChange() || isAdmin());
       allow delete: if isAdmin();
     }
     match /proposals/{proposalId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /claims/{claimId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /leads/{leadId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /lead_followups/{followupId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /endorsements/{endorsementId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /documents/{documentId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /message_logs/{messageId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /renewal_reminder_settings/{docId} {
       allow read, create, update, delete: if isAdmin();
     }
     match /renewal_reminder_logs/{docId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /commission_master/{commissionMasterId} {
       allow read, create, update, delete: if isAdmin();
     }
     match /commission_transactions/{commissionTransactionId} {
-      allow read, create, update: if isAuth();
+      allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /audit_logs/{auditId} {
@@ -99,14 +110,14 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
     match /reports_saved_filters/{filterId} {
-      allow read, create, update, delete: if isAuth();
+      allow read, create, update, delete: if isStaff();
     }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();
-      allow create: if (isSelf(userId)
-          && validUserProfile()
-          && request.resource.data.role == 'staff')
-        || (isAdmin() && validUserProfile());
+      // Self-provisioning is deliberately NOT allowed. Previously any signed-in user
+      // could create their own 'staff' profile and unlock the entire CRM. Staff
+      // accounts must be created by an admin through the Admin Users page.
+      allow create: if isAdmin() && validUserProfile();
       allow update: if isAdmin()
         && validUserProfile()
         && request.resource.data.diff(resource.data).affectedKeys()

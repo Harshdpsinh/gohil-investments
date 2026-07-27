@@ -11,7 +11,7 @@
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
-    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 24"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",

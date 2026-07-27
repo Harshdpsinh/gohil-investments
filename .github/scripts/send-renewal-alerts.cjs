@@ -1,4 +1,4 @@
-// .github/scripts/send-renewal-alerts.js
+// .github/scripts/send-renewal-alerts.cjs
 // ─────────────────────────────────────────────────────────────
 // Queries Firestore for policies expiring in ≤ 30 days,
 // builds a rich HTML email, and sends it via Gmail.
