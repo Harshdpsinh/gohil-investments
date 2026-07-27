@@ -36,6 +36,7 @@ export default function BackupPage() {
   const [restoreFile, setRestoreFile] = useState(null)
   const [restorePreview, setRestorePreview] = useState(null)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [backupStep, setBackupStep] = useState('')
 
   if (!isAdmin) return (
     <div className="p-8 text-center text-gray-400">
@@ -46,14 +47,20 @@ export default function BackupPage() {
 
   const onDownloadBackup = async () => {
     setBackupLoading(true)
+    setBackupStep('Starting…')
     try {
-      const backup = await createCRMBackup()
+      const backup = await createCRMBackup((done, total, name) => {
+        setBackupStep(`Reading ${name} (${done}/${total})`)
+      })
       downloadJson(backup)
       toast.success('Backup downloaded successfully.')
     } catch (err) {
-      toast.error(err.message || 'Could not create backup.')
+      // Surface the real reason — these messages name the collection that failed.
+      toast.error(err.message || 'Could not create backup.', { duration: 8000 })
+      console.error('Backup failed:', err)
     } finally {
       setBackupLoading(false)
+      setBackupStep('')
     }
   }
 
@@ -129,6 +136,9 @@ export default function BackupPage() {
           <button onClick={onDownloadBackup} disabled={backupLoading || restoreLoading} className="btn-primary">
             {backupLoading ? 'Preparing backup...' : 'Download Full Backup'}
           </button>
+          {backupLoading && backupStep && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">{backupStep}</p>
+          )}
           <div className="text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
             Keep this downloaded file in Google Drive, OneDrive, or an external drive. It is your recovery copy.
           </div>

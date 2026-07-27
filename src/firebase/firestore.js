@@ -113,31 +113,54 @@ async function commitBackupWritesInChunks(writes, onProgress = () => {}) {
   }
 }
 
-export async function createCRMBackup() {
+export async function createCRMBackup(onProgress = () => {}) {
   const collections = {}
   const totals = {}
+  const steps = BACKUP_COLLECTIONS.length + 1
+  let step = 0
 
   for (const name of BACKUP_COLLECTIONS) {
-    const snap = await getDocs(collection(db, name))
-    collections[name] = snap.docs.map(d => ({
-      id: d.id,
-      data: serialiseBackupValue(d.data()),
-    }))
-    totals[name] = snap.size
-  }
-
-  const clientDocuments = []
-  for (const client of collections[CLIENTS] || []) {
-    const snap = await getDocs(collection(db, CLIENTS, client.id, DOCS_META))
-    snap.docs.forEach(d => {
-      clientDocuments.push({
-        clientId: client.id,
+    try {
+      const snap = await getDocs(collection(db, name))
+      collections[name] = snap.docs.map(d => ({
         id: d.id,
         data: serialiseBackupValue(d.data()),
+      }))
+      totals[name] = snap.size
+    } catch (error) {
+      // Name the collection that failed. A bare "Missing or insufficient
+      // permissions" gives no clue which rule to look at.
+      throw new Error(`Backup failed while reading "${name}": ${error?.message || error}`)
+    }
+    onProgress(++step, steps, name)
+  }
+
+  // Each client has its own documents subcollection, so this is one read per
+  // client. Run them in batches rather than one at a time — sequentially this
+  // took as many round trips as you have clients and looked like a hang.
+  const clientDocuments = []
+  const clientList = collections[CLIENTS] || []
+  try {
+    for (let i = 0; i < clientList.length; i += 25) {
+      const batch = clientList.slice(i, i + 25)
+      const snaps = await Promise.all(
+        batch.map(client => getDocs(collection(db, CLIENTS, client.id, DOCS_META)))
+      )
+      snaps.forEach((snap, index) => {
+        snap.docs.forEach(d => {
+          clientDocuments.push({
+            clientId: batch[index].id,
+            id: d.id,
+            data: serialiseBackupValue(d.data()),
+          })
+        })
       })
-    })
+    }
+  } catch (error) {
+    throw new Error(`Backup failed while reading client documents: ${error?.message || error}`)
   }
   totals.clientDocuments = clientDocuments.length
+  onProgress(++step, steps, 'clientDocuments')
 
   return {
     app: 'gohil-investments-crm',
