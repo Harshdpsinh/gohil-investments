@@ -11,7 +11,9 @@
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
-    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 24"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 23"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -44,6 +46,7 @@
     "eslint-plugin-react-hooks": "^4.6.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "vitest": "^4.1.10"
   }
 }

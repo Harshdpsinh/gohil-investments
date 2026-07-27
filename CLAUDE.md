@@ -16,11 +16,14 @@ both the web app and the Android app.
 ```bash
 npm run dev              # Vite dev server
 npm run build            # production build to dist/
+npm test                 # Vitest, single run
+npm run test:watch       # Vitest, watch mode
+npm run lint             # ESLint
 npm run android:sync     # build + npx cap sync android
 npm run android:apk      # build + assembleDebug
 ```
 
-`npm run lint` is capped at `--max-warnings 24`, the count as of the last cleanup. This is
+`npm run lint` is capped at `--max-warnings 23`, the count as of the last cleanup. This is
 a ratchet: it blocks new warnings without blocking the build on existing ones. When you
 clear warnings, lower the number — never raise it.
 
@@ -46,8 +49,21 @@ Write the unit tests before the production code. Define the expected behaviour,
 then implement against it. Production code written before its tests should be
 treated as unfinished.
 
-Note: the project has no test runner installed yet. Adding one (Vitest fits Vite
-natively) is a prerequisite for this rule to mean anything.
+Vitest is set up. Tests live beside the code as `*.test.js` and run in a Node
+environment via `vitest.config.js` (deliberately separate from `vite.config.js` so a
+production build never resolves dev tooling).
+
+**Tests must never touch real data.** Firebase is mocked at module level — see
+`src/firebase/firestore.test.js` for the pattern. Anything that needs a live Firestore
+does not belong in the unit suite.
+
+Pure logic worth testing has been pulled out of the Firebase and React layers into:
+- `src/utils/validation.js` — payload normalisation and assertions
+- `src/utils/policyImport.js` — fuzzy matching and proposal/lead → policy conversion
+- `src/utils/dateUtils.js` — date parsing, frequency, due dates
+
+Keep those three free of any `firebase` or `react` import. That property is what makes
+them testable, and it is easy to destroy by accident.
 
 ### 3. Isolated git branches
 
@@ -59,12 +75,13 @@ git checkout -b feat/short-description
 
 ## Architecture notes
 
-- `src/firebase/firestore.js` (~1,675 lines) is the single data-access layer. Every
-  collection read/write goes through it. Payloads are normalised and validated here
-  (`normalisePolicyPayload`, `assertPolicyDateOrder`, duplicate detection) — put new
-  validation here rather than in pages.
-- `src/pages/PoliciesPage.jsx` (~2,582 lines) is the largest file and the highest-risk
-  place to edit. Prefer extracting new work into components over growing it further.
+- `src/firebase/firestore.js` (~1,540 lines) is the single data-access layer. Every
+  collection read/write goes through it. Validation now lives in `src/utils/validation.js`
+  and is re-exported from here for existing importers — put new validation in the utils
+  module, not in pages and not back in this file.
+- `src/pages/PoliciesPage.jsx` (~2,420 lines) is still the largest file and the
+  highest-risk place to edit. Prefer extracting into `src/utils/policyImport.js` (pure
+  logic) or a new component over growing it further.
 - Policies cascade: editing a client or policy triggers `cascadeUpdateClient` /
   `cascadeUpdatePolicyLinks` to keep denormalised copies (`clientName`, `clientMobile`)
   in sync. Deletes are soft (`deleted`/`deletedAt`) and admin-gated.
