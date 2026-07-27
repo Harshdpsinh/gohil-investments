@@ -812,7 +812,7 @@ export default function RenewalsPage() {
         toast.error(err.message)
       }
       return
-    }
+    }
   }, [clients])
 
   // ─── Filter logic ────────────────────────────────────────────
@@ -870,6 +870,24 @@ export default function RenewalsPage() {
       })
       .sort((a, b) => (daysUntilPolicyDue(a) ?? 9999) - (daysUntilPolicyDue(b) ?? 9999))
   }, [policies, search, dayWindow, dateFrom, dateTo, policyTab, statusFilter])
+
+  // Row display data is computed once and shared by the desktop table and the
+  // mobile card list, so the two views can never drift apart.
+  const clientById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients])
+
+  const renewalRows = useMemo(() => filtered.map(policy => {
+    const days = daysUntilPolicyDue(policy)
+    const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
+    return {
+      policy,
+      days,
+      statusLabel,
+      statusCls,
+      dueStr: getPolicyDueDate(policy),
+      termRenewalDue: isTermRenewalDue(policy),
+      phone: policy.clientMobile || clientById.get(policy.clientId)?.mobile || '',
+    }
+  }), [filtered, clientById])
 
   // ─── Summary stats ────────────────────────────────────────────
   useEffect(() => {
@@ -1179,11 +1197,93 @@ export default function RenewalsPage() {
       {/* Search */}
       <SearchBar value={search} onChange={setSearch} placeholder="Client name, policy no, insurer…" />
 
-      {/* ✅ FIX R7, R9: Table with premium + insurer columns */}
-      <div ref={topScrollRef} className="table-scroll-top overflow-x-auto rounded-t-2xl border border-b-0 border-slate-200/80 bg-white/80 dark:border-slate-700/70 dark:bg-slate-900/80">
+      {/* Mobile / tablet: stacked cards. Every action is reachable without any
+          horizontal scrolling — the wide table below is desktop-only. */}
+      <div className="lg:hidden space-y-3">
+        {renewalRows.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-10 text-center text-gray-400 dark:border-slate-700/70 dark:bg-slate-900/80 dark:text-gray-500">
+            <p className="text-2xl mb-2">🎉</p>
+            <p className="font-medium">No renewals in this window</p>
+            <p className="text-xs mt-1">Try a different day window or tab</p>
+          </div>
+        ) : renewalRows.map(({ policy: p, days, statusLabel, statusCls, dueStr, termRenewalDue, phone }) => (
+          <div
+            key={p.id}
+            className={`rounded-2xl border p-4 shadow-sm ${
+              days !== null && days < 0
+                ? 'border-red-200 bg-red-50 dark:border-red-900/50 dark:bg-red-950/30'
+                : days !== null && days <= 7
+                  ? 'border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30'
+                  : 'border-slate-200/80 bg-white dark:border-slate-700/70 dark:bg-slate-900/80'
+            }`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 dark:text-white truncate">{p.clientName}</p>
+                <p className="font-mono text-xs text-gray-500 dark:text-gray-400 truncate">{p.policyNumber}</p>
+              </div>
+              <span className={`shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full ${statusCls}`}>
+                {statusLabel}
+              </span>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Due</span>
+                <p className="font-medium text-gray-800 dark:text-gray-200">{fmtDate(dueStr)}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Days</span>
+                <p className={`font-bold ${
+                  days !== null && days <= 0 ? 'text-red-600 dark:text-red-400'
+                    : days <= 7 ? 'text-orange-600 dark:text-orange-400'
+                      : 'text-gray-700 dark:text-gray-300'}`}>
+                  {days === null ? '—' : days < 0 ? `${Math.abs(days)}d ago` : `${days}d`}
+                </p>
+              </div>
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Premium</span>
+                <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtCurrency(p.premium)}</p>
+              </div>
+              <div>
+                <span className="text-gray-500 dark:text-gray-400">Phone</span>
+                <p className="font-medium text-gray-800 dark:text-gray-200">
+                  {phone || <span className="text-orange-500">Missing</span>}
+                </p>
+              </div>
+              <div className="col-span-2">
+                <span className="text-gray-500 dark:text-gray-400">Insurer</span>
+                <p className="font-medium text-gray-800 dark:text-gray-200 truncate">
+                  <span className="badge-blue mr-2 text-xs">{p.policyType || 'Health'}</span>
+                  {p.insurer || '—'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button onClick={() => openWhatsApp(p)}
+                      className="col-span-2 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-sm px-3 py-2.5 rounded-xl font-semibold transition-colors">
+                WhatsApp Reminder
+              </button>
+              <button onClick={() => handleManualReminder(p)}
+                      disabled={manualSendingId === p.id}
+                      className="bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white text-sm px-3 py-2.5 rounded-xl font-semibold transition-colors">
+                {manualSendingId === p.id ? 'Sending…' : 'Resend'}
+              </button>
+              <button onClick={() => termRenewalDue ? setRenewModal(p) : setPremiumPaidModal(p)}
+                      disabled={saving}
+                      className={`${termRenewalDue ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'} disabled:opacity-50 text-white text-sm px-3 py-2.5 rounded-xl font-semibold transition-colors`}>
+                {termRenewalDue ? 'Renew' : 'Mark Paid'}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ✅ FIX R7, R9: Table with premium + insurer columns — desktop only */}
+      <div ref={topScrollRef} className="table-scroll-top hidden lg:block overflow-x-auto rounded-t-2xl border border-b-0 border-slate-200/80 bg-white/80 dark:border-slate-700/70 dark:bg-slate-900/80">
         <div className="h-3 min-w-[1180px]" />
       </div>
-      <div ref={tableScrollRef} className="table-container renewals-table-container">
+      <div ref={tableScrollRef} className="table-container renewals-table-container hidden lg:block">
         <table className="min-w-[1180px]">
           <thead>
             <tr>
@@ -1202,14 +1302,7 @@ export default function RenewalsPage() {
                 </td>
               </tr>
             ) : (
-              filtered.map((p, i) => {
-                const days = daysUntilPolicyDue(p)
-                const { label: statusLabel, cls: statusCls } = getStatusInfo(days)
-                const dueStr = getPolicyDueDate(p)
-                const termRenewalDue = isTermRenewalDue(p)
-                const client = clients.find(c => c.id === p.clientId)
-                const phone = p.clientMobile || client?.mobile || ''
-
+              renewalRows.map(({ policy: p, days, statusLabel, statusCls, dueStr, termRenewalDue, phone }, i) => {
                 return (
                   <tr
                     key={p.id}
