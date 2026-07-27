@@ -867,7 +867,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
               <span className="font-semibold text-gray-700 dark:text-gray-300">📞</span>
               {form._clientMobile
                 ? <span className="text-green-700 dark:text-green-300 font-semibold">{form._clientMobile}</span>
-                : <span className="text-orange-600 dark:text-orange-400 font-semibold">⚠️ No mobile — WhatsApp won't work. <a href="/clients" target="_blank" className="underline">Add in Clients page</a></span>}
+                : <span className="text-orange-600 dark:text-orange-400 font-semibold">⚠️ No mobile — WhatsApp won&apos;t work. <a href="/clients" target="_blank" className="underline">Add in Clients page</a></span>}
               <span className="font-semibold text-gray-400">|</span>
               <span className="font-semibold text-gray-700 dark:text-gray-300">✉️</span>
               {form._clientEmail
@@ -1041,7 +1041,7 @@ function ClientMappingStep({ unmapped, clients, onConfirm, onBack }) {
           const res = resolution[name] || { type: 'skip' }
           return (
             <div key={name} className="border border-gray-200 rounded-xl p-3 bg-white">
-              <p className="text-sm font-semibold text-gray-800 mb-2">"{name}"</p>
+              <p className="text-sm font-semibold text-gray-800 mb-2">&quot;{name}&quot;</p>
               <div className="flex gap-2 flex-wrap mb-2">
                 <button onClick={() => setRes(name, { type: 'new' })}
                   className={`px-3 py-1 text-xs rounded-lg border font-medium ${res.type==='new'?'bg-blue-600 text-white border-blue-600':'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'}`}>

@@ -301,8 +301,6 @@ export default function ClaimsPage() {
     try {
       await updateClaim(id, { status })
       toast.success(`Status changed to ${status}`)
-      return
-    toast.success(`Status → ${status}`)
     } catch (err) {
       toast.error(err.message || 'Could not update claim status.')
     }

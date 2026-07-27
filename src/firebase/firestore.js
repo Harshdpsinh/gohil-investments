@@ -158,7 +158,7 @@ export async function restoreCRMBackup(backup, onProgress = () => {}) {
     })
   }
 
-  ;(backup.subcollections?.clientDocuments || []).forEach(record => {
+  (backup.subcollections?.clientDocuments || []).forEach(record => {
     if (!record?.clientId || !record?.id || !record.data) return
     writes.push({
       ref: doc(db, CLIENTS, record.clientId, DOCS_META, record.id),
@@ -678,7 +678,7 @@ function normaliseClientPayload(data, { partial = false } = {}) {
     next.aadhar = digits
   }
 
-  ;['address', 'city', 'state', 'occupation', 'employment', 'qualification', 'designation', 'notes'].forEach(field => {
+  ['address', 'city', 'state', 'occupation', 'employment', 'qualification', 'designation', 'notes'].forEach(field => {
     if (next[field] !== undefined && next[field] !== null) {
       next[field] = String(next[field]).trim()
     }

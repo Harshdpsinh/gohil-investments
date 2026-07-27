@@ -9,3 +9,9 @@ dist/
 node-*-x64.msi
 openwa/
 evolution-api/
+
+# Credentials — never commit. Listing a file here does NOT untrack it if it was
+# already added; use `git rm --cached <file>` for that.
+FIREBASE.txt
+*.zip
+

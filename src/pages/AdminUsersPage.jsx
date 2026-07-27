@@ -154,7 +154,7 @@ export default function AdminUsersPage() {
           <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <h3 className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white"><AppIcon name="warning" size={18} /> Confirm Role Change</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              Change <strong>{pendingRoleChange.name}</strong>'s role to{' '}
+              Change <strong>{pendingRoleChange.name}</strong>&apos;s role to{' '}
               <strong className={pendingRoleChange.newRole === 'admin' ? 'text-blue-600' : 'text-green-600'}>
                 {pendingRoleChange.newRole === 'admin' ? 'Admin' : 'Staff'}
               </strong>?
