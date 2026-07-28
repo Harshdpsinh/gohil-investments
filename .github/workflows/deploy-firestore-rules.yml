@@ -1,0 +1,67 @@
+# Deploys firestore.rules whenever the rules file changes on main.
+#
+# Authenticates with the Firebase service account already stored in repository
+# secrets for the renewal-alerts workflow — no extra credentials needed.
+#
+# If this fails with a permissions error, the service account needs the
+# "Firebase Rules Admin" role (roles/firebaserules.admin) granted in
+# Google Cloud Console → IAM for the gohil-investments project.
+name: Deploy Firestore Rules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/deploy-firestore-rules.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Build service account credentials
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+        run: |
+          if [ -z "$FIREBASE_CLIENT_EMAIL" ] || [ -z "$FIREBASE_PRIVATE_KEY" ]; then
+            echo "::error::FIREBASE_CLIENT_EMAIL or FIREBASE_PRIVATE_KEY is not set in repository secrets."
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const key = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n");
+            fs.writeFileSync("/tmp/sa.json", JSON.stringify({
+              type: "service_account",
+              project_id: process.env.FIREBASE_PROJECT_ID,
+              client_email: process.env.FIREBASE_CLIENT_EMAIL,
+              private_key: key,
+            }));
+          '
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy Firestore rules
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: firebase deploy --only firestore:rules --project "${FIREBASE_PROJECT_ID:-gohil-investments}" --non-interactive
+
+      - name: Remove credentials
+        if: always()
+        run: rm -f /tmp/sa.json
