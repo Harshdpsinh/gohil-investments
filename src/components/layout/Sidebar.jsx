@@ -15,6 +15,7 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/clients',    icon:'clients', label:'Clients'     },
     { to:'/policies',   icon:'policies', label:'Policies'    },
     { to:'/renewals',   icon:'renewals', label:'Renewals'    },
+    { to:'/pipeline',   icon:'renewals', label:'Pipeline 3D' },
     { to:'/claims',     icon:'claims', label:'Claims'      },
     { to:'/leads',      icon:'leads', label:'Leads'       },
     { to:'/endorsements', icon:'endorsements', label:'Endorsements' },
