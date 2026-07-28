@@ -30,10 +30,14 @@ export function defaultRenewalReminderSettings() {
   }
 }
 
-export function normaliseReminderSettings(settings = {}) {
+export function normaliseReminderSettings(settings) {
+  // getRenewalReminderSettings() returns null when the settings document has
+  // never been saved. A `= {}` parameter default does not cover null, so guard
+  // explicitly — otherwise reading .intervals throws on a fresh install.
+  const source = settings || {}
   const base = defaultRenewalReminderSettings()
   const seen = new Set()
-  const intervals = (settings.intervals?.length ? settings.intervals : base.intervals)
+  const intervals = (source.intervals?.length ? source.intervals : base.intervals)
     .map((item, index) => ({
       id: item.id || `d${item.days ?? index}`,
       days: Math.max(0, Number(item.days) || 0),
@@ -47,8 +51,10 @@ export function normaliseReminderSettings(settings = {}) {
     .sort((a, b) => b.days - a.days)
 
   return {
-    enabled: settings.enabled !== false,
-    prompt: String(settings.prompt || base.prompt).trim(),
+    enabled: source.enabled !== false,
+    // Trim before falling back, so a whitespace-only prompt does not send an
+    // empty line to clients.
+    prompt: String(source.prompt || '').trim() || base.prompt,
     intervals,
   }
 }
