@@ -54,6 +54,39 @@ describe('HDFC ERGO export format', () => {
   })
 })
 
+describe('Niva Bupa detailed export', () => {
+  const NIVA = {
+    'Policy Number': '32482287202604',
+    'Customer Name': 'VIKRAMSINH RANA',
+    'GWP(Before Tax)': 27570,
+    'Commission Structure': 3504,
+    'Payout %': 12.71,
+    'Net Payment': 3433.92,
+  }
+
+  // "Payout %" collapses to the same key as the old commissionAmount alias
+  // "payout", which read 12.71 as the amount instead of 3504.
+  it('reads Payout % as the rate, not the amount', () => {
+    const [row] = normaliseStatement([NIVA])
+    expect(row.commissionPct).toBe(12.71)
+    expect(row.commissionAmount).toBe(3504)
+  })
+
+  it('reads GWP(Before Tax) as the premium', () => {
+    expect(normaliseStatement([NIVA])[0].premium).toBe(27570)
+  })
+
+  it('drops the all-zero balance adjustment rows', () => {
+    const adjustment = { 'Policy Number': '00000000000000', 'Customer Name': '', 'Commission Structure': -3 }
+    expect(normaliseStatement([adjustment, NIVA])).toHaveLength(1)
+  })
+
+  it('keeps genuine negative clawbacks', () => {
+    const clawback = { ...NIVA, 'Policy Number': '50900200202501', 'Commission Structure': -893 }
+    expect(normaliseStatement([clawback])[0].commissionAmount).toBe(-893)
+  })
+})
+
 describe('toPayoutMonth', () => {
   it.each([
     [202606, '2026-06'],
