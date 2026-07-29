@@ -11,7 +11,7 @@
 // a parse failure.
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { toNumber } from './commissionImport'
+import { fieldForHeader, toNumber } from './commissionImport'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
@@ -255,7 +255,89 @@ function parseStarHealth(pages) {
   return rows
 }
 
+// ── Banded table: broker / aggregator bills ─────────────────────────────
+// e.g. WealthMaker "Transaction Detailed Report". Columns are identified from
+// the header row, and each cell may wrap over several lines. Values do not sit
+// exactly under their header — "Investor" is at x=367 while its value starts at
+// x=352 — so every fragment is assigned to the *nearest* header, not a fixed
+// band. The carrier is read per row from Company/AMC.
+function parseBandedTable(pages) {
+  const rows = []
+  for (const lines of pages) {
+    // A header line is one where several cells name known fields.
+    let header = null
+    for (const line of lines) {
+      const hits = line.cells.filter(c => fieldForHeader(c.text)).length
+      if (hits >= 4) { header = line; break }
+    }
+    if (!header) continue
+
+    // Header labels wrap too: "Company /" + "AMC", "Fresh/" + "Renewal".
+    // Merge any continuation line into the nearest header cell first.
+    const merged = header.cells.map(c => ({ x: c.x, text: c.text }))
+    for (const line of lines) {
+      if (line.y >= header.y || line.y < header.y - 14) continue
+      for (const cell of line.cells) {
+        const target = merged.reduce((best, h) =>
+          Math.abs(h.x - cell.x) < Math.abs(best.x - cell.x) ? h : best, merged[0])
+        target.text = `${target.text} ${cell.text}`
+      }
+    }
+
+    // Every header becomes an anchor, including ones we do not recognise —
+    // they act as sinks. Without them a value under "Policy Issue Dt." is
+    // pulled into "Policy No." simply because that is the nearest *known* field.
+    const anchors = merged.map(h => ({ x: h.x, field: fieldForHeader(h.text) }))
+    if (!anchors.some(a => a.field === 'commissionAmount')) continue
+
+    const nearest = x => anchors.reduce((best, a) =>
+      Math.abs(a.x - x) < Math.abs(best.x - x) ? a : best, anchors[0])
+
+    const amountX = anchors.find(a => a.field === 'commissionAmount').x
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+
+    for (const line of lines) {
+      if (line.y >= header.y) continue
+      const hasAmount = line.cells.some(c =>
+        Math.abs(c.x - amountX) < 30 && /^-?[\d,]+(\.\d+)?$/.test(c.text))
+      if (!hasAmount) continue
+
+      // Wrapped continuation lines sit just below the anchor.
+      const near = flat.filter(i => i.y <= line.y && i.y > line.y - 30)
+      if (near.some(i => /^(grand\s+)?total$/i.test(i.text))) continue
+
+      const cell = {}
+      for (const item of near) {
+        const field = nearest(item.x).field
+        if (!field) continue
+        ;(cell[field] ||= []).push(item)
+      }
+      const text = field => (cell[field] || [])
+        .sort((a, b) => (b.y - a.y) || (a.x - b.x))
+        .map(i => i.text).join(' ').replace(/\s+/g, ' ').trim()
+
+      const commissionAmount = toNumber(text('commissionAmount'))
+      const policyNumber = text('policyNumber')
+      if (!policyNumber || !commissionAmount) continue
+
+      rows.push({
+        policyNumber,
+        clientName: text('clientName'),
+        insurer: text('insurer'),
+        planName: text('planName'),
+        premium: toNumber(text('premium')),
+        commissionPct: toNumber(text('commissionPct')),
+        commissionAmount,
+        businessType: /renew/i.test(text('businessType')) ? 'Renewal'
+          : /fresh|new/i.test(text('businessType')) ? 'Fresh' : '',
+      })
+    }
+  }
+  return rows
+}
+
 const PARSERS = [
+  ['broker / aggregator bill', parseBandedTable],
   ['Aditya Birla Health', parseAdityaBirla],
   ['Star Health', parseStarHealth],
   ['ICICI Lombard', parseIciciLombard],
