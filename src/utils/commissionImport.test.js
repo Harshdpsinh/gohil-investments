@@ -1,8 +1,71 @@
 import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement,
-  postingKey, summarise,
+  postingKey, summarise, toPayoutMonth,
 } from './commissionImport'
+
+// Real header row from an HDFC ERGO payout export. This insurer omits the
+// insurer column entirely and prefixes policy numbers with an apostrophe.
+const HDFC_ROW = {
+  Month: 202606,
+  Parent_Name: 'UMABA HARSHDIPSINH GOHIL',
+  Customer_Name: 'ANKUSH KUMAR JAIN',
+  Policy_Num: "'2800000041617000",
+  Certificate_Num: "'2800000041617000000",
+  Business_Type: 'New',
+  GWP: 23413,
+  Premium_For_Commission: 23413,
+  Commission_perct: 21.186440677966086,
+  TOTAL_COMM: 4960.3813559322,
+  COMMISSION_OD_AMT: 4960.3813559322,
+}
+
+describe('HDFC ERGO export format', () => {
+  it('reads every field the ledger needs', () => {
+    const [row] = normaliseStatement([HDFC_ROW])
+    expect(row.policyNumber).toBe('2800000041617000') // leading apostrophe gone
+    expect(row.clientName).toBe('ANKUSH KUMAR JAIN')
+    expect(row.premium).toBe(23413)
+    expect(row.commissionPct).toBeCloseTo(21.186, 2)
+    expect(row.commissionAmount).toBeCloseTo(4960.38, 2)
+    expect(row.payoutMonth).toBe('2026-06')
+  })
+
+  it('prefers TOTAL_COMM over COMMISSION_OD_AMT', () => {
+    const [row] = normaliseStatement([{ ...HDFC_ROW, TOTAL_COMM: 111, COMMISSION_OD_AMT: 999 }])
+    expect(row.commissionAmount).toBe(111)
+  })
+
+  it('does not mistake Parent_Name for the customer', () => {
+    expect(normaliseStatement([HDFC_ROW])[0].clientName).not.toBe(HDFC_ROW.Parent_Name)
+  })
+
+  it('matches once the user names the insurer', () => {
+    const policies = [{ id: 'p9', policyNumber: '2800000041617000', clientName: 'ANKUSH KUMAR JAIN', insurer: 'HDFC ERGO' }]
+    const [m] = matchStatement(normaliseStatement([HDFC_ROW]), policies, 'HDFC ERGO')
+    expect(m.status).toBe('matched')
+  })
+
+  it('rejects the statement when the declared insurer is wrong', () => {
+    const policies = [{ id: 'p9', policyNumber: '2800000041617000', clientName: 'ANKUSH KUMAR JAIN', insurer: 'HDFC ERGO' }]
+    const [m] = matchStatement(normaliseStatement([HDFC_ROW]), policies, 'Star Health')
+    expect(m.status).toBe('review')
+    expect(m.reason).toMatch(/insurer differs/)
+  })
+})
+
+describe('toPayoutMonth', () => {
+  it.each([
+    [202606, '2026-06'],
+    ['202606', '2026-06'],
+    ['2026-06', '2026-06'],
+    ['', ''],
+    [null, ''],
+    ['June 2026', ''],
+  ])('maps %s to %s', (input, expected) => {
+    expect(toPayoutMonth(input)).toBe(expected)
+  })
+})
 
 const policies = [
   { id: 'p1', policyNumber: 'POL-001', clientName: 'Meera Patel', insurer: 'HDFC ERGO', premium: 12000 },

@@ -17,15 +17,25 @@ const STATUS_STYLE = {
 
 export default function StatementImportModal({ open, onClose, policies, user, onPosted }) {
   const fileRef = useRef(null)
-  const [rows, setRows] = useState([])
+  const [parsed, setParsed] = useState([])
+  const [insurer, setInsurer] = useState('')
   const [skipped, setSkipped] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [fileName, setFileName] = useState('')
 
+  // Insurers the book actually uses — the statement rarely names itself.
+  const insurerOptions = useMemo(
+    () => [...new Set(policies.map(p => p.insurer).filter(Boolean))].sort(),
+    [policies]
+  )
+  const rows = useMemo(
+    () => matchStatement(parsed, policies, insurer),
+    [parsed, policies, insurer]
+  )
   const stats = useMemo(() => summarise(rows), [rows])
   const postable = rows.filter(r => r.policy && !skipped.has(r.sourceRow))
 
-  const reset = () => { setRows([]); setSkipped(new Set()); setFileName(''); if (fileRef.current) fileRef.current.value = '' }
+  const reset = () => { setParsed([]); setSkipped(new Set()); setFileName(''); setInsurer(''); if (fileRef.current) fileRef.current.value = '' }
 
   const onPick = async e => {
     const file = e.target.files?.[0]
@@ -35,9 +45,11 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       const raw = await parseImportFile(file)
       const parsed = normaliseStatement(raw)
       if (!parsed.length) throw new Error('No usable rows found. Check the file has a header row.')
-      setRows(matchStatement(parsed, policies))
+      setParsed(parsed)
       setFileName(file.name)
       setSkipped(new Set())
+      // Pre-fill when the sheet does name its insurer.
+      setInsurer(parsed.find(r => r.insurer)?.insurer || '')
     } catch (err) {
       toast.error(err.message || 'Could not read that file.')
       reset()
@@ -70,7 +82,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           receivedCommission: row.commissionAmount,
           netReceived: row.commissionAmount,
           payoutDate: row.payoutDate,
-          payoutMonth: (row.payoutDate || '').slice(0, 7),
+          payoutMonth: row.payoutMonth || (row.payoutDate || '').slice(0, 7),
           status: 'posted',
           postingKey: postingKey(row),
           createdBy: user?.uid || '',
@@ -131,6 +143,24 @@ export default function StatementImportModal({ open, onClose, policies, user, on
         </div>
       ) : (
         <div className="space-y-4">
+          <label className="block">
+            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
+              Statement insurer
+            </span>
+            <select
+              className="form-input mt-1"
+              value={insurer}
+              onChange={e => setInsurer(e.target.value)}
+            >
+              <option value="">— not specified —</option>
+              {insurerOptions.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
+              Most payout files do not name the insurer. Setting it here lets the
+              insurer be verified against each policy before posting.
+            </span>
+          </label>
+
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Tile label="Rows" value={stats.total} />
             <Tile label="Matched" value={stats.matched} tone="text-emerald-600 dark:text-emerald-400" />

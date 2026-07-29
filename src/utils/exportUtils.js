@@ -155,14 +155,33 @@ export function downloadTemplate(headers, sheetName, filename, sampleRow = null)
 }
 
 // ── Parse uploaded Excel / CSV ────────────────────────────────
+/**
+ * Some insurer exports declare a sheet range covering the whole grid
+ * (A1:AQ1048576) even when two rows have data. sheet_to_json walks the declared
+ * range, which froze the tab for ~24s on a one-row file. Shrink !ref to the
+ * cells that actually exist first — that is O(cells), not O(declared rows).
+ */
+function clampSheetRange(ws) {
+  const cells = Object.keys(ws).filter(key => !key.startsWith('!'))
+  if (!cells.length) return ws
+  let maxRow = 0, maxCol = 0
+  for (const address of cells) {
+    const { r, c } = XLSX.utils.decode_cell(address)
+    if (r > maxRow) maxRow = r
+    if (c > maxCol) maxCol = c
+  }
+  ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxRow, c: maxCol } })
+  return ws
+}
+
 export function parseImportFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = e => {
       try {
         const wb   = XLSX.read(e.target.result, { type: 'array', cellDates: true })  // FIX #4: array not binary
-        const ws   = wb.Sheets[wb.SheetNames[0]]
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
+        const ws   = clampSheetRange(wb.Sheets[wb.SheetNames[0]])
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: '', blankrows: false })
         resolve(rows)
       } catch {
         reject(new Error('Could not read file. Use a valid .xlsx or .csv file.'))
