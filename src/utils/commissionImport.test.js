@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement,
-  postingKey, summarise, toPayoutMonth,
+  postingKey, summarise, toPayoutMonth, normaliseBusinessType,
 } from './commissionImport'
 
 // Real header row from an HDFC ERGO payout export. This insurer omits the
@@ -84,6 +84,74 @@ describe('Niva Bupa detailed export', () => {
   it('keeps genuine negative clawbacks', () => {
     const clawback = { ...NIVA, 'Policy Number': '50900200202501', 'Commission Structure': -893 }
     expect(normaliseStatement([clawback])[0].commissionAmount).toBe(-893)
+  })
+})
+
+describe('multi-company aggregator bill', () => {
+  // WealthMaker / Probus style: the carrier varies per row.
+  const AGG = [
+    {
+      'Policy No.': 'TAG/2026/001', 'Investor': 'RAKESH SHAH',
+      'Company/AMC': 'TATA AIG GENERAL INSURANCE CO. LTD.', 'Plan/Scheme': 'Motor Package',
+      'Fresh/Renewal': 'Fresh', 'Amount': 24000, 'Expense': 2400,
+    },
+    {
+      'Policy No.': 'HDF/2026/002', 'Investor': 'MEERA PATEL',
+      'Company/AMC': 'HDFC ERGO', 'Plan/Scheme': 'Optima Secure',
+      'Fresh/Renewal': 'Renewal', 'Amount': 18000, 'Expense': 1800,
+    },
+  ]
+
+  it('reads a different carrier from each row', () => {
+    const rows = normaliseStatement(AGG)
+    expect(rows[0].insurer).toBe('TATA AIG GENERAL INSURANCE CO. LTD.')
+    expect(rows[1].insurer).toBe('HDFC ERGO')
+  })
+
+  it('maps Investor to the client and Expense to the commission', () => {
+    const [row] = normaliseStatement(AGG)
+    expect(row.clientName).toBe('RAKESH SHAH')
+    expect(row.commissionAmount).toBe(2400)
+    expect(row.premium).toBe(24000)
+  })
+
+  it('captures plan and business type', () => {
+    const rows = normaliseStatement(AGG)
+    expect(rows[0].planName).toBe('Motor Package')
+    expect(rows[0].businessType).toBe('Fresh')
+    expect(rows[1].businessType).toBe('Renewal')
+  })
+
+  it('does not let a declared insurer override a per-row carrier', () => {
+    const matched = matchStatement(normaliseStatement(AGG), [], 'Star Health')
+    expect(matched[0].insurer).toBe('TATA AIG GENERAL INSURANCE CO. LTD.')
+  })
+})
+
+describe('percent-header disambiguation', () => {
+  // "Payout %" and "Payout" both reduce to "payout". Without the % rule the
+  // rate is read as the amount — 12.71 posted instead of 3504.
+  it('treats a % header as the rate even when the alias says amount', () => {
+    const [row] = normaliseStatement([{
+      'Policy Number': 'P1', 'Customer Name': 'A', 'Payout %': 12.71, 'Commission Structure': 3504,
+    }])
+    expect(row.commissionPct).toBe(12.71)
+    expect(row.commissionAmount).toBe(3504)
+  })
+
+  it('treats a bare Payout column as the amount', () => {
+    const [row] = normaliseStatement([{ 'Policy No.': 'P1', 'Investor': 'A', 'Payout': 2400 }])
+    expect(row.commissionAmount).toBe(2400)
+  })
+})
+
+describe('normaliseBusinessType', () => {
+  it.each([
+    ['Fresh', 'Fresh'], ['New', 'Fresh'], ['New Business', 'Fresh'],
+    ['Renewal', 'Renewal'], ['Renewed Policy', 'Renewal'], ['RENEW', 'Renewal'],
+    ['', ''], [null, ''], ['something else', ''],
+  ])('maps %s to %s', (input, expected) => {
+    expect(normaliseBusinessType(input)).toBe(expected)
   })
 })
 
