@@ -9,6 +9,7 @@ import { updatePolicy, getCommissionTransactionsPage } from '../firebase/firesto
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import SearchBar from '../components/ui/SearchBar'
+import StatementImportModal from '../components/commission/StatementImportModal'
 import toast from 'react-hot-toast'
 import { isValid } from 'date-fns'
 
@@ -108,7 +109,7 @@ function CommCell({ policyId, field, value }) {
 export default function CommissionPage() {
   const { policies, loading } = usePolicies()
   const { clients }           = useClients()
-  const { isAdmin }           = useAuth()
+  const { isAdmin, user }     = useAuth()
 
   const [search,      setSearch]      = useState('')
   const [typeFilter,  setTypeFilter]  = useState('All')
@@ -120,11 +121,18 @@ export default function CommissionPage() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [actualView, setActualView] = useState('insurer')
   const [ledgerError, setLedgerError] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return
     getCommissionTransactionsPage({ pageSize: 100 }).then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') }).catch(err => { const message = err.message || 'Could not load posted commission.'; setLedgerError(message); toast.error(message) })
   }, [isAdmin])
+
+  const reloadTransactions = useCallback(() => {
+    getCommissionTransactionsPage({ pageSize: 100 })
+      .then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') })
+      .catch(err => toast.error(err.message || 'Could not refresh commission ledger.'))
+  }, [])
 
   const loadMoreTransactions = async () => {
     if (!hasMoreTransactions || loadingMore) return
@@ -221,6 +229,7 @@ export default function CommissionPage() {
           <p className="fintech-subtitle">{filtered.length} policies · Separate estimated earnings from posted receipts.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          {isAdmin && <button onClick={()=>setImportOpen(true)} className="btn-primary text-xs">⬆ Import Statement</button>}
           <button onClick={()=>exportToCSV(filtered,COMM_COLS,'commission')} className="btn-secondary text-xs">⬇ CSV</button>
           <button onClick={()=>exportToExcel(filtered,COMM_COLS,'Commission','commission')} className="btn-secondary text-xs">⬇ Excel</button>
           <button onClick={async()=>await exportToPDF(filtered,COMM_COLS,'Commission Report','commission')} className="btn-secondary text-xs">⬇ PDF</button>
@@ -228,6 +237,14 @@ export default function CommissionPage() {
       </div>
 
       {ledgerError && <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span><strong>Commission ledger unavailable.</strong> {ledgerError}</span><button className="font-bold" onClick={() => window.location.reload()}>Retry</button></div>}
+
+      <StatementImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        policies={policies}
+        user={user}
+        onPosted={reloadTransactions}
+      />
 
       <div className="commission-command-grid">
         {[
