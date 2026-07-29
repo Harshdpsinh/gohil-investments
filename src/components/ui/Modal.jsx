@@ -1,5 +1,6 @@
 // UI MODERNIZATION - logic unchanged
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import AppIcon from './AppIcon'
 
 export default function Modal({ open, onClose, title, children, size = 'md', subtitle = '', footerContent = null }) {
@@ -27,7 +28,13 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
     full: 'max-w-full mx-4',
   }
 
-  return (
+  // Portalled to <body>. `.page-enter` keeps a transform after its entry
+  // animation (animation-fill-mode: both), and a transformed ancestor becomes
+  // the containing block for position:fixed — which pushed every modal to the
+  // middle of the *document* instead of the viewport, so you had to scroll to
+  // reach it. Rendering outside that subtree makes it immune to any ancestor
+  // transform, now and in future.
+  return createPortal(
     <div className="gi-modal-overlay fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4">
       {/* UI-only verification: backdrop click still calls the original onClose prop. */}
       <div className="absolute inset-0 animate-fadeIn bg-slate-950/60" onClick={onClose} />
@@ -58,6 +65,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

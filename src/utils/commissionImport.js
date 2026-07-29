@@ -6,14 +6,24 @@ import { fuzzyMatch } from './policyImport'
 
 // Insurers all name their columns differently. Lowercased, non-alphanumerics
 // stripped, so "Policy No." and "policy_no" collapse to the same key.
+// Order within each list is the preference order when a sheet has several
+// candidates (HDFC ERGO ships both TOTAL_COMM and COMMISSION_OD_AMT).
 const ALIASES = {
-  policyNumber: ['policyno', 'policynumber', 'policy', 'certificateno', 'proposalno'],
-  clientName: ['clientname', 'name', 'insuredname', 'policyholder', 'policyholdername', 'customername'],
+  policyNumber: ['policyno', 'policynumber', 'policynum', 'policy', 'certificateno', 'certificatenum', 'proposalno'],
+  clientName: ['clientname', 'customername', 'insuredname', 'policyholder', 'policyholdername', 'name'],
   insurer: ['insurer', 'company', 'insurancecompany', 'insurername'],
-  premium: ['premium', 'grosspremium', 'netpremium', 'premiumamount'],
-  commissionPct: ['commissionpct', 'commission', 'commissionpercent', 'commissionpercentage', 'commrate', 'rate', 'brokeragepct'],
-  commissionAmount: ['commissionamount', 'commissionamt', 'commamount', 'brokerage', 'brokerageamount', 'payout', 'netpayable'],
-  payoutDate: ['payoutdate', 'paymentdate', 'date', 'transactiondate'],
+  premium: ['premiumforcommission', 'premium', 'grosspremium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull'],
+  commissionPct: ['commissionpct', 'commissionperct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'commission', 'rate'],
+  commissionAmount: ['totalcomm', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'netpayable', 'payout'],
+  payoutDate: ['payoutdate', 'paymentdate', 'transactiondate', 'date'],
+  payoutMonth: ['month', 'payoutmonth', 'paymentmonth', 'cycle'],
+}
+
+/** "202606" or 202606 -> "2026-06". Anything else -> ''. */
+export function toPayoutMonth(value) {
+  const s = String(value ?? '').trim()
+  const m = s.match(/^(\d{4})-?(\d{2})$/)
+  return m ? `${m[1]}-${m[2]}` : ''
 }
 
 const key = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '')
@@ -43,16 +53,21 @@ export function normaliseStatement(rows = []) {
   if (!rows.length) return []
   const cols = mapColumns(rows[0])
   return rows
-    .map((row, index) => ({
-      sourceRow: index + 2, // +2: 1-indexed, and row 1 is the header
-      policyNumber: String(row[cols.policyNumber] ?? '').trim(),
-      clientName: String(row[cols.clientName] ?? '').trim(),
-      insurer: String(row[cols.insurer] ?? '').trim(),
-      premium: toNumber(row[cols.premium]),
-      commissionPct: toNumber(row[cols.commissionPct]),
-      commissionAmount: toNumber(row[cols.commissionAmount]),
-      payoutDate: String(row[cols.payoutDate] ?? '').trim(),
-    }))
+    .map((row, index) => {
+      const payoutDate = String(row[cols.payoutDate] ?? '').trim()
+      return {
+        sourceRow: index + 2, // +2: 1-indexed, and row 1 is the header
+        // Insurers export policy numbers as text with a leading apostrophe.
+        policyNumber: String(row[cols.policyNumber] ?? '').replace(/^'/, '').trim(),
+        clientName: String(row[cols.clientName] ?? '').trim(),
+        insurer: String(row[cols.insurer] ?? '').trim(),
+        premium: toNumber(row[cols.premium]),
+        commissionPct: toNumber(row[cols.commissionPct]),
+        commissionAmount: toNumber(row[cols.commissionAmount]),
+        payoutDate,
+        payoutMonth: toPayoutMonth(row[cols.payoutMonth]) || payoutDate.slice(0, 7),
+      }
+    })
     .filter(r => r.policyNumber || r.clientName)
 }
 
@@ -97,8 +112,15 @@ export function matchRow(row, policies = []) {
   return { ...row, policy: null, status: 'unmatched', reason: 'No matching policy found' }
 }
 
-export function matchStatement(rows, policies) {
-  return rows.map(row => matchRow(row, policies))
+/**
+ * defaultInsurer fills rows whose sheet has no insurer column (HDFC ERGO's
+ * export omits it entirely), so the name+insurer check still has something
+ * to verify against.
+ */
+export function matchStatement(rows, policies, defaultInsurer = '') {
+  return rows.map(row =>
+    matchRow(defaultInsurer && !row.insurer ? { ...row, insurer: defaultInsurer } : row, policies)
+  )
 }
 
 /**
@@ -106,7 +128,7 @@ export function matchStatement(rows, policies) {
  * double-post. Firestore doc ids may not contain '/'.
  */
 export function postingKey(row) {
-  const month = (row.payoutDate || '').slice(0, 7) || 'nodate'
+  const month = row.payoutMonth || (row.payoutDate || '').slice(0, 7) || 'nodate'
   return `${row.policyNumber}_${month}_${Math.round(row.commissionAmount)}`
     .replace(/[^a-zA-Z0-9_-]/g, '_')
 }
