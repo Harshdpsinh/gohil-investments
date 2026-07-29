@@ -14,7 +14,7 @@ const ALIASES = {
   // companyamc: aggregator bills (WealthMaker, Probus) name the carrier per row.
   insurer: ['companyamc', 'insurer', 'insurancecompany', 'insurername', 'company', 'amc'],
   planName: ['planscheme', 'planname', 'plan', 'scheme', 'productname', 'proddescription', 'lob'],
-  businessType: ['freshrenewal', 'businesstype', 'newrenewal', 'policystatus', 'renewedpolicy'],
+  businessType: ['freshrenewal', 'businesstype', 'newrenewal', 'policystatus', 'renewedpolicy', 'fresh', 'renewal'],
   premium: ['premiumforcommission', 'gwpbeforetax', 'grosspremium', 'premium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull', 'amount'],
   commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'rate'],
   commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'expense', 'payout', 'netpayable', 'netpayment', 'commission'],
@@ -49,12 +49,22 @@ export function toNumber(value) {
 }
 
 /**
- * Builds { field -> actual column name } from the first row's headers.
+ * Which field a single header string represents, or '' if unrecognised.
+ * Shared with the PDF banded-table parser so both read the same vocabulary.
  *
  * A header containing "%" can only be a rate. Without that rule "Payout %"
  * (Niva Bupa's rate) and "Payout" (an aggregator's amount) both reduce to
  * "payout" and the rate gets posted as the commission.
  */
+export function fieldForHeader(header) {
+  if (/%|percent/i.test(header)) return 'commissionPct'
+  const k = key(header)
+  for (const [field, names] of Object.entries(ALIASES)) {
+    if (names.includes(k)) return field
+  }
+  return ''
+}
+
 export function mapColumns(row = {}) {
   const found = {}
   for (const header of Object.keys(row)) {

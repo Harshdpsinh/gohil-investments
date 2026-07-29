@@ -283,7 +283,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                           <Field>Policy</Field><Field>Client</Field><Field>Insurer</Field>
                           <Field>Premium</Field><Field>Commission</Field>
                         </td>
-                        <td className="table-cell">
+                        <td className="table-cell w-[26%] min-w-[190px]">
                           <Cell value={row.policyNumber} mono
                                 onChange={v => edit(row.sourceRow, 'policyNumber', v)} />
                           <Cell value={row.clientName}
@@ -295,7 +295,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                           <Cell value={row.commissionAmount} numeric
                                 onChange={v => edit(row.sourceRow, 'commissionAmount', Number(v) || 0)} />
                         </td>
-                        <td className="table-cell">
+                        <td className="table-cell w-[26%] min-w-[190px]">
                           <Val mono match={db && sameish(db.policyNumber, row.policyNumber)}>{db?.policyNumber || '—'}</Val>
                           <Val match={db && sameish(db.clientName, row.clientName)}>{db?.clientName || '—'}</Val>
                           <Val match={db && sameish(db.insurer, row.insurer || insurer)}>{db?.insurer || '—'}</Val>
@@ -349,13 +349,16 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   )
 }
 
+// The three stacked columns must share one row height or they drift apart.
+const ROW = 'flex h-8 items-center'
+
 function Field({ children }) {
-  return <div className="py-1 text-[11px] font-bold uppercase tracking-wide text-gray-400">{children}</div>
+  return <div className={`${ROW} text-[11px] font-bold uppercase tracking-wide text-gray-400`}>{children}</div>
 }
 
 function Val({ children, mono, match }) {
   const tone = match === undefined ? '' : match ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-  return <div className={`py-1 ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
+  return <div className={`${ROW} truncate ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
 }
 
 function Cell({ value, onChange, mono, numeric }) {
@@ -364,7 +367,7 @@ function Cell({ value, onChange, mono, numeric }) {
       value={value ?? ''}
       onChange={e => onChange(e.target.value)}
       inputMode={numeric ? 'decimal' : undefined}
-      className={`w-full rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
+      className={`h-8 w-full rounded border border-transparent bg-transparent px-1 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
     />
   )
 }
