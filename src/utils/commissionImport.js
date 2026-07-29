@@ -10,15 +10,25 @@ import { fuzzyMatch } from './policyImport'
 // candidates (HDFC ERGO ships both TOTAL_COMM and COMMISSION_OD_AMT).
 const ALIASES = {
   policyNumber: ['policyno', 'policynumber', 'policynum', 'policy', 'certificateno', 'certificatenum', 'proposalno'],
-  clientName: ['clientname', 'customername', 'insuredname', 'policyholder', 'policyholdername', 'name'],
-  insurer: ['insurer', 'company', 'insurancecompany', 'insurername'],
-  premium: ['premiumforcommission', 'gwpbeforetax', 'premium', 'grosspremium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull'],
-  // "Payout %" belongs here, not on the amount — Niva Bupa uses that header for
-  // the rate, and reading it as an amount posted 12.75 instead of 3504.
-  commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'payout', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'commission', 'rate'],
-  commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'netpayable', 'netpayment'],
+  clientName: ['clientname', 'customername', 'insuredname', 'policyholder', 'policyholdername', 'investor', 'proposer', 'proposersname', 'name'],
+  // companyamc: aggregator bills (WealthMaker, Probus) name the carrier per row.
+  insurer: ['companyamc', 'insurer', 'insurancecompany', 'insurername', 'company', 'amc'],
+  planName: ['planscheme', 'planname', 'plan', 'scheme', 'productname', 'proddescription', 'lob'],
+  businessType: ['freshrenewal', 'businesstype', 'newrenewal', 'policystatus', 'renewedpolicy'],
+  premium: ['premiumforcommission', 'gwpbeforetax', 'grosspremium', 'premium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull', 'amount'],
+  commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'rate'],
+  commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'expense', 'payout', 'netpayable', 'netpayment', 'commission'],
   payoutDate: ['payoutdate', 'paymentdate', 'transactiondate', 'date'],
   payoutMonth: ['month', 'payoutmonth', 'paymentmonth', 'cycle'],
+}
+
+/** Fresh / New / New Business -> 'Fresh'; Renewal / Renewed -> 'Renewal'. */
+export function normaliseBusinessType(value) {
+  const text = String(value ?? '').toLowerCase()
+  if (!text.trim()) return ''
+  if (/renew/.test(text)) return 'Renewal'
+  if (/fresh|new/.test(text)) return 'Fresh'
+  return ''
 }
 
 /** "202606" or 202606 -> "2026-06". Anything else -> ''. */
@@ -38,11 +48,21 @@ export function toNumber(value) {
   return Number.isFinite(n) ? n : 0
 }
 
-/** Builds { field -> actual column name } from the first row's headers. */
+/**
+ * Builds { field -> actual column name } from the first row's headers.
+ *
+ * A header containing "%" can only be a rate. Without that rule "Payout %"
+ * (Niva Bupa's rate) and "Payout" (an aggregator's amount) both reduce to
+ * "payout" and the rate gets posted as the commission.
+ */
 export function mapColumns(row = {}) {
   const found = {}
   for (const header of Object.keys(row)) {
     const k = key(header)
+    if (/%|percent/i.test(header)) {
+      if (!found.commissionPct) found.commissionPct = header
+      continue
+    }
     for (const [field, names] of Object.entries(ALIASES)) {
       if (!found[field] && names.includes(k)) found[field] = header
     }
@@ -62,7 +82,11 @@ export function normaliseStatement(rows = []) {
         // Insurers export policy numbers as text with a leading apostrophe.
         policyNumber: String(row[cols.policyNumber] ?? '').replace(/^'/, '').trim(),
         clientName: String(row[cols.clientName] ?? '').trim(),
+        // On an aggregator bill this differs per row; on a single-carrier
+        // statement it is usually absent and the user declares it.
         insurer: String(row[cols.insurer] ?? '').trim(),
+        planName: String(row[cols.planName] ?? '').trim(),
+        businessType: normaliseBusinessType(row[cols.businessType]),
         premium: toNumber(row[cols.premium]),
         commissionPct: toNumber(row[cols.commissionPct]),
         commissionAmount: toNumber(row[cols.commissionAmount]),
