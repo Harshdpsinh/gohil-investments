@@ -12,9 +12,11 @@ const ALIASES = {
   policyNumber: ['policyno', 'policynumber', 'policynum', 'policy', 'certificateno', 'certificatenum', 'proposalno'],
   clientName: ['clientname', 'customername', 'insuredname', 'policyholder', 'policyholdername', 'name'],
   insurer: ['insurer', 'company', 'insurancecompany', 'insurername'],
-  premium: ['premiumforcommission', 'premium', 'grosspremium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull'],
-  commissionPct: ['commissionpct', 'commissionperct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'commission', 'rate'],
-  commissionAmount: ['totalcomm', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'netpayable', 'payout'],
+  premium: ['premiumforcommission', 'gwpbeforetax', 'premium', 'grosspremium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull'],
+  // "Payout %" belongs here, not on the amount — Niva Bupa uses that header for
+  // the rate, and reading it as an amount posted 12.75 instead of 3504.
+  commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'payout', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'commission', 'rate'],
+  commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'netpayable', 'netpayment'],
   payoutDate: ['payoutdate', 'paymentdate', 'transactiondate', 'date'],
   payoutMonth: ['month', 'payoutmonth', 'paymentmonth', 'cycle'],
 }
@@ -68,7 +70,8 @@ export function normaliseStatement(rows = []) {
         payoutMonth: toPayoutMonth(row[cols.payoutMonth]) || payoutDate.slice(0, 7),
       }
     })
-    .filter(r => r.policyNumber || r.clientName)
+    // All-zero policy numbers are Niva Bupa's balance adjustments, not policies.
+    .filter(r => (r.policyNumber || r.clientName) && !/^0+$/.test(r.policyNumber))
 }
 
 const sameInsurer = (a, b) => {

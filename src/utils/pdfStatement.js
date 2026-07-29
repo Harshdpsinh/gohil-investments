@@ -1,10 +1,14 @@
 // src/utils/pdfStatement.js
 // Extracts per-policy commission rows from insurer PDF statements.
 //
-// Reality check from real files: only some statements contain policy-level rows
-// at all. Niva Bupa and Aditya Birla ship totals only, so there is nothing to
-// extract and this returns []. The caller must surface that rather than
-// pretending the parse failed.
+// Every insurer lays these out differently, and two of them do not use rows at
+// all: Aditya Birla wraps one record over three stacked text lines, and Star
+// Health rotates the whole table so policies become columns. Each profile below
+// was written against a real statement, not a guess.
+//
+// Returning [] means the PDF genuinely holds no policy-level detail (some
+// insurers publish only totals) — the caller must say so rather than reporting
+// a parse failure.
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { toNumber } from './commissionImport'
@@ -146,7 +150,114 @@ function parseGeneric(pages) {
   return rows
 }
 
+// ── Aditya Birla Health: "Annexure 1 : Policies Issued" ─────────────────
+// One record spans three stacked text lines at the same x, e.g. the policy id
+// arrives as "31-26-" / "0164666-" / "00". Anchor on the line carrying the
+// numbers, then sweep a y-window and bucket every fragment by x column.
+const ABH_BANDS = {
+  policyNumber: [28, 66], clientName: [66, 108], businessType: [108, 145],
+  productName: [145, 200], premium: [248, 312], commissionPct: [312, 356],
+  commissionAmount: [356, 420],
+}
+
+function bucket(items, bands) {
+  const out = {}
+  for (const [field, [lo, hi]] of Object.entries(bands)) {
+    out[field] = items
+      .filter(i => i.x >= lo && i.x < hi)
+      .sort((a, b) => (b.y - a.y) || (a.x - b.x))
+      .map(i => i.text)
+      .join(' ')
+      .replace(/\s*-\s*(?=\d)/g, '-')  // rejoin "31-26- 0164666- 00"
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+  return out
+}
+
+function parseAdityaBirla(pages) {
+  const rows = []
+  for (const lines of pages) {
+    if (!lines.some(l => /annexure\s*1\s*:\s*policies issued/i.test(joined(l)))) continue
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+
+    for (const line of lines) {
+      const amount = line.cells.find(c => c.x >= 356 && c.x < 420 && /^-?[\d,.]+$/.test(c.text))
+      const finalAmt = line.cells.find(c => c.x >= 505 && c.x < 570 && /^-?[\d,.]+$/.test(c.text))
+      if (!amount || !finalAmt) continue
+      const near = flat.filter(i => Math.abs(i.y - line.y) <= 13)
+      if (near.some(i => /^total$/i.test(i.text))) continue
+      const r = bucket(near, ABH_BANDS)
+      // A policy id always carries digits; this rejects the GST summary block.
+      if (!/\d/.test(r.policyNumber) || !toNumber(r.commissionAmount)) continue
+      rows.push({
+        policyNumber: r.policyNumber.replace(/\s/g, ''),
+        clientName: r.clientName,
+        insurer: 'Aditya Birla Health Insurance',
+        premium: toNumber(r.premium),
+        commissionPct: toNumber(r.commissionPct),
+        commissionAmount: toNumber(r.commissionAmount),
+        businessType: /retail new|new/i.test(r.businessType) ? 'New' : r.businessType || '',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Star Health: agent provisional statement ────────────────────────────
+// The table is rotated: each policy is an x-column, each field a y-row. Read
+// the label positions, then take the values sitting on those y bands.
+function parseStarHealth(pages) {
+  const rows = []
+  for (const lines of pages) {
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+    if (!flat.some(i => /STAR HEALTH AND ALLIED/i.test(i.text))) continue
+
+    // Label column sits left of the data columns.
+    const labelY = re => {
+      const hit = flat.find(i => i.x > 300 && i.x < 375 && re.test(i.text))
+      return hit ? hit.y : null
+    }
+    const yPolicy = labelY(/^Policy No$/i)
+    const yName = labelY(/^Proposer's$/i)
+    const yPrem = labelY(/^Premium\/Ref$/i)
+    const yPay = labelY(/^Payable$/i)
+    if (yPolicy === null || yPrem === null) continue
+
+    // Data columns: the x positions of the policy-number values.
+    const anchors = flat
+      .filter(i => i.x > 375 && Math.abs(i.y - yPolicy) <= 14 && /^\d{6,}$/.test(i.text))
+      .sort((a, b) => a.x - b.x)
+
+    for (let n = 0; n < anchors.length; n++) {
+      const lo = anchors[n].x - 4
+      const hi = n + 1 < anchors.length ? anchors[n + 1].x - 4 : anchors[n].x + 34
+      const col = (yc, tol = 14) =>
+        flat.filter(i => i.x >= lo && i.x < hi && Math.abs(i.y - yc) <= tol)
+          // Rotated table: reading order runs along x, not y.
+          .sort((a, b) => (a.x - b.x) || (b.y - a.y)).map(i => i.text)
+
+      const policyNumber = col(yPolicy).join('')
+      const premium = toNumber(col(yPrem + 25, 14).find(t => /^[\d,.]+$/.test(t)))
+      const payable = yPay === null ? 0 : toNumber(col(yPay + 5, 14).find(t => /^[\d,.]+$/.test(t)))
+      if (!policyNumber || !payable) continue
+      rows.push({
+        policyNumber,
+        clientName: yName === null ? '' : col(yName + 8, 16).join(' ').replace(/\s+/g, ' ').trim(),
+        insurer: 'Star Health & Allied Insurance',
+        premium,
+        commissionPct: premium ? Number(((payable / premium) * 100).toFixed(2)) : 0,
+        commissionAmount: payable,
+        businessType: '',
+      })
+    }
+  }
+  return rows
+}
+
 const PARSERS = [
+  ['Aditya Birla Health', parseAdityaBirla],
+  ['Star Health', parseStarHealth],
   ['ICICI Lombard', parseIciciLombard],
   ['Tata AIA', parseTataAia],
   ['generic table', parseGeneric],
