@@ -1,0 +1,344 @@
+// src/utils/pdfProfiles.js
+// One parser per insurer statement layout. Input is always the same shape:
+// pages -> lines -> { y, cells: [{ x, text }] }, as produced by
+// pdfStatement.extractLines. Pure — no pdfjs, no Firebase, no React — so every
+// profile can be tested against a captured page without opening a PDF.
+//
+// Every insurer lays these out differently, and two of them do not use rows at
+// all: Aditya Birla wraps one record over three stacked text lines, and Star
+// Health rotates the whole table so policies become columns. Each profile below
+// was written against a real statement, not a guess.
+//
+// Returning [] means the PDF genuinely holds no policy-level detail (some
+// insurers publish only totals) — the caller must say so rather than reporting
+// a parse failure.
+import { fieldForHeader, toNumber } from './commissionImport'
+
+const cellsOf = line => line.cells.map(c => c.text)
+const joined = line => cellsOf(line).join(' ')
+
+// ── ICICI Lombard: "EAnnexure" ──────────────────────────────────────────
+// Header: Intermediary Name | IRDA Code | MO Name | Insured Name | System
+// Policy No | GWP | %TDS | Gross Amt | TDS | Net Amt | ... | Renewed Policy
+export function parseIciciLombard(pages) {
+  const rows = []
+  for (const lines of pages) {
+    const header = lines.find(l => /insured name/i.test(joined(l)) && /system policy no/i.test(joined(l)))
+    if (!header) continue
+    const cols = cellsOf(header)
+    const at = re => cols.findIndex(c => re.test(c))
+    const iName = at(/insured name/i), iPolicy = at(/policy no/i)
+    const iGwp = at(/^gwp$/i), iGross = at(/gross amt/i), iType = at(/renewed policy/i)
+
+    for (const line of lines) {
+      if (line === header) continue
+      const cells = cellsOf(line)
+      if (cells.length < cols.length - 2) continue
+      if (/grand total|professional tax/i.test(joined(line))) continue
+      const policyNumber = cells[iPolicy]
+      if (!policyNumber || !/\d/.test(policyNumber)) continue
+      const gross = toNumber(cells[iGross])
+      const premium = toNumber(cells[iGwp])
+      if (!gross) continue
+      rows.push({
+        policyNumber: policyNumber.replace(/\/+$/, ''),
+        clientName: cells[iName] || '',
+        insurer: 'ICICI Lombard',
+        premium,
+        commissionAmount: gross,
+        commissionPct: premium ? Number(((gross / premium) * 100).toFixed(2)) : 0,
+        businessType: /renew/i.test(cells[iType] || '') ? 'Renewal' : 'New',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Tata AIA: "Income Statement" → Cycle Wise Earning Breakup ───────────
+// Row: date | policyNo | insured | ... | modalPremium | rate% | debit | credit
+const TATA_ROW = /^(\d{2}\/\d{2}\/\d{4})\s+([A-Z]?\d{6,})\s+(.+?)\s+([\d,]+)\s+([\d.]+)\s*%\s+([\d,.]+)\s+([\d,.]+)$/
+
+export function parseTataAia(pages) {
+  const rows = []
+  for (const lines of pages) {
+    if (!lines.some(l => /cycle wise earning breakup/i.test(joined(l)))) continue
+    for (const line of lines) {
+      const m = joined(line).replace(/\s*\|\s*/g, ' ').replace(/\s+/g, ' ').trim().match(TATA_ROW)
+      if (!m) continue
+      const [, , policyNumber, rest, premium, rate, , credit] = m
+      rows.push({
+        policyNumber,
+        // Strip the status/term codes and PT/PPT numbers sitting between the
+        // name and the premium column.
+        clientName: rest
+          .replace(/\b(N|Y|FYC|RYC|Inforce|Lapsed|Surrendered)\b/gi, ' ')
+          .replace(/\b\d+\b/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+        insurer: 'Tata AIA',
+        premium: toNumber(premium),
+        commissionPct: toNumber(rate),
+        commissionAmount: toNumber(credit),
+        businessType: /RYC/i.test(rest) ? 'Renewal' : 'New',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Generic: any page with a single-line header naming the fields ───────
+const HEAD = {
+  policyNumber: /policy\s*(no|num|number)/i,
+  clientName: /(insured|customer|client|policy\s*holder)\s*name/i,
+  premium: /premium|gwp/i,
+  commissionAmount: /(commission|brokerage|gross)\s*(amt|amount)?/i,
+}
+
+export function parseGeneric(pages) {
+  const rows = []
+  for (const lines of pages) {
+    const header = lines.find(l => {
+      const text = joined(l)
+      return HEAD.policyNumber.test(text) && (HEAD.clientName.test(text) || HEAD.commissionAmount.test(text))
+    })
+    if (!header) continue
+    const cols = cellsOf(header)
+    const idx = {}
+    for (const [field, re] of Object.entries(HEAD)) idx[field] = cols.findIndex(c => re.test(c))
+
+    for (const line of lines) {
+      if (line === header) continue
+      const cells = cellsOf(line)
+      const policyNumber = cells[idx.policyNumber]
+      const amount = toNumber(cells[idx.commissionAmount])
+      if (!policyNumber || !/\d{4,}/.test(policyNumber) || !amount) continue
+      if (/total/i.test(joined(line))) continue
+      const premium = toNumber(cells[idx.premium])
+      rows.push({
+        policyNumber: String(policyNumber).replace(/\/+$/, ''),
+        clientName: cells[idx.clientName] || '',
+        insurer: '',
+        premium,
+        commissionAmount: amount,
+        commissionPct: premium ? Number(((amount / premium) * 100).toFixed(2)) : 0,
+        businessType: '',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Aditya Birla Health: "Annexure 1 : Policies Issued" ─────────────────
+// One record spans three stacked text lines at the same x, e.g. the policy id
+// arrives as "31-26-" / "0164666-" / "00". Anchor on the line carrying the
+// numbers, then sweep a y-window and bucket every fragment by x column.
+const ABH_BANDS = {
+  policyNumber: [28, 66], clientName: [66, 108], businessType: [108, 145],
+  productName: [145, 200], premium: [248, 312], commissionPct: [312, 356],
+  commissionAmount: [356, 420],
+}
+
+function bucket(items, bands) {
+  const out = {}
+  for (const [field, [lo, hi]] of Object.entries(bands)) {
+    out[field] = items
+      .filter(i => i.x >= lo && i.x < hi)
+      .sort((a, b) => (b.y - a.y) || (a.x - b.x))
+      .map(i => i.text)
+      .join(' ')
+      .replace(/\s*-\s*(?=\d)/g, '-')  // rejoin "31-26- 0164666- 00"
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+  return out
+}
+
+export function parseAdityaBirla(pages) {
+  const rows = []
+  for (const lines of pages) {
+    if (!lines.some(l => /annexure\s*1\s*:\s*policies issued/i.test(joined(l)))) continue
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+
+    for (const line of lines) {
+      const amount = line.cells.find(c => c.x >= 356 && c.x < 420 && /^-?[\d,.]+$/.test(c.text))
+      const finalAmt = line.cells.find(c => c.x >= 505 && c.x < 570 && /^-?[\d,.]+$/.test(c.text))
+      if (!amount || !finalAmt) continue
+      const near = flat.filter(i => Math.abs(i.y - line.y) <= 13)
+      if (near.some(i => /^total$/i.test(i.text))) continue
+      const r = bucket(near, ABH_BANDS)
+      // A policy id always carries digits; this rejects the GST summary block.
+      if (!/\d/.test(r.policyNumber) || !toNumber(r.commissionAmount)) continue
+      rows.push({
+        policyNumber: r.policyNumber.replace(/\s/g, ''),
+        clientName: r.clientName,
+        insurer: 'Aditya Birla Health Insurance',
+        planName: r.productName,
+        premium: toNumber(r.premium),
+        commissionPct: toNumber(r.commissionPct),
+        commissionAmount: toNumber(r.commissionAmount),
+        businessType: /retail new|new/i.test(r.businessType) ? 'New' : r.businessType || '',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Star Health: agent provisional statement ────────────────────────────
+// The table is rotated: each policy is an x-column, each field a y-row. Read
+// the label positions, then take the values sitting on those y bands.
+export function parseStarHealth(pages) {
+  const rows = []
+  for (const lines of pages) {
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+    if (!flat.some(i => /STAR HEALTH AND ALLIED/i.test(i.text))) continue
+
+    // Label column sits left of the data columns.
+    const labelY = re => {
+      const hit = flat.find(i => i.x > 300 && i.x < 375 && re.test(i.text))
+      return hit ? hit.y : null
+    }
+    const yPolicy = labelY(/^Policy No$/i)
+    const yName = labelY(/^Proposer's$/i)
+    const yPrem = labelY(/^Premium\/Ref$/i)
+    const yPay = labelY(/^Payable$/i)
+    if (yPolicy === null || yPrem === null) continue
+
+    // Data columns: the x positions of the policy-number values.
+    const anchors = flat
+      .filter(i => i.x > 375 && Math.abs(i.y - yPolicy) <= 14 && /^\d{6,}$/.test(i.text))
+      .sort((a, b) => a.x - b.x)
+
+    for (let n = 0; n < anchors.length; n++) {
+      const lo = anchors[n].x - 4
+      const hi = n + 1 < anchors.length ? anchors[n + 1].x - 4 : anchors[n].x + 34
+      const col = (yc, tol = 14) =>
+        flat.filter(i => i.x >= lo && i.x < hi && Math.abs(i.y - yc) <= tol)
+          // Rotated table: reading order runs along x, not y.
+          .sort((a, b) => (a.x - b.x) || (b.y - a.y)).map(i => i.text)
+
+      const policyNumber = col(yPolicy).join('')
+      const premium = toNumber(col(yPrem + 25, 14).find(t => /^[\d,.]+$/.test(t)))
+      const payable = yPay === null ? 0 : toNumber(col(yPay + 5, 14).find(t => /^[\d,.]+$/.test(t)))
+      if (!policyNumber || !payable) continue
+      rows.push({
+        policyNumber,
+        clientName: yName === null ? '' : col(yName + 8, 16).join(' ').replace(/\s+/g, ' ').trim(),
+        insurer: 'Star Health & Allied Insurance',
+        premium,
+        commissionPct: premium ? Number(((payable / premium) * 100).toFixed(2)) : 0,
+        commissionAmount: payable,
+        businessType: '',
+      })
+    }
+  }
+  return rows
+}
+
+// ── Banded table: broker / aggregator bills ─────────────────────────────
+// e.g. WealthMaker "Transaction Detailed Report". Columns are identified from
+// the header row, and each cell may wrap over several lines. Values do not sit
+// exactly under their header — "Investor" is at x=367 while its value starts at
+// x=352 — so every fragment is assigned to the *nearest* header, not a fixed
+// band. The carrier is read per row from Company/AMC.
+export function parseBandedTable(pages) {
+  const rows = []
+  for (const lines of pages) {
+    // A header line is one where several cells name known fields.
+    let header = null
+    for (const line of lines) {
+      const hits = line.cells.filter(c => fieldForHeader(c.text)).length
+      if (hits >= 4) { header = line; break }
+    }
+    if (!header) continue
+
+    // Header labels wrap too: "Company /" + "AMC", "Fresh/" + "Renewal".
+    // Merge any continuation line into the nearest header cell first.
+    const merged = header.cells.map(c => ({ x: c.x, text: c.text }))
+    for (const line of lines) {
+      if (line.y >= header.y || line.y < header.y - 14) continue
+      for (const cell of line.cells) {
+        const target = merged.reduce((best, h) =>
+          Math.abs(h.x - cell.x) < Math.abs(best.x - cell.x) ? h : best, merged[0])
+        target.text = `${target.text} ${cell.text}`
+      }
+    }
+
+    // Every header becomes an anchor, including ones we do not recognise —
+    // they act as sinks. Without them a value under "Policy Issue Dt." is
+    // pulled into "Policy No." simply because that is the nearest *known* field.
+    const anchors = merged.map(h => ({ x: h.x, field: fieldForHeader(h.text) }))
+    if (!anchors.some(a => a.field === 'commissionAmount')) continue
+
+    const nearest = x => anchors.reduce((best, a) =>
+      Math.abs(a.x - x) < Math.abs(best.x - x) ? a : best, anchors[0])
+
+    const amountX = anchors.find(a => a.field === 'commissionAmount').x
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+
+    for (const line of lines) {
+      if (line.y >= header.y) continue
+      const hasAmount = line.cells.some(c =>
+        Math.abs(c.x - amountX) < 30 && /^-?[\d,]+(\.\d+)?$/.test(c.text))
+      if (!hasAmount) continue
+
+      // Wrapped continuation lines sit just below the anchor.
+      const near = flat.filter(i => i.y <= line.y && i.y > line.y - 30)
+      if (near.some(i => /^(grand\s+)?total$/i.test(i.text))) continue
+
+      const cell = {}
+      for (const item of near) {
+        const field = nearest(item.x).field
+        if (!field) continue
+        ;(cell[field] ||= []).push(item)
+      }
+      const text = field => (cell[field] || [])
+        .sort((a, b) => (b.y - a.y) || (a.x - b.x))
+        .map(i => i.text).join(' ').replace(/\s+/g, ' ').trim()
+
+      const commissionAmount = toNumber(text('commissionAmount'))
+      const policyNumber = text('policyNumber')
+      if (!policyNumber || !commissionAmount) continue
+
+      rows.push({
+        policyNumber,
+        clientName: text('clientName'),
+        insurer: text('insurer'),
+        planName: text('planName'),
+        premium: toNumber(text('premium')),
+        commissionPct: toNumber(text('commissionPct')),
+        commissionAmount,
+        businessType: /renew/i.test(text('businessType')) ? 'Renewal'
+          : /fresh|new/i.test(text('businessType')) ? 'Fresh' : '',
+      })
+    }
+  }
+  return rows
+}
+
+// Order matters: the banded parser is the most general, so it runs first and
+// only yields when a header actually names a commission column.
+export const PARSERS = [
+  ['broker / aggregator bill', parseBandedTable],
+  ['Aditya Birla Health', parseAdityaBirla],
+  ['Star Health', parseStarHealth],
+  ['ICICI Lombard', parseIciciLombard],
+  ['Tata AIA', parseTataAia],
+  ['generic table', parseGeneric],
+]
+
+/**
+ * Runs every profile against already-extracted lines and returns the first
+ * non-empty result. rows === [] means no profile found policy-level detail.
+ */
+export function parseStatementLines(pages) {
+  for (const [format, parser] of PARSERS) {
+    const rows = parser(pages)
+    if (rows.length) {
+      return {
+        format,
+        rows: rows.map((row, i) => ({ ...row, sourceRow: i + 1, payoutDate: '', payoutMonth: '' })),
+      }
+    }
+  }
+  return { format: 'unrecognised', rows: [] }
+}
