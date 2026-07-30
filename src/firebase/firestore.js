@@ -534,6 +534,11 @@ export async function addCommissionTransaction(data = {}) {
     clientId: data.clientId || '',
     clientName: data.clientName || '',
     insurer: data.insurer || '',
+    // Fresh / Renewal and the plan (LOB) as the statement reported them. These
+    // are queryable fields, not remarks text, because the ledger dashboards
+    // split on them — a policy's own policyYear is a different question.
+    businessType: data.businessType || '',
+    planName: data.planName || '',
     premium: Number(data.premium || 0),
     expectedCommission: Number(data.expectedCommission || 0),
     receivedCommission: Number(data.receivedCommission || 0),
@@ -554,9 +559,16 @@ export async function addCommissionTransaction(data = {}) {
   if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
 
   const transactionRef = doc(db, COMMISSION_TRANSACTIONS, payload.postingKey)
+  // Rows posted before postingKey included the source row live under the older
+  // id, so both have to be checked or re-uploading an old statement double-posts.
+  const legacyKey = String(data.legacyPostingKey || '').trim()
+  const legacyRef = legacyKey && legacyKey !== payload.postingKey
+    ? doc(db, COMMISSION_TRANSACTIONS, legacyKey)
+    : null
   await runTransaction(db, async transaction => {
     const existing = await transaction.get(transactionRef)
-    if (existing.exists()) {
+    const legacy = legacyRef ? await transaction.get(legacyRef) : null
+    if (existing.exists() || legacy?.exists()) {
       const error = new Error('This commission row has already been posted.')
       error.code = 'commission/duplicate-post'
       throw error

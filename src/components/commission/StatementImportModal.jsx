@@ -5,7 +5,7 @@ import { useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
-import { matchStatement, normaliseStatement, postingKey, summarise } from '../../utils/commissionImport'
+import { legacyPostingKey, matchStatement, normaliseStatement, postingKey, summarise } from '../../utils/commissionImport'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
 import { fmtCurrency } from '../../utils/dateUtils'
 
@@ -125,6 +125,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           clientId: row.policy.clientId || '',
           clientName: row.policy.clientName || row.clientName,
           insurer: row.insurer || insurer || row.policy.insurer || '',
+          businessType: row.businessType || '',
+          planName: row.planName || '',
           premium: row.premium || Number(row.policy.premium) || 0,
           receivedCommission: row.commissionAmount,
           netReceived: row.commissionAmount,
@@ -132,13 +134,10 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           payoutDate: row.payoutDate || '',
           status: 'posted',
           postingKey: `${postingKey(row)}_${payoutMonth}`,
+          legacyPostingKey: `${legacyPostingKey(row)}_${payoutMonth}`,
           createdBy: user?.uid || '',
           createdByEmail: user?.email || '',
-          remarks: [
-            `Imported from ${fileName} row ${row.sourceRow}`,
-            row.businessType && `Business: ${row.businessType}`,
-            row.planName && `Plan: ${row.planName}`,
-          ].filter(Boolean).join(' · '),
+          remarks: `Imported from ${fileName} row ${row.sourceRow}`,
         })
         if (row.commissionPct > 0 && row.commissionPct <= 100) {
           await updatePolicy(row.policy.id, { fyCommission: row.commissionPct })

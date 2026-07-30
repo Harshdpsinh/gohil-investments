@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement,
-  postingKey, summarise, toPayoutMonth, normaliseBusinessType,
+  postingKey, legacyPostingKey, summarise, toPayoutMonth, normaliseBusinessType,
 } from './commissionImport'
 
 // Real header row from an HDFC ERGO payout export. This insurer omits the
@@ -328,6 +328,26 @@ describe('postingKey', () => {
 
   it('copes with a missing payout date', () => {
     expect(postingKey({ policyNumber: 'P1', commissionAmount: 10 })).toContain('nodate')
+  })
+
+  // Aditya Birla posts a Booster line and a Retail New Business line for the
+  // same policy in the same month. Identical amounts must not collide.
+  it('separates two rows that share policy, month and amount', () => {
+    const row = { policyNumber: 'P1', payoutMonth: '2026-07', commissionAmount: 500 }
+    expect(postingKey({ ...row, sourceRow: 4 })).not.toBe(postingKey({ ...row, sourceRow: 9 }))
+  })
+
+  it('is unchanged for the same row of the same file', () => {
+    const row = { policyNumber: 'P1', payoutMonth: '2026-07', commissionAmount: 500, sourceRow: 4 }
+    expect(postingKey(row)).toBe(postingKey({ ...row }))
+  })
+})
+
+describe('legacyPostingKey', () => {
+  it('keeps the pre-sourceRow shape', () => {
+    const row = { policyNumber: 'P1', payoutMonth: '2026-07', commissionAmount: 500, sourceRow: 4 }
+    expect(legacyPostingKey(row)).toBe('P1_2026-07_500')
+    expect(postingKey(row)).toBe('P1_2026-07_500_r4')
   })
 })
 
