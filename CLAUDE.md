@@ -23,7 +23,7 @@ npm run android:sync     # build + npx cap sync android
 npm run android:apk      # build + assembleDebug
 ```
 
-`npm run lint` is capped at `--max-warnings 23`, the count as of the last cleanup. This is
+`npm run lint` is capped at `--max-warnings 19`, the count as of the last cleanup. This is
 a ratchet: it blocks new warnings without blocking the build on existing ones. When you
 clear warnings, lower the number — never raise it.
 
@@ -61,9 +61,18 @@ Pure logic worth testing has been pulled out of the Firebase and React layers in
 - `src/utils/validation.js` — payload normalisation and assertions
 - `src/utils/policyImport.js` — fuzzy matching and proposal/lead → policy conversion
 - `src/utils/dateUtils.js` — date parsing, frequency, due dates
+- `src/utils/commissionImport.js` — statement column vocabulary, matching, posting keys
+- `src/utils/pdfProfiles.js` — the six insurer PDF layout parsers
 
-Keep those three free of any `firebase` or `react` import. That property is what makes
-them testable, and it is easy to destroy by accident.
+Keep those free of any `firebase` or `react` import — and keep `pdfProfiles.js` free of
+`pdfjs-dist` too; `pdfStatement.js` exists solely to own that dependency. That property
+is what makes them testable, and it is easy to destroy by accident.
+
+`pdfProfiles.test.js` drives the parsers with hand-built page captures, because the real
+statements hold client data and cannot be committed. Each fixture reproduces the geometry
+its parser depends on (Aditya Birla's absolute x-bands, Star Health's rotated y-offsets,
+the aggregator's nearest-header assignment). If you change a coordinate, that suite is the
+only thing standing between a carrier's template change and silently wrong money.
 
 ### 3. Isolated git branches
 
@@ -79,9 +88,10 @@ git checkout -b feat/short-description
   collection read/write goes through it. Validation now lives in `src/utils/validation.js`
   and is re-exported from here for existing importers — put new validation in the utils
   module, not in pages and not back in this file.
-- `src/pages/PoliciesPage.jsx` (~2,420 lines) is still the largest file and the
-  highest-risk place to edit. Prefer extracting into `src/utils/policyImport.js` (pure
-  logic) or a new component over growing it further.
+- `src/pages/PoliciesPage.jsx` is down to ~830 lines. The form and the bulk-import flow
+  now live in `src/components/policies/` (`PolicyForm.jsx`, `ImportModals.jsx`,
+  `PolicyPdfUpload.jsx`), moved verbatim. Prefer extracting into
+  `src/utils/policyImport.js` (pure logic) or a new component over growing the page again.
 - Policies cascade: editing a client or policy triggers `cascadeUpdateClient` /
   `cascadeUpdatePolicyLinks` to keep denormalised copies (`clientName`, `clientMobile`)
   in sync. Deletes are soft (`deleted`/`deletedAt`) and admin-gated.
