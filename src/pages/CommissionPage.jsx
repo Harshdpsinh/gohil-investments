@@ -120,6 +120,8 @@ export default function CommissionPage() {
   const [hasMoreTransactions, setHasMoreTransactions] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [actualView, setActualView] = useState('insurer')
+  const [ledgerType, setLedgerType] = useState('All')   // Fresh / Renewal, as the statement said
+  const [ledgerPlan, setLedgerPlan] = useState('All')   // plan / LOB, as the statement said
   const [ledgerError, setLedgerError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
 
@@ -200,15 +202,39 @@ export default function CommissionPage() {
   }, [filtered])
 
   const maxBar = Math.max(...stats.byMonth, 1)
+
+  // Ledger-only filters. These read the statement's own Fresh/Renewal and plan
+  // columns — not the policy's policyYear, which answers a different question.
+  const planOptions = useMemo(
+    () => [...new Set(transactions.map(t => t.planName).filter(Boolean))].sort(),
+    [transactions]
+  )
+  const ledgerRows = useMemo(() => transactions.filter(item =>
+    (ledgerType === 'All' || (item.businessType || '') === ledgerType) &&
+    (ledgerPlan === 'All' || (item.planName || '') === ledgerPlan)
+  ), [transactions, ledgerType, ledgerPlan])
+
   const actualStats = useMemo(() => {
-    const total = transactions.reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0)
-    const byInsurer = transactions.reduce((map, item) => ({ ...map, [item.insurer || 'Other']: (map[item.insurer || 'Other'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
-    const byClient = transactions.reduce((map, item) => ({ ...map, [item.clientName || 'Unknown']: (map[item.clientName || 'Unknown'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
-    const byCategory = transactions.reduce((map, item) => { const category = policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'; return { ...map, [category]: (map[category] || 0) + Number(item.netReceived || item.receivedCommission || 0) } }, {})
-    const byMonth = transactions.reduce((map, item) => ({ ...map, [item.payoutMonth || 'Unknown']: (map[item.payoutMonth || 'Unknown'] || 0) + Number(item.netReceived || item.receivedCommission || 0) }), {})
-    return { total, byInsurer, byClient, byCategory, byMonth }
-  }, [transactions, policies])
-  const actualBreakdown = actualView === 'client' ? actualStats.byClient : actualView === 'category' ? actualStats.byCategory : actualView === 'month' ? actualStats.byMonth : actualStats.byInsurer
+    const amount = item => Number(item.netReceived || item.receivedCommission || 0)
+    const tally = pick => ledgerRows.reduce((map, item) => {
+      const key = pick(item)
+      return { ...map, [key]: (map[key] || 0) + amount(item) }
+    }, {})
+    return {
+      total: ledgerRows.reduce((sum, item) => sum + amount(item), 0),
+      byInsurer: tally(item => item.insurer || 'Other'),
+      byClient: tally(item => item.clientName || 'Unknown'),
+      byCategory: tally(item => policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'),
+      byMonth: tally(item => item.payoutMonth || 'Unknown'),
+      // Blank on statements that carry no such column (Star Health's does not).
+      byBusinessType: tally(item => item.businessType || 'Unspecified'),
+      byPlan: tally(item => item.planName || 'Unspecified'),
+    }
+  }, [ledgerRows, policies])
+  const actualBreakdown = {
+    client: actualStats.byClient, category: actualStats.byCategory, month: actualStats.byMonth,
+    business: actualStats.byBusinessType, plan: actualStats.byPlan,
+  }[actualView] || actualStats.byInsurer
 
   const TYPES = ['Health','Life','Motor','Home','Travel','Other']
   const TYPE_COLORS = { Health:'bg-blue-500', Life:'bg-purple-500', Motor:'bg-orange-500', Home:'bg-green-500', Travel:'bg-teal-500', Other:'bg-gray-400' }
@@ -248,7 +274,7 @@ export default function CommissionPage() {
 
       <div className="commission-command-grid">
         {[
-          { label:'Actual posted', val: fmtCurrency(actualStats.total), note: `${transactions.length} ledger entries`, tone:'text-emerald-600' },
+          { label:'Actual posted', val: fmtCurrency(actualStats.total), note: `${ledgerRows.length} ledger entries${ledgerRows.length === transactions.length ? '' : ' (filtered)'}`, tone:'text-emerald-600' },
           { label:'Estimated total', val: fmtCurrency(stats.total), note: 'From policy rates' },
           { label:'FY estimate', val: fmtCurrency(stats.fyTotal), note: 'First-year business' },
           { label:'RY estimate', val: fmtCurrency(stats.ryTotal), note: 'Renewal business' },
@@ -259,8 +285,21 @@ export default function CommissionPage() {
       </div>
 
       <div className="fintech-panel p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only</p></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
-        {transactions.length ? <div className="commission-rank-list mt-4">{Object.entries(actualBreakdown).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name,amount], index) => <div key={name} className="commission-rank-row"><span className="min-w-0 truncate"><span className="mr-2 text-xs font-bold text-gray-400">{String(index + 1).padStart(2,'0')}</span>{name}</span><strong className="tabular-nums">{fmtCurrency(amount)}</strong></div>)}</div> : <div className="commission-empty mt-4"><span className="commission-empty-mark">₹</span><p className="font-bold text-gray-700 dark:text-gray-200">No posted commission yet</p><p className="mt-1 text-sm">Confirm reconciliation rows or add a manual entry.</p></div>}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only · {ledgerRows.length} of {transactions.length} entries</p></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise'],['business','Fresh vs Renewal'],['plan','Plan-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select value={ledgerType} onChange={e=>setLedgerType(e.target.value)} className="form-select w-auto text-xs">
+            <option value="All">All business</option>
+            <option value="Fresh">Fresh only</option>
+            <option value="Renewal">Renewal only</option>
+            <option value="">Unspecified only</option>
+          </select>
+          <select value={ledgerPlan} onChange={e=>setLedgerPlan(e.target.value)} className="form-select w-auto text-xs">
+            <option value="All">All plans / LOB</option>
+            {planOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+          {(ledgerType !== 'All' || ledgerPlan !== 'All') && <button className="text-xs font-bold text-blue-600 dark:text-blue-400" onClick={()=>{setLedgerType('All');setLedgerPlan('All')}}>Clear</button>}
+        </div>
+        {ledgerRows.length ? <div className="commission-rank-list mt-4">{Object.entries(actualBreakdown).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name,amount], index) => <div key={name} className="commission-rank-row"><span className="min-w-0 truncate"><span className="mr-2 text-xs font-bold text-gray-400">{String(index + 1).padStart(2,'0')}</span>{name}</span><strong className="tabular-nums">{fmtCurrency(amount)}</strong></div>)}</div> : <div className="commission-empty mt-4"><span className="commission-empty-mark">₹</span><p className="font-bold text-gray-700 dark:text-gray-200">{transactions.length ? 'No posted commission matches these filters' : 'No posted commission yet'}</p><p className="mt-1 text-sm">{transactions.length ? 'Older imports have no Fresh/Renewal column — try “Unspecified only”.' : 'Confirm reconciliation rows or add a manual entry.'}</p></div>}
       </div>
       {hasMoreTransactions && <div className="text-center"><button className="btn-secondary" disabled={loadingMore} onClick={loadMoreTransactions}>{loadingMore ? 'Loading...' : 'Load 100 more commission records'}</button></div>}
 

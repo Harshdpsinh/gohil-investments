@@ -534,6 +534,11 @@ export async function addCommissionTransaction(data = {}) {
     clientId: data.clientId || '',
     clientName: data.clientName || '',
     insurer: data.insurer || '',
+    // Fresh / Renewal and the plan (LOB) as the statement reported them. These
+    // are queryable fields, not remarks text, because the ledger dashboards
+    // split on them — a policy's own policyYear is a different question.
+    businessType: data.businessType || '',
+    planName: data.planName || '',
     premium: Number(data.premium || 0),
     expectedCommission: Number(data.expectedCommission || 0),
     receivedCommission: Number(data.receivedCommission || 0),
@@ -554,9 +559,16 @@ export async function addCommissionTransaction(data = {}) {
   if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
 
   const transactionRef = doc(db, COMMISSION_TRANSACTIONS, payload.postingKey)
+  // The posting-key shape has changed twice, and rows already in the ledger keep
+  // whichever id was current when they were posted. Every historical shape has to
+  // be checked or re-uploading an old statement posts the whole thing again.
+  const legacyRefs = [...new Set((data.legacyPostingKeys || []).map(k => String(k || '').trim()))]
+    .filter(k => k && k !== payload.postingKey)
+    .map(k => doc(db, COMMISSION_TRANSACTIONS, k))
   await runTransaction(db, async transaction => {
     const existing = await transaction.get(transactionRef)
-    if (existing.exists()) {
+    const legacy = await Promise.all(legacyRefs.map(ref => transaction.get(ref)))
+    if (existing.exists() || legacy.some(snapshot => snapshot.exists())) {
       const error = new Error('This commission row has already been posted.')
       error.code = 'commission/duplicate-post'
       throw error

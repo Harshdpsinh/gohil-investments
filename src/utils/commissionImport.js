@@ -160,14 +160,30 @@ export function matchStatement(rows, policies, defaultInsurer = '') {
   )
 }
 
+const safeId = s => String(s).replace(/[^a-zA-Z0-9_-]/g, '_')
+const keyMonth = row => row.payoutMonth || (row.payoutDate || '').slice(0, 7) || 'nodate'
+
 /**
  * Stable id for a posted row so re-uploading the same statement cannot
  * double-post. Firestore doc ids may not contain '/'.
+ *
+ * sourceRow is part of the key because policy + month + amount is not unique:
+ * Aditya Birla emits a Booster line and a Retail New Business line for the same
+ * policy in the same month, and if those two ever carry the same amount the
+ * second would be rejected as a duplicate. sourceRow is the row's position in
+ * the file, so it is identical on every re-upload of that file.
  */
 export function postingKey(row) {
-  const month = row.payoutMonth || (row.payoutDate || '').slice(0, 7) || 'nodate'
-  return `${row.policyNumber}_${month}_${Math.round(row.commissionAmount)}`
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
+  return safeId(`${row.policyNumber}_${keyMonth(row)}_${Math.round(row.commissionAmount)}_r${row.sourceRow ?? 0}`)
+}
+
+/**
+ * The pre-sourceRow key shape. Passed alongside postingKey so a statement
+ * posted before that change is still recognised as already posted.
+ * ponytail: delete once no statement from before Aug 2026 will be re-uploaded.
+ */
+export function legacyPostingKey(row) {
+  return safeId(`${row.policyNumber}_${keyMonth(row)}_${Math.round(row.commissionAmount)}`)
 }
 
 export function summarise(matched = []) {
