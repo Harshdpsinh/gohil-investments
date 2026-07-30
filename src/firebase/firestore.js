@@ -559,16 +559,16 @@ export async function addCommissionTransaction(data = {}) {
   if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
 
   const transactionRef = doc(db, COMMISSION_TRANSACTIONS, payload.postingKey)
-  // Rows posted before postingKey included the source row live under the older
-  // id, so both have to be checked or re-uploading an old statement double-posts.
-  const legacyKey = String(data.legacyPostingKey || '').trim()
-  const legacyRef = legacyKey && legacyKey !== payload.postingKey
-    ? doc(db, COMMISSION_TRANSACTIONS, legacyKey)
-    : null
+  // The posting-key shape has changed twice, and rows already in the ledger keep
+  // whichever id was current when they were posted. Every historical shape has to
+  // be checked or re-uploading an old statement posts the whole thing again.
+  const legacyRefs = [...new Set((data.legacyPostingKeys || []).map(k => String(k || '').trim()))]
+    .filter(k => k && k !== payload.postingKey)
+    .map(k => doc(db, COMMISSION_TRANSACTIONS, k))
   await runTransaction(db, async transaction => {
     const existing = await transaction.get(transactionRef)
-    const legacy = legacyRef ? await transaction.get(legacyRef) : null
-    if (existing.exists() || legacy?.exists()) {
+    const legacy = await Promise.all(legacyRefs.map(ref => transaction.get(ref)))
+    if (existing.exists() || legacy.some(snapshot => snapshot.exists())) {
       const error = new Error('This commission row has already been posted.')
       error.code = 'commission/duplicate-post'
       throw error

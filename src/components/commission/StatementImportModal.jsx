@@ -134,7 +134,13 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           payoutDate: row.payoutDate || '',
           status: 'posted',
           postingKey: `${postingKey(row)}_${payoutMonth}`,
-          legacyPostingKey: `${legacyPostingKey(row)}_${payoutMonth}`,
+          // Both earlier id shapes: before the source row was added, and before
+          // the statement month was appended at all. Rows already in the ledger
+          // carry one of these, and must still count as already posted.
+          legacyPostingKeys: [
+            `${legacyPostingKey(row)}_${payoutMonth}`,
+            legacyPostingKey(row),
+          ],
           createdBy: user?.uid || '',
           createdByEmail: user?.email || '',
           remarks: `Imported from ${fileName} row ${row.sourceRow}`,
