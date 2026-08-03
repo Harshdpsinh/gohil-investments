@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   levenshtein, fuzzyMatch, isLifePolicyType, policyDocumentYear,
-  buildImportClientReview, proposalToPolicyInitial, leadToPolicyInitial,
+  buildImportClientReview, proposalToPolicyInitial,
   TYPES, FREQS, STATUS,
 } from './policyImport'
 import { POLICY_TYPES, POLICY_FREQUENCIES, POLICY_STATUSES } from './validation'
@@ -190,44 +190,5 @@ describe('proposalToPolicyInitial', () => {
     expect(proposalToPolicyInitial({}).notes).toBe('Converted from proposal')
     expect(proposalToPolicyInitial({ notes: 'urgent' }).notes)
       .toBe('Converted from proposal: urgent')
-  })
-})
-
-describe('leadToPolicyInitial', () => {
-  it('returns null without a lead', () => {
-    expect(leadToPolicyInitial(null)).toBeNull()
-  })
-
-  it.each([
-    ['term plan', 'Life'],
-    ['life cover', 'Life'],
-    ['car insurance', 'Motor'],
-    ['vehicle', 'Motor'],
-    ['home cover', 'Home'],
-    ['travel abroad', 'Travel'],
-    ['mediclaim', 'Health'],
-    ['', 'Health'],
-  ])('infers %s as a %s policy', (need, expected) => {
-    expect(leadToPolicyInitial({ insuranceNeed: need }).policyType).toBe(expected)
-  })
-
-  it('reads the type from leadType when insuranceNeed is empty', () => {
-    expect(leadToPolicyInitial({ leadType: 'Motor renewal' }).policyType).toBe('Motor')
-  })
-
-  it('carries the lead value across as the premium', () => {
-    const result = leadToPolicyInitial({ id: 'l1', leadValue: '12000' })
-    expect(result.premium).toBe('12000')
-    expect(result.leadId).toBe('l1')
-    expect(result.source).toBe('lead')
-  })
-
-  it('builds a note naming the source and remarks', () => {
-    expect(leadToPolicyInitial({ source: 'Referral', remarks: 'call after 6pm' }).notes)
-      .toBe('Converted from lead (Referral): call after 6pm')
-  })
-
-  it('builds a bare note when there is no source or remarks', () => {
-    expect(leadToPolicyInitial({}).notes).toBe('Converted from lead')
   })
 })

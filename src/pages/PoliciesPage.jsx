@@ -7,7 +7,7 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, bulkDeletePolicies,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
-  subscribeProposals, updateProposal, updateLead,
+  subscribeProposals, updateProposal,
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset } from '../firebase/storage'
 import Modal        from '../components/ui/Modal'
@@ -18,7 +18,7 @@ import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewa
 import { exportToCSV, exportToExcel, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
 import {
   TYPES, POLICY_PAGE_SIZE, policyDocumentYear,
-  proposalToPolicyInitial, leadToPolicyInitial,
+  proposalToPolicyInitial,
 } from '../utils/policyImport'
 import { openWhatsAppApiLink, openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -358,17 +358,6 @@ export default function PoliciesPage() {
     setModal('add')
   }, [location.state, clients])
 
-  useEffect(() => {
-    const lead = location.state?.leadToPolicy
-    const consumeKey = lead?.id ? `lead:${lead.id}` : ''
-    if (!consumeKey || consumedProposalRef.current === consumeKey) return
-    if (lead.clientId && !clients.some(client => client.id === lead.clientId)) return
-    consumedProposalRef.current = consumeKey
-    setProposalPrefill(leadToPolicyInitial(lead, clients))
-    setDupWarning('')
-    resetDeleteState()
-    setModal('add')
-  }, [location.state, clients])
   const checkDup = useCallback(async (policyNumber) => {
     setDupWarning('')
   }, [])
@@ -481,13 +470,6 @@ export default function PoliciesPage() {
       if (form.proposalId) {
         await updateProposal(form.proposalId, {
           status: 'Converted',
-          convertedPolicyNumber: form.policyNumber || '',
-          convertedAt: new Date().toISOString(),
-        })
-      }
-      if (form.leadId) {
-        await updateLead(form.leadId, {
-          status: 'converted',
           convertedPolicyNumber: form.policyNumber || '',
           convertedAt: new Date().toISOString(),
         })
