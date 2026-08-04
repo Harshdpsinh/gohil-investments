@@ -140,6 +140,52 @@ export function getTypeDefaults(policyType) {
   }
 }
 
+// ── Known insurers ────────────────────────────────────────────
+// Shared by the policy form's combobox and the PDF extractor, which spots the
+// carrier by finding one of these names anywhere in the document.
+export const KNOWN_INSURERS = [
+  // General / Health
+  'Star Health and Allied Insurance',
+  'New India Assurance',
+  'National Insurance',
+  'United India Insurance',
+  'Oriental Insurance',
+  'HDFC ERGO General Insurance',
+  'ICICI Lombard General Insurance',
+  'Bajaj Allianz General Insurance',
+  'Reliance General Insurance',
+  'Royal Sundaram General Insurance',
+  'Niva Bupa Health Insurance',
+  'Aditya Birla Health Insurance',
+  'Care Health Insurance',
+  'ManipalCigna Health Insurance',
+  'SBI General Insurance',
+  'Tata AIG General Insurance',
+  'Cholamandalam MS General Insurance',
+  'Future Generali India Insurance',
+  'Iffco Tokio General Insurance',
+  'Kotak Mahindra General Insurance',
+  'Liberty General Insurance',
+  'Magma HDI General Insurance',
+  'Raheja QBE General Insurance',
+  'Universal Sompo General Insurance',
+  // Life
+  'LIC of India',
+  'HDFC Life Insurance',
+  'ICICI Prudential Life Insurance',
+  'SBI Life Insurance',
+  'Max Life Insurance',
+  'Bajaj Allianz Life Insurance',
+  'Kotak Mahindra Life Insurance',
+  'Aditya Birla Sun Life Insurance',
+  'Tata AIA Life Insurance',
+  'PNB MetLife India Insurance',
+  'Pramerica Life Insurance',
+  'IndiaFirst Life Insurance',
+  'Edelweiss Tokio Life Insurance',
+  'Canara HSBC Life Insurance',
+]
+
 // ── Insurer detection ─────────────────────────────────────────
 export function isStarHealth(insurer) {
   return (insurer||'').toLowerCase().includes('star')

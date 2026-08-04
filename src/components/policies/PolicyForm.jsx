@@ -10,6 +10,7 @@ import PolicyPdfUpload from './PolicyPdfUpload'
 import {
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
   MOTOR_VEHICLE_TYPES, MOTOR_FUEL_TYPES, LIFE_SUBTYPES, getTypeDefaults,
+  KNOWN_INSURERS,
 } from '../../utils/policySchemas'
 import {
   addPolicyCoverageInterval, computeNextPolicyDue, fmtCurrency, fmtDate,
@@ -242,49 +243,6 @@ function MotorSection({ form, set }) {
 
 // ── Policy Form (main) ────────────────────────────────────────
 
-// ── Known insurers list (built-in — no external import needed) ──
-const KNOWN_INSURERS = [
-  // General / Health
-  'Star Health and Allied Insurance',
-  'New India Assurance',
-  'National Insurance',
-  'United India Insurance',
-  'Oriental Insurance',
-  'HDFC ERGO General Insurance',
-  'ICICI Lombard General Insurance',
-  'Bajaj Allianz General Insurance',
-  'Reliance General Insurance',
-  'Royal Sundaram General Insurance',
-  'Niva Bupa Health Insurance',
-  'Aditya Birla Health Insurance',
-  'Care Health Insurance',
-  'ManipalCigna Health Insurance',
-  'SBI General Insurance',
-  'Tata AIG General Insurance',
-  'Cholamandalam MS General Insurance',
-  'Future Generali India Insurance',
-  'Iffco Tokio General Insurance',
-  'Kotak Mahindra General Insurance',
-  'Liberty General Insurance',
-  'Magma HDI General Insurance',
-  'Raheja QBE General Insurance',
-  'Universal Sompo General Insurance',
-  // Life
-  'LIC of India',
-  'HDFC Life Insurance',
-  'ICICI Prudential Life Insurance',
-  'SBI Life Insurance',
-  'Max Life Insurance',
-  'Bajaj Allianz Life Insurance',
-  'Kotak Mahindra Life Insurance',
-  'Aditya Birla Sun Life Insurance',
-  'Tata AIA Life Insurance',
-  'PNB MetLife India Insurance',
-  'Pramerica Life Insurance',
-  'IndiaFirst Life Insurance',
-  'Edelweiss Tokio Life Insurance',
-  'Canara HSBC Life Insurance',
-]
 
 // ── Smart insurer combobox (datalist — supports both select & free-type) ──
 function InsurerSelect({ value, onChange }) {
