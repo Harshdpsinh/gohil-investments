@@ -51,7 +51,9 @@ jobs:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install firebase-admin nodemailer
+        # npm ci, not a hand-picked list: the script now shares the app's date
+        # helpers, so it needs the same date-fns the app was tested against.
+        run: npm ci
 
       # ── Core script: query Firestore → build email → send ────
       - name: Send renewal alert email
@@ -62,4 +64,4 @@ jobs:
           GMAIL_USER:            ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD:    ${{ secrets.GMAIL_APP_PASSWORD }}
           ALERT_EMAIL_TO:        ${{ secrets.ALERT_EMAIL_TO }}
-        run: node .github/scripts/send-renewal-alerts.cjs
+        run: node .github/scripts/send-renewal-alerts.js
