@@ -143,30 +143,3 @@ export function proposalToPolicyInitial(proposal, clients = []) {
   return base
 }
 
-export function leadToPolicyInitial(lead, clients = []) {
-  if (!lead) return null
-  const client = clients.find(item => item.id === lead.clientId)
-  const need = `${lead.insuranceNeed || ''} ${lead.leadType || ''}`.toLowerCase()
-  const policyType = need.includes('life') || need.includes('term') ? 'Life'
-    : need.includes('motor') || need.includes('vehicle') || need.includes('car') ? 'Motor'
-      : need.includes('home') ? 'Home'
-        : need.includes('travel') ? 'Travel'
-          : 'Health'
-  const mobile = lead.mobile || client?.mobile || ''
-  const email = lead.email || client?.email || ''
-  return {
-    ...BASE_EMPTY,
-    ...getTypeDefaults(policyType),
-    policyType,
-    clientId: lead.clientId || '',
-    clientName: lead.clientName || lead.name || client?.name || '',
-    clientMobile: mobile,
-    clientEmail: email,
-    _clientMobile: mobile,
-    _clientEmail: email,
-    premium: lead.leadValue || '',
-    leadId: lead.id || '',
-    source: 'lead',
-    notes: `Converted from lead${lead.source ? ` (${lead.source})` : ''}${lead.remarks ? `: ${lead.remarks}` : ''}`,
-  }
-}

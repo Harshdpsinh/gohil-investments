@@ -1,5 +1,4 @@
 // UI MODERNIZATION - logic unchanged
-import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth }           from './hooks/useAuth'
 import { ThemeProvider }     from './context/ThemeContext'
@@ -15,14 +14,12 @@ import CommissionPage        from './pages/CommissionPage'
 import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
 import BackupPage            from './pages/BackupPage'
-import LeadsPage             from './pages/LeadsPage'
-import EndorsementsPage      from './pages/EndorsementsPage'
-import MastersPage           from './pages/MastersPage'
 import ReportsPage           from './pages/ReportsPage'
 
-// Lazy: keeps three.js (~170KB gzip) out of the main chunk so every other
-// page loads at the same speed it did before.
-const PipelineDashboard = lazy(() => import('./pages/PipelineDashboard'))
+// Pipeline 3D is disabled. The page and src/three/ are still in the repo — to
+// switch it back on, restore the lazy import, the /pipeline route below and the
+// Sidebar entry. Nothing else depends on it.
+// const PipelineDashboard = lazy(() => import('./pages/PipelineDashboard'))
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -56,19 +53,7 @@ export default function App() {
                 <Route path="/proposals"           element={<ProposalsPage />} />
                 <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/claims"              element={<ClaimsPage />} />
-                <Route path="/leads"               element={<LeadsPage />} />
-                <Route path="/endorsements"        element={<EndorsementsPage />} />
-                <Route path="/masters"             element={<MastersPage />} />
                 <Route path="/reports"             element={<ReportsPage />} />
-                <Route path="/pipeline"            element={
-                  <Suspense fallback={
-                    <div className="flex h-[60vh] items-center justify-center text-sm font-semibold text-slate-400">
-                      Loading 3D pipeline…
-                    </div>
-                  }>
-                    <PipelineDashboard />
-                  </Suspense>
-                } />
                 <Route path="/admin-users"         element={<AdminUsersPage />} />
                 <Route path="/backup"              element={<BackupPage />} />
                 <Route path="*"                    element={<Navigate to="/dashboard" replace />} />

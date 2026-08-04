@@ -5,15 +5,13 @@ import { usePolicies } from '../hooks/usePolicies'
 import DateInput from '../components/ui/DateInput'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, parseAnyDate } from '../utils/dateUtils'
-import { getAllEndorsements, getAllLeads, subscribeClaims } from '../firebase/firestore'
+import { subscribeClaims } from '../firebase/firestore'
 
 const reportTypes = [
   'Business',
   'Renewals',
   'Claims',
-  'Leads',
   'Clients',
-  'Pending Work',
   'Cross Sell',
 ]
 
@@ -31,8 +29,6 @@ export default function ReportsPage() {
   const { clients } = useClients()
   const { policies } = usePolicies()
   const [claims, setClaims] = useState([])
-  const [leads, setLeads] = useState([])
-  const [endorsements, setEndorsements] = useState([])
   const [report, setReport] = useState('Business')
   const [query, setQuery] = useState('')
   const [from, setFrom] = useState('')
@@ -40,11 +36,7 @@ export default function ReportsPage() {
   const [status, setStatus] = useState('All')
 
   useEffect(() => {
-    const unsubClaims = subscribeClaims(setClaims, err => toast.error(err.message || 'Claims load failed.'))
-    Promise.all([getAllLeads(), getAllEndorsements()])
-      .then(([l, e]) => { setLeads(l); setEndorsements(e) })
-      .catch(err => toast.error(err.message || 'Report data load failed.'))
-    return unsubClaims
+    return subscribeClaims(setClaims, err => toast.error(err.message || 'Claims load failed.'))
   }, [])
 
   const rows = useMemo(() => {
@@ -86,17 +78,6 @@ export default function ReportsPage() {
         amount: Number(c.claimAmount || c.amount || 0),
         detail: c.claimNumber || '',
       })),
-      Leads: leads.map(l => ({
-        type: 'Lead',
-        date: l.followUpDate || l.createdAt,
-        client: l.name,
-        policyNumber: '',
-        insurer: l.source || '',
-        product: l.insuranceNeed || '',
-        status: l.status || '',
-        amount: Number(l.leadValue || 0),
-        detail: l.assignedUserName || '',
-      })),
       Clients: clients.map(c => ({
         type: 'Client',
         date: c.createdAt || c.dob,
@@ -108,19 +89,6 @@ export default function ReportsPage() {
         amount: activePolicies.filter(p => p.clientId === c.id).length,
         detail: c.familyName || '',
       })),
-      'Pending Work': [
-        ...endorsements.filter(e => !['completed', 'approved', 'rejected'].includes(e.status)).map(e => ({
-          type: 'Endorsement',
-          date: e.requestedDate,
-          client: e.clientName,
-          policyNumber: e.policyNumber,
-          insurer: '',
-          product: e.type,
-          status: e.status,
-          amount: 0,
-          detail: e.notes || '',
-        })),
-      ],
       'Cross Sell': clients.flatMap(c => {
         const owned = activePolicies.filter(p => p.clientId === c.id).map(p => String(p.policyType || '').toLowerCase())
         const gaps = []
@@ -145,7 +113,7 @@ export default function ReportsPage() {
       const text = Object.values(row).join(' ').toLowerCase()
       return (!q || text.includes(q)) && (status === 'All' || row.status === status) && isBetween(row.date, from, to)
     })
-  }, [clients, policies, claims, leads, endorsements, report, query, from, to, status])
+  }, [clients, policies, claims, report, query, from, to, status])
 
   const statuses = useMemo(() => ['All', ...Array.from(new Set(rows.map(r => r.status).filter(Boolean)))], [rows])
   const totalAmount = rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0)
@@ -167,7 +135,7 @@ export default function ReportsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dynamic Reports</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Business, renewal, claim, lead, client, pending work, and cross-sell views.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Business, renewal, claim, client, and cross-sell views.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-secondary text-xs" onClick={() => exportToCSV(rows, columns, `${report.toLowerCase()}_report`)}>CSV</button>

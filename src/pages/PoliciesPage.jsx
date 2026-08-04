@@ -7,7 +7,7 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, bulkDeletePolicies,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
-  subscribeProposals, updateProposal, updateLead,
+  subscribeProposals, updateProposal,
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset } from '../firebase/storage'
 import Modal        from '../components/ui/Modal'
@@ -18,13 +18,14 @@ import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate, renewa
 import { exportToCSV, exportToExcel, exportToPDF, POLICY_COLS } from '../utils/exportUtils'
 import {
   TYPES, POLICY_PAGE_SIZE, policyDocumentYear,
-  proposalToPolicyInitial, leadToPolicyInitial,
+  proposalToPolicyInitial,
 } from '../utils/policyImport'
 import { openWhatsAppApiLink, openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
 import ImportModal from '../components/policies/ImportModals'
 import PolicyForm from '../components/policies/PolicyForm'
 import PolicyPdfUpload from '../components/policies/PolicyPdfUpload'
+import PdfExtractReview from '../components/policies/PdfExtractReview'
 
 
 
@@ -256,6 +257,7 @@ export default function PoliciesPage() {
   const [whatsAppMenu,   setWhatsAppMenu]   = useState(null)
   const [proposals,      setProposals]      = useState([])
   const [proposalPrefill,setProposalPrefill]= useState(null)
+  const [readPdfOpen, setReadPdfOpen] = useState(false)
   const [page,           setPage]           = useState(1)
   const consumedProposalRef = useRef(null)
   const tableScrollRef = useRef(null)
@@ -358,17 +360,6 @@ export default function PoliciesPage() {
     setModal('add')
   }, [location.state, clients])
 
-  useEffect(() => {
-    const lead = location.state?.leadToPolicy
-    const consumeKey = lead?.id ? `lead:${lead.id}` : ''
-    if (!consumeKey || consumedProposalRef.current === consumeKey) return
-    if (lead.clientId && !clients.some(client => client.id === lead.clientId)) return
-    consumedProposalRef.current = consumeKey
-    setProposalPrefill(leadToPolicyInitial(lead, clients))
-    setDupWarning('')
-    resetDeleteState()
-    setModal('add')
-  }, [location.state, clients])
   const checkDup = useCallback(async (policyNumber) => {
     setDupWarning('')
   }, [])
@@ -485,13 +476,6 @@ export default function PoliciesPage() {
           convertedAt: new Date().toISOString(),
         })
       }
-      if (form.leadId) {
-        await updateLead(form.leadId, {
-          status: 'converted',
-          convertedPolicyNumber: form.policyNumber || '',
-          convertedAt: new Date().toISOString(),
-        })
-      }
       toast.success('Policy added!')
       setModal(null)
       setProposalPrefill(null)
@@ -547,6 +531,7 @@ export default function PoliciesPage() {
             className={`btn-secondary text-xs ${showRenewed ? 'ring-2 ring-blue-400 text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}
             title="Renewed-Out policies are hidden by default"
           ><AppIcon name="renewals" size={17} /> {showRenewed ? 'Hide Renewed' : 'Show Renewed'}</button>
+          <button type="button" className="btn-secondary" onClick={()=>{resetDeleteState();setReadPdfOpen(true)}}><AppIcon name="policies" size={17} /> Read Policy PDF</button>
           <button type="button" className="btn-primary" onClick={()=>{resetDeleteState();setDupWarning('');setProposalPrefill(null);setModal('add')}}><AppIcon name="plus" size={17} /> Add Policy</button>
         </div>
       </div>
@@ -775,6 +760,27 @@ export default function PoliciesPage() {
       <button type="button" className="gi-fab md:hidden" onClick={() => { resetDeleteState(); setDupWarning(''); setProposalPrefill(null); setModal('add') }} aria-label="Add policy">
         <span aria-hidden="true">+</span>
       </button>
+      <PdfExtractReview
+        open={readPdfOpen}
+        onClose={() => setReadPdfOpen(false)}
+        policies={policies}
+        onUse={({ mode, policy, fields, fileName }) => {
+          const note = `Read from ${fileName}`
+          if (mode === 'edit' && policy) {
+            // Only fills blanks — an extracted value never overwrites something
+            // already on the record. Conflicts were shown in the review.
+            const merged = { ...policy }
+            Object.entries(fields).forEach(([k, v]) => { if (!String(merged[k] ?? '').trim()) merged[k] = v })
+            merged.notes = [policy.notes, note].filter(Boolean).join(' · ')
+            setSelected(merged)
+            setModal('edit')
+          } else {
+            setProposalPrefill({ ...fields, notes: note })
+            setDupWarning('')
+            setModal('add')
+          }
+        }}
+      />
       <Modal open={modal==='add'} onClose={()=>{setModal(null);setProposalPrefill(null)}} title="Add New Policy" size="xl">
         {proposals.length > 0 && (
           <div className="mb-4 p-3 rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30">
