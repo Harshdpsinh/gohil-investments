@@ -1,11 +1,16 @@
-// .github/scripts/send-renewal-alerts.cjs
+// .github/scripts/send-renewal-alerts.js
 // ─────────────────────────────────────────────────────────────
 // Queries Firestore for policies expiring in ≤ 30 days,
 // builds a rich HTML email, and sends it via Gmail.
 // Called by the GitHub Actions workflow every morning.
 // ─────────────────────────────────────────────────────────────
-const admin      = require('firebase-admin')
-const nodemailer = require('nodemailer')
+import admin from 'firebase-admin'
+import nodemailer from 'nodemailer'
+// Same due-date rule as the app and the WhatsApp cron. This script used to work
+// off p.expiryDate with a bare new Date(), which read legacy DD/MM/YYYY dates as
+// MM/DD/YYYY and ignored nextPremiumDue, life policies and multi-year terms —
+// so its "expiring in 30 days" list never matched what the Renewals page showed.
+import { getDueDate, daysUntilPolicyDue, fmtDate } from '../../src/utils/dateUtils.js'
 
 // ── Firebase Admin init (uses service account from secrets) ──
 admin.initializeApp({
@@ -19,20 +24,9 @@ admin.initializeApp({
 
 const db = admin.firestore()
 
-// ── Helper: format date string dd/MM/yyyy ─────────────────────
-function fmtDate(str) {
-  if (!str) return '—'
-  const d = new Date(str)
-  if (isNaN(d)) return str
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-// ── Helper: days until a date ─────────────────────────────────
-function daysUntil(str) {
-  if (!str) return null
-  const diff = Math.ceil((new Date(str) - new Date()) / 86400000)
-  return diff
-}
+// Policies in these states are finished and must never be chased. Same list as
+// the app and the WhatsApp cron.
+const STOP_STATUSES = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
 
 // ── Helper: format currency ────────────────────────────────────
 function fmtCurrency(val) {
@@ -59,11 +53,11 @@ async function main() {
   const DAYS_WINDOW = 30
   const alertPolicies = allPolicies
     .filter(p => {
-      if (p.status && p.status !== 'Active') return false
-      const d = daysUntil(p.expiryDate)
+      if (STOP_STATUSES.has(String(p.status || '').trim()) || p.is_renewed) return false
+      const d = daysUntilPolicyDue(p)
       return d !== null && d <= DAYS_WINDOW
     })
-    .sort((a, b) => daysUntil(a.expiryDate) - daysUntil(b.expiryDate))
+    .sort((a, b) => (daysUntilPolicyDue(a) ?? 9999) - (daysUntilPolicyDue(b) ?? 9999))
 
   console.log(`Found ${alertPolicies.length} policies needing attention.`)
 
@@ -73,12 +67,12 @@ async function main() {
   }
 
   // ── Build HTML email ─────────────────────────────────────────
-  const overdue  = alertPolicies.filter(p => daysUntil(p.expiryDate) <  0)
-  const critical = alertPolicies.filter(p => { const d = daysUntil(p.expiryDate); return d >= 0 && d <= 7 })
-  const upcoming = alertPolicies.filter(p => daysUntil(p.expiryDate) > 7)
+  const overdue  = alertPolicies.filter(p => daysUntilPolicyDue(p) <  0)
+  const critical = alertPolicies.filter(p => { const d = daysUntilPolicyDue(p); return d >= 0 && d <= 7 })
+  const upcoming = alertPolicies.filter(p => daysUntilPolicyDue(p) > 7)
 
   const tableRows = alertPolicies.map(p => {
-    const days    = daysUntil(p.expiryDate)
+    const days    = daysUntilPolicyDue(p)
     const color   = urgencyColor(days)
     const daysLbl = days < 0 ? `${Math.abs(days)}d OVERDUE` : `${days}d`
     return `
@@ -88,9 +82,9 @@ async function main() {
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${p.policyType || '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${p.insurer || '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${fmtCurrency(p.premium)}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${fmtDate(p.expiryDate)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${fmtDate(getDueDate(p))}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb;font-weight:700;color:${color}">${daysLbl}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${p.phone || '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #e5e7eb">${p.clientMobile || p.phone || '—'}</td>
       </tr>`
   }).join('')
 
@@ -171,7 +165,7 @@ async function main() {
 </html>`
 
   // ── Send email via Gmail SMTP ─────────────────────────────────
-  const transporter = nodemailer.createTransporter({
+  const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
       user: process.env.GMAIL_USER,

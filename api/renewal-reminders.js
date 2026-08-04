@@ -1,5 +1,11 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
-import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore'
+import { getFirestore, FieldValue } from 'firebase-admin/firestore'
+// The one source of truth for when a policy is due. This file used to carry its
+// own copy and the two drifted apart in two ways that both sent reminders on the
+// wrong day: it preferred nextPremiumDue where the app prefers expiryDate, and
+// its parser read legacy DD/MM/YYYY dates as MM/DD/YYYY whenever the day was 12
+// or lower — 01/12/2026 became 12 Jan, eleven months early. Import, never copy.
+import { getDueDate, daysUntilPolicyDue, parseAnyDate } from '../src/utils/dateUtils.js'
 
 const DEFAULT_PROMPT = 'Please renew your policy on time to keep your insurance protection active without interruption.'
 const DEFAULT_INTERVALS = [30, 15, 7, 1, 0].map(days => ({ id: `d${days}`, days, enabled: true }))
@@ -30,13 +36,13 @@ export default async function handler(req, res) {
     let skipped = 0
 
     // Pass 1 — decide which policies are due today. The whole collection still has to be
-    // scanned: the due date can come from nextPremiumDue, expiryDate or renewalDate, and
-    // legacy rows store dates as DD/MM/YYYY, so no single indexed range query is safe here.
+    // scanned: getDueDate picks between expiryDate, nextPremiumDue and a computed date per
+    // policy, and legacy rows store DD/MM/YYYY, so no indexed range query is safe here.
     const due = []
     for (const doc of policySnap.docs) {
       const policy = { id: doc.id, ...doc.data() }
-      const dueDate = getPolicyDueDate(policy)
-      const daysBefore = daysUntil(dueDate)
+      const dueDate = getDueDate(policy)          // yyyy-MM-dd, same as the app shows
+      const daysBefore = daysUntilPolicyDue(policy)
       const status = String(policy.status || 'Active').trim()
       if (!dueDate || !enabledDays.has(daysBefore) || STOP_STATUSES.has(status) || policy.is_renewed) {
         skipped += 1
@@ -69,7 +75,7 @@ export default async function handler(req, res) {
           clientId: client?.id || policy.clientId || '',
           clientName: client?.name || policy.clientName || '',
           insurer: policy.insurer || '',
-          dueDate: toDateText(dueDate),
+          dueDate,
           daysBefore,
           mobile: digits(mobile),
           message,
@@ -231,57 +237,12 @@ async function sendEvolutionMessage(config, mobile, text) {
   }
 }
 
-function getPolicyDueDate(policy) {
-  return parseDate(policy.nextPremiumDue || policy.expiryDate || policy.renewalDate)
-}
-
-function parseDate(value) {
-  if (!value) return null
-  if (value instanceof Date) return validDate(value)
-  if (value instanceof Timestamp) return validDate(value.toDate())
-  if (typeof value?.toDate === 'function') return validDate(value.toDate())
-  if (typeof value === 'string') {
-    const text = value.trim()
-    const iso = validDate(new Date(text))
-    if (iso) return iso
-    const match = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/)
-    if (match) {
-      const [, dd, mm, yyyy] = match
-      const year = Number(yyyy.length === 2 ? `20${yyyy}` : yyyy)
-      return validDate(new Date(year, Number(mm) - 1, Number(dd)))
-    }
-  }
-  return null
-}
-
-function validDate(date) {
-  return Number.isNaN(date?.getTime?.()) ? null : date
-}
-
-function daysUntil(date) {
-  if (!date) return null
-  const today = startOfDay(new Date())
-  const due = startOfDay(date)
-  return Math.round((due - today) / 86400000)
-}
-
-function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
-}
-
 function reminderKey(policyId, dueDate, daysBefore) {
-  return `${policyId}_${toDateText(dueDate)}_${daysBefore}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+  return `${policyId}_${dueDate}_${daysBefore}`.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
-function toDateText(date) {
-  if (!date) return ''
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-function formatDate(date) {
+function formatDate(value) {
+  const date = parseAnyDate(value)
   if (!date) return '-'
   return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(date)
 }

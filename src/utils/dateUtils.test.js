@@ -227,6 +227,21 @@ describe('getDueDate', () => {
   it.each([null, undefined, {}])('returns an empty string for %s', policy => {
     expect(getDueDate(policy)).toBe('')
   })
+
+  // Legacy rows store DD/MM/YYYY. Both renewal automations used to parse these
+  // with a bare `new Date(str)`, which reads them as MM/DD/YYYY whenever the day
+  // is 12 or lower — 01/12/2026 became 12 January, eleven months early, and the
+  // reminder went out on the wrong day. Days above 12 happened to parse
+  // correctly, which is why it went unnoticed. Both now call getDueDate.
+  it.each([
+    ['01/12/2026', '2026-12-01'],
+    ['05/08/2026', '2026-08-05'],
+    ['12/01/2027', '2027-01-12'],
+    ['13/08/2026', '2026-08-13'],
+    ['31/03/2027', '2027-03-31'],
+  ])('reads the legacy date %s as day-first', (stored, expected) => {
+    expect(getDueDate({ policyType: 'Health', expiryDate: stored })).toBe(expected)
+  })
 })
 
 describe('daysUntilPolicyDue', () => {
