@@ -13,13 +13,21 @@ import nodemailer from 'nodemailer'
 import { getDueDate, daysUntilPolicyDue, fmtDate } from '../../src/utils/dateUtils.js'
 
 // ── Firebase Admin init (uses service account from secrets) ──
+// Prefer the whole service-account JSON: deploy-firestore-rules.yml already
+// needs that secret, so this workflow costs no extra ones. The three split
+// vars stay as a fallback for anyone who set them before.
+const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT
 admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId:   process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    // GitHub replaces \n literals; restore real newlines
-    privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-  }),
+  credential: admin.credential.cert(
+    serviceAccountJson
+      ? JSON.parse(serviceAccountJson)
+      : {
+          projectId:   process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // GitHub replaces \n literals; restore real newlines
+          privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }
+  ),
 })
 
 const db = admin.firestore()

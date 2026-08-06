@@ -366,13 +366,16 @@ function Val({ children, mono, match }) {
   return <div className={`${ROW} truncate ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
 }
 
+// `block` on the input is load-bearing: .table-cell sets white-space:nowrap, and
+// an inline-block input inside it never line-breaks — all five then sit on one
+// line and spill across the "In your database" and "Status" columns.
 function Cell({ value, onChange, mono, numeric }) {
   return (
     <input
       value={value ?? ''}
       onChange={e => onChange(e.target.value)}
       inputMode={numeric ? 'decimal' : undefined}
-      className={`h-8 w-full rounded border border-transparent bg-transparent px-1 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
+      className={`block h-8 w-full rounded border border-transparent bg-transparent px-1 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
     />
   )
 }

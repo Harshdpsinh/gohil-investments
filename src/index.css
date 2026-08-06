@@ -1151,10 +1151,20 @@ textarea::placeholder {
     scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
     -webkit-overflow-scrolling: touch;
   }
+  /* Column, not the default row: the Add Policy modal puts the "Auto-fill from
+     proposal" picker beside the form as a second flex item, which squeezed both
+     to half width and clipped every field. */
   .gi-modal-body:has(> .gi-fixed-action-form) {
     display: flex;
+    flex-direction: column;
     overflow: hidden;
     padding: 0 !important;
+  }
+  /* padding:0 above is for the form's own edge-to-edge scroller — anything else
+     in the body still needs gutters. */
+  .gi-modal-body:has(> .gi-fixed-action-form) > *:not(.gi-fixed-action-form) {
+    flex: 0 0 auto;
+    margin: 0.75rem 1rem 0;
   }
   .gi-fixed-action-form {
     display: flex;

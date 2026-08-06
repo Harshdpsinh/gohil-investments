@@ -53,6 +53,12 @@ Vitest is set up. Tests live beside the code as `*.test.js` and run in a Node
 environment via `vitest.config.js` (deliberately separate from `vite.config.js` so a
 production build never resolves dev tooling).
 
+Component tests are `*.test.jsx` and opt into a DOM with a `// @vitest-environment jsdom`
+docblock on line 1 — the Node default stays for the pure-logic suites, which are the bulk.
+Vitest runs without `globals`, so React Testing Library cannot register its own cleanup:
+every component test must call `afterEach(cleanup)` itself or renders pile up in
+`document.body` and queries start matching two of everything.
+
 **Tests must never touch real data.** Firebase is mocked at module level — see
 `src/firebase/firestore.test.js` for the pattern. Anything that needs a live Firestore
 does not belong in the unit suite.
@@ -108,6 +114,11 @@ git checkout -b feat/short-description
 
 These are separate channels, not duplicates. Both read the full `policies` and
 `clients` collections on each run.
+
+The email workflow authenticates with the `FIREBASE_SERVICE_ACCOUNT` repo secret that
+`deploy-firestore-rules.yml` already needs, so its only unique secret is
+`GMAIL_APP_PASSWORD` (`GMAIL_USER` and `ALERT_EMAIL_TO` are set). Until that one is set
+the job fails; nothing else is blocked on it.
 
 ## Security constraints
 
