@@ -58,6 +58,9 @@ jobs:
       # ── Core script: query Firestore → build email → send ────
       - name: Send renewal alert email
         env:
+          # Shared with deploy-firestore-rules.yml. The three FIREBASE_* vars
+          # below are only a fallback if this one is ever unset.
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT_ID:   ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY:  ${{ secrets.FIREBASE_PRIVATE_KEY }}

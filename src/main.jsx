@@ -21,6 +21,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         <App />
         <Toaster
           position={Capacitor.isNativePlatform() ? 'top-center' : 'bottom-right'}
+          // Clear the sticky mobile top bar (h-14) plus the status bar, or the
+          // toast lands on top of the app header on Android.
+          containerStyle={
+            Capacitor.isNativePlatform()
+              ? { top: 'calc(env(safe-area-inset-top) + 3.75rem)' }
+              : undefined
+          }
           toastOptions={{
             duration: 3500,
             style: {
