@@ -7,7 +7,7 @@ import {
   getRenewalReminderSettings,
 } from '../firebase/firestore'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
-import { getEvolutionConfig, sendWhatsApp } from '../utils/whatsappSender'
+import { sendWhatsApp } from '../utils/whatsappSender'
 
 export const DEFAULT_RENEWAL_REMINDER_PROMPT =
   'Please renew your policy on time to keep your insurance protection active without interruption.'
@@ -65,18 +65,26 @@ export function findPolicyClient(policy, clients = []) {
     || null
 }
 
-export function buildRenewalReminderMessage({ policy, client, daysBefore, settings }) {
-  const dueDate = getPolicyDueDate(policy)
-  const detail = {
+/**
+ * The facts a reminder is built from. Also the source of the WhatsApp template's
+ * body variables, so the message a client receives and the preview stored in the
+ * log are always describing the same policy.
+ */
+export function buildRenewalReminderDetail({ policy, client, daysBefore }) {
+  return {
     clientName: client?.name || policy.clientName || 'Customer',
     policyNumber: policy.policyNumber || '-',
     policyType: policy.policyType || 'Insurance',
     insurer: policy.insurer || 'your insurer',
     planName: policy.planName || '',
     premium: fmtCurrency(policy.premium || 0),
-    dueDate: fmtDate(dueDate),
+    dueDate: fmtDate(getPolicyDueDate(policy)),
     days: daysBefore,
   }
+}
+
+export function buildRenewalReminderMessage({ policy, client, daysBefore, settings }) {
+  const detail = buildRenewalReminderDetail({ policy, client, daysBefore })
   const custom = applyReminderTokens(settings?.prompt || DEFAULT_RENEWAL_REMINDER_PROMPT, detail)
   const timing = daysBefore === 0
     ? 'is due for renewal today'
@@ -104,7 +112,7 @@ export function buildRenewalReminderMessage({ policy, client, daysBefore, settin
 
 export async function runRenewalReminderSweep() {
   const settings = normaliseReminderSettings(await getRenewalReminderSettings())
-  if (!settings.enabled || !getEvolutionConfig()?.baseUrl) return { sent: 0, skipped: 0 }
+  if (!settings.enabled) return { sent: 0, skipped: 0 }
 
   const [policies, clients] = await Promise.all([getAllPolicies(), getAllClients()])
   const enabledDays = new Set(settings.intervals.filter(i => i.enabled).map(i => i.days))
@@ -138,7 +146,10 @@ export async function runRenewalReminderSweep() {
       continue
     }
 
-    const result = await sendWhatsApp({ number: mobile, text: message })
+    const result = await sendWhatsApp({
+      number: mobile,
+      detail: buildRenewalReminderDetail({ policy, client, daysBefore }),
+    })
     await finishRenewalReminderLog(key, {
       status: result.ok ? 'sent' : 'failed',
       messageId: result.messageId || '',
@@ -157,7 +168,10 @@ export async function sendManualRenewalReminder(policy, clients, settings) {
   const daysBefore = daysUntilPolicyDue(policy)
   const dueDate = getPolicyDueDate(policy)
   const message = buildRenewalReminderMessage({ policy, client, daysBefore, settings: safeSettings })
-  const result = await sendWhatsApp({ number: mobile, text: message })
+  const result = await sendWhatsApp({
+    number: mobile,
+    detail: buildRenewalReminderDetail({ policy, client, daysBefore }),
+  })
   await addManualRenewalReminderLog({
     policy,
     client,
