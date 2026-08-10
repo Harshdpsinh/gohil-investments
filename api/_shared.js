@@ -2,7 +2,6 @@
 // Server-only helpers for the two functions that talk to Firebase and Meta.
 // The leading underscore keeps Vercel from routing this as an endpoint.
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
-import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
 import {
   DEFAULT_API_VERSION,
@@ -20,9 +19,32 @@ export function getAdminDb() {
   return getFirestore()
 }
 
-export function getAdminAuth() {
-  ensureAdminApp()
-  return getAuth()
+/**
+ * Verifies a Firebase ID token through Google's identity toolkit REST endpoint,
+ * deliberately NOT through firebase-admin/auth: that subpath pulls in jwks-rsa,
+ * which require()s the ESM-only `jose` and kills the whole function at load with
+ * ERR_REQUIRE_ESM — taking the renewal cron down with it. One HTTP round trip,
+ * no dependency, and the API key is project-scoped so a token minted for
+ * another Firebase project is rejected too.
+ *
+ * Returns { uid } or null. The API key is public by design (it ships in the
+ * client bundle) — it identifies the project, it does not authorise anything.
+ */
+export async function verifyIdToken(idToken) {
+  const apiKey = process.env.VITE_FIREBASE_API_KEY
+  if (!apiKey) throw new Error('VITE_FIREBASE_API_KEY is not configured.')
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    }
+  )
+  if (!response.ok) return null
+  const body = await response.json().catch(() => null)
+  const uid = body?.users?.[0]?.localId
+  return uid ? { uid } : null
 }
 
 function ensureAdminApp() {

@@ -6,7 +6,7 @@
 // is a long-lived System User token that can message anyone, and the previous
 // Evolution setup kept its credentials in localStorage where any XSS could read
 // them. The token stays server-side; the browser only proves who it is.
-import { getAdminAuth, getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.js'
+import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate, verifyIdToken } from './_shared.js'
 
 const ALLOWED_ROLES = new Set(['admin', 'staff'])
 
@@ -20,12 +20,8 @@ export default async function handler(req, res) {
     const idToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
     if (!idToken) return res.status(401).json({ error: 'Missing sign-in token.' })
 
-    let decoded
-    try {
-      decoded = await getAdminAuth().verifyIdToken(idToken)
-    } catch {
-      return res.status(401).json({ error: 'Sign-in token is invalid or expired.' })
-    }
+    const decoded = await verifyIdToken(idToken)
+    if (!decoded) return res.status(401).json({ error: 'Sign-in token is invalid or expired.' })
 
     const profile = (await getAdminDb().collection('users').doc(decoded.uid).get()).data()
     if (!ALLOWED_ROLES.has(String(profile?.role || '').toLowerCase())) {
