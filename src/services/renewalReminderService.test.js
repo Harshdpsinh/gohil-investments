@@ -11,7 +11,6 @@ vi.mock('../firebase/firestore', () => ({
   getRenewalReminderSettings: vi.fn(),
 }))
 vi.mock('../utils/whatsappSender', () => ({
-  getEvolutionConfig: vi.fn(() => ({})),
   sendWhatsApp: vi.fn(),
 }))
 

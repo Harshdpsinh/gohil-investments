@@ -1,5 +1,5 @@
-import { cert, getApps, initializeApp } from 'firebase-admin/app'
-import { getFirestore, FieldValue } from 'firebase-admin/firestore'
+import { FieldValue } from 'firebase-admin/firestore'
+import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.js'
 // The one source of truth for when a policy is due. This file used to carry its
 // own copy and the two drifted apart in two ways that both sent reminders on the
 // wrong day: it preferred nextPremiumDue where the app prefers expiryDate, and
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
     const settings = normaliseSettings((await db.collection('renewal_reminder_settings').doc('active').get()).data())
     if (!settings.enabled) return res.status(200).json({ sent: 0, skipped: 0, disabled: true })
 
-    const evolution = getEvolutionConfig()
+    const whatsapp = getWhatsAppConfig()
     const policySnap = await db.collection('policies').get()
     const enabledDays = new Set(settings.intervals.filter(item => item.enabled).map(item => item.days))
     let sent = 0
@@ -63,7 +63,8 @@ export default async function handler(req, res) {
         continue
       }
 
-      const message = buildMessage({ policy, client, dueDate, daysBefore, settings })
+      const detail = buildDetail({ policy, client, dueDate, daysBefore })
+      const message = buildMessage(detail, settings)
       const id = reminderKey(policy.id, dueDate, daysBefore)
       const logRef = db.collection('renewal_reminder_logs').doc(id)
       const claimed = await db.runTransaction(async tx => {
@@ -78,7 +79,10 @@ export default async function handler(req, res) {
           dueDate,
           daysBefore,
           mobile: digits(mobile),
+          // The composed text is a preview for the app's log view. What Meta
+          // actually renders is the approved template plus these variables.
           message,
+          template: whatsapp.templateName,
           status: 'sending',
           manual: false,
           createdAt: FieldValue.serverTimestamp(),
@@ -91,10 +95,11 @@ export default async function handler(req, res) {
         continue
       }
 
-      const result = await sendEvolutionMessage(evolution, mobile, message)
+      const result = await sendWhatsAppTemplate(whatsapp, mobile, detail)
       await logRef.set({
         status: result.ok ? 'sent' : 'failed',
         messageId: result.messageId || '',
+        mobile: result.to || digits(mobile),
         error: result.error || '',
         sentAt: result.ok ? FieldValue.serverTimestamp() : null,
         updatedAt: FieldValue.serverTimestamp(),
@@ -106,25 +111,6 @@ export default async function handler(req, res) {
   } catch (error) {
     res.status(500).json({ error: error.message || 'Renewal reminder cron failed' })
   }
-}
-
-function getAdminDb() {
-  if (!getApps().length) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-    if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not configured.')
-    const serviceAccount = JSON.parse(raw)
-    if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')
-    initializeApp({ credential: cert(serviceAccount) })
-  }
-  return getFirestore()
-}
-
-function getEvolutionConfig() {
-  const baseUrl = String(process.env.EVOLUTION_API_BASE_URL || '').replace(/\/+$/, '')
-  const instanceName = process.env.EVOLUTION_API_INSTANCE_NAME
-  const apiKey = process.env.EVOLUTION_API_KEY
-  if (!baseUrl || !instanceName || !apiKey) throw new Error('Evolution API environment variables are not configured.')
-  return { baseUrl, instanceName, apiKey }
 }
 
 function normaliseSettings(settings = {}) {
@@ -181,8 +167,11 @@ function findPolicyClient(policy, clients) {
     || null
 }
 
-function buildMessage({ policy, client, dueDate, daysBefore, settings }) {
-  const detail = {
+// The facts a reminder is built from — and the source of the WhatsApp
+// template's body variables, so the message sent and the preview logged always
+// describe the same policy.
+function buildDetail({ policy, client, dueDate, daysBefore }) {
+  return {
     clientName: client?.name || policy.clientName || 'Customer',
     policyNumber: policy.policyNumber || '-',
     policyType: policy.policyType || 'Insurance',
@@ -192,6 +181,10 @@ function buildMessage({ policy, client, dueDate, daysBefore, settings }) {
     dueDate: formatDate(dueDate),
     days: daysBefore,
   }
+}
+
+function buildMessage(detail, settings) {
+  const daysBefore = detail.days
   const custom = applyTokens(settings.prompt, detail)
   const timing = daysBefore === 0
     ? 'is due for renewal today'
@@ -215,26 +208,6 @@ function buildMessage({ policy, client, dueDate, daysBefore, settings }) {
     'Pradipsinh Gohil - 9426204547',
     'Bhavnagar, Gujarat',
   ].filter(Boolean).join('\n')
-}
-
-async function sendEvolutionMessage(config, mobile, text) {
-  try {
-    const response = await fetch(`${config.baseUrl}/message/sendText/${encodeURIComponent(config.instanceName)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: config.apiKey,
-      },
-      body: JSON.stringify({ number: digits(mobile), text }),
-    })
-    const body = await response.text()
-    if (!response.ok) return { ok: false, error: `Evolution API HTTP ${response.status}: ${body.slice(0, 200)}` }
-    let json = {}
-    try { json = body ? JSON.parse(body) : {} } catch {}
-    return { ok: true, messageId: json.key?.id || json.messageId || json.id || '' }
-  } catch (error) {
-    return { ok: false, error: error.message || 'Could not reach Evolution API.' }
-  }
 }
 
 function reminderKey(policyId, dueDate, daysBefore) {

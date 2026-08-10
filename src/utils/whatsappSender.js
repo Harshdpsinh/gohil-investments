@@ -1,91 +1,41 @@
 // src/utils/whatsappSender.js
-// Evolution API client. Config is stored only in this browser.
+// Thin browser client for the official WhatsApp Cloud API. It deliberately does
+// no sending of its own: it posts to /api/whatsapp-send, which holds the Meta
+// token. The Evolution API client this replaced kept a base URL and API key in
+// localStorage — any XSS could read them, and there is no version of that which
+// is safe with a token that can message the whole client book.
+import { auth } from '../firebase/config'
+import { toE164 } from './whatsappCloud'
 
-const STORAGE_KEY = 'evolution_api_config'
-const LEGACY_STORAGE_KEY = 'openwa_config'
+export const phoneToNumber = toE164
 
-export function getEvolutionConfig() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY)
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
-}
-
-export function saveEvolutionConfig(config) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    baseUrl: config.baseUrl || 'http://localhost:8080',
-    instanceName: config.instanceName || config.sessionId || 'default',
-    apiKey: config.apiKey || '',
-  }))
-  localStorage.removeItem(LEGACY_STORAGE_KEY)
-}
-
-export function clearEvolutionConfig() {
-  localStorage.removeItem(STORAGE_KEY)
-  localStorage.removeItem(LEGACY_STORAGE_KEY)
-}
-
-export function phoneToNumber(phone) {
-  if (!phone || typeof phone !== 'string') return null
-  const digits = phone.replace(/\D/g, '')
-  return digits.length >= 10 ? digits : null
-}
-
-export async function sendWhatsApp({ number, chatId, text }) {
-  const config = getEvolutionConfig()
-  if (!config?.baseUrl) {
-    return { ok: false, error: 'Evolution API not configured. Open WhatsApp settings first.' }
-  }
-  if (!config.instanceName) {
-    return { ok: false, error: 'No Evolution instance name configured.' }
-  }
-
-  const to = phoneToNumber(number || chatId)
+/**
+ * `detail` fills the approved template's variables. `text` is the composed
+ * human-readable reminder, kept for the log only — Meta will not send free text
+ * for a conversation the business starts.
+ */
+export async function sendWhatsApp({ number, chatId, detail = {} }) {
+  const to = toE164(number || chatId)
   if (!to) return { ok: false, error: 'Invalid WhatsApp phone number.' }
 
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/message/sendText/${encodeURIComponent(config.instanceName)}`
-  const headers = { 'Content-Type': 'application/json' }
-  if (config.apiKey) headers.apikey = config.apiKey
+  const user = auth.currentUser
+  if (!user) return { ok: false, error: 'Sign in again to send WhatsApp messages.' }
 
   try {
-    const res = await fetch(url, {
+    const response = await fetch('/api/whatsapp-send', {
       method: 'POST',
-      headers,
-      body: JSON.stringify({ number: to, text }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${await user.getIdToken()}`,
+      },
+      body: JSON.stringify({ mobile: to, detail }),
     })
-
-    const body = await res.text()
-    const data = body ? safeJson(body) : null
-
-    if (res.ok) {
-      return { ok: true, messageId: data?.key?.id || data?.messageId || data?.id }
+    const body = await response.json().catch(() => null)
+    if (!response.ok) {
+      return { ok: false, error: body?.error || `WhatsApp send failed (HTTP ${response.status}).` }
     }
-    if (res.status === 401 || res.status === 403) {
-      return { ok: false, error: `Authentication failed (HTTP ${res.status}). Check the Evolution API key.` }
-    }
-    if (res.status === 400) {
-      return { ok: false, error: 'Evolution rejected the message. Check the phone number and message text.' }
-    }
-    if (res.status === 404) {
-      return { ok: false, error: `Evolution instance "${config.instanceName}" was not found.` }
-    }
-    return { ok: false, error: `Evolution API returned HTTP ${res.status}: ${body.slice(0, 200)}` }
-  } catch (err) {
-    return { ok: false, error: `Cannot reach Evolution API at ${config.baseUrl}. Is it running? (${err.message})` }
+    return body || { ok: false, error: 'WhatsApp send returned an empty response.' }
+  } catch (error) {
+    return { ok: false, error: `Could not reach the WhatsApp sender: ${error.message}` }
   }
 }
-
-function safeJson(text) {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
-}
-
-export const getOpenWAConfig = getEvolutionConfig
-export const saveOpenWAConfig = saveEvolutionConfig
-export const clearOpenWAConfig = clearEvolutionConfig
-export const phoneToChatId = phoneToNumber

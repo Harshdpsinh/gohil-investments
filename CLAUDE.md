@@ -108,7 +108,7 @@ git checkout -b feat/short-description
 ## Automation
 
 - **Vercel cron**, daily 04:00 UTC → `api/renewal-reminders.js` → WhatsApp renewal
-  reminders to clients via Evolution API.
+  reminders to clients via the official WhatsApp Cloud API.
 - **GitHub Action**, daily 01:30 UTC → `.github/scripts/send-renewal-alerts.js` →
   renewal summary email to the owner via Gmail SMTP.
 
@@ -119,6 +119,37 @@ The email workflow authenticates with the `FIREBASE_SERVICE_ACCOUNT` repo secret
 `deploy-firestore-rules.yml` already needs, so its only unique secret is
 `GMAIL_APP_PASSWORD` (`GMAIL_USER` and `ALERT_EMAIL_TO` are set). Until that one is set
 the job fails; nothing else is blocked on it.
+
+## WhatsApp
+
+Sending runs on the official **WhatsApp Cloud API** (Meta Graph). Evolution API and its
+localStorage credentials are gone — an unofficial Baileys bridge risks the firm's number
+being banned, and a token that can message the whole client book must never sit in a
+browser.
+
+The rule that shapes the code: a message the business starts, outside a 24-hour window
+opened by the client's own reply, **must** be a Meta-approved template. Free text is
+rejected. So `buildRenewalReminderMessage` is only ever a preview written to
+`renewal_reminder_logs`; what a client actually receives is the template named by
+`WHATSAPP_TEMPLATE_NAME`, filled from `buildRenewalReminderDetail`. Change the template's
+wording in Meta Business Manager, not here — and if you change its **variable count or
+order**, set `WHATSAPP_TEMPLATE_PARAMS` to match or every send fails.
+
+- `src/utils/whatsappCloud.js` — pure payload shaping (E.164, parameters, error decoding).
+  No firebase, no react, no network. Tested.
+- `api/_shared.js` — server-only Firebase Admin + Graph sender. Leading `_` keeps Vercel
+  from routing it as an endpoint.
+- `api/whatsapp-send.js` — what the browser calls. Verifies a Firebase ID token **and** a
+  provisioned `users/{uid}` role, because the API key is public.
+- `src/utils/whatsappSender.js` — browser client. Posts to the endpoint; holds no secrets.
+
+The green "WhatsApp Reminder" buttons on Renewals and Policies are unrelated: they are
+`wa.me` deeplinks that open WhatsApp for a human to press send, and need no API at all.
+
+Server env vars (Vercel): `WHATSAPP_TOKEN` (a **System User** token — the dashboard's
+temporary token dies after 24h), `WHATSAPP_PHONE_NUMBER_ID`, and optionally
+`WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANG`, `WHATSAPP_TEMPLATE_PARAMS`,
+`WHATSAPP_API_VERSION`, `WHATSAPP_DEFAULT_COUNTRY_CODE`.
 
 ## Security constraints
 
