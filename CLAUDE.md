@@ -123,6 +123,29 @@ The email workflow authenticates with the `FIREBASE_SERVICE_ACCOUNT` repo secret
 `GMAIL_APP_PASSWORD` (`GMAIL_USER` and `ALERT_EMAIL_TO` are set). Until that one is set
 the job fails; nothing else is blocked on it.
 
+## Reading a policy PDF
+
+`PdfExtractReview` reads a schedule, matches it to a client **and** a policy, and hands the
+values to `PolicyForm` — it never writes a policy itself, so an extracted policy passes the
+same validation as a typed one.
+
+Two rules that are easy to break:
+
+- **`splitExtractedFields` must stay in the path.** `normalisePolicyPayload` does *not*
+  allow-list its input, so passing the whole extraction to the policy would write the
+  client's mobile, PAN and address onto the policy document. Client fields are listed in
+  `CLIENT_FIELD_NAMES`.
+- **`matchExtractedClient` treats mobile and PAN as identifiers and a name never as one.**
+  A name match returns `confirm`, not `link`. Brothers share surnames, and filing a policy
+  under the wrong sibling is worse than one extra question. `choose` disables saving.
+
+The schedule is uploaded and attached automatically in `onAdd` once the policy has an id.
+`pendingPdf` must be cleared when the add form closes, or the next manually-created policy
+gets the previous PDF.
+
+Text-layer PDFs only — a scan reads nothing and says so. OCR (Tesseract.js, free and
+browser-side) is the intended fallback and is not built.
+
 ## Insurer names
 
 `src/utils/insurers.js` is the only list. There were three — `constants.js`,

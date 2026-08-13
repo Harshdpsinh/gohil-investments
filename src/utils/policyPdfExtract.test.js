@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   extractPolicyFields, matchExtractedPolicy, buildFieldReview,
-  detectInsurer, detectPolicyType,
+  detectInsurer, detectPolicyType, matchExtractedClient, splitExtractedFields,
 } from './policyPdfExtract'
 
 // Page captures in the shape pdfStatement.extractLines returns. Each fixture
@@ -232,5 +232,139 @@ describe('buildFieldReview', () => {
   it('treats every field as a fill when creating a new policy', () => {
     const rows = buildFieldReview(extracted, null)
     expect(rows.find(r => r.field === 'policyNumber').state).toBe('fill')
+  })
+})
+
+// ── Client extraction and matching ──────────────────────────────────────────
+// A schedule carries the person's details alongside the policy's. These feed
+// the client record, so that a policy read from a PDF can be filed against the
+// right person instead of creating a duplicate.
+const WITH_CLIENT = [[
+  line(780, [at(40, 'Niva Bupa Health Insurance')]),
+  line(700, [at(40, 'Policy No: NB/2026/778899')]),
+  line(680, [at(40, "Insured's Name: MEHUL SHAH")]),
+  line(660, [at(40, 'Mobile No: +91 98250 12345')]),
+  line(640, [at(40, 'Email ID: Mehul.Shah@Example.COM')]),
+  line(620, [at(40, 'Date of Birth: 12/07/1984')]),
+  line(600, [at(40, 'PAN No: abcde1234f')]),
+  line(580, [at(40, 'Communication Address: 12 Kalubha Road, Bhavnagar 364001')]),
+  line(560, [at(40, 'Total Premium: Rs. 24,500')]),
+]]
+
+describe('extractPolicyFields — client details', () => {
+  const r = extractPolicyFields(WITH_CLIENT)
+
+  // Schedules print +91 and spaces; the client record stores ten digits.
+  it('normalises an Indian mobile to ten digits', () => {
+    expect(r.fields.mobile).toBe('9825012345')
+  })
+
+  it('lowercases the email', () => {
+    expect(r.fields.email).toBe('mehul.shah@example.com')
+  })
+
+  it('reads date of birth as an input date', () => {
+    expect(r.fields.dob).toBe('1984-07-12')
+  })
+
+  it('uppercases PAN', () => {
+    expect(r.fields.pan).toBe('ABCDE1234F')
+  })
+
+  it('keeps the address', () => {
+    expect(r.fields.address).toContain('Kalubha Road')
+  })
+
+  // Firestore rejects a malformed PAN outright, so a half-read one must be
+  // flagged for the user rather than sent to the save.
+  it('marks an unusable PAN uncertain instead of passing it through', () => {
+    const bad = extractPolicyFields([[line(700, [at(40, 'PAN No: ABCDE12')])]])
+    expect(bad.status.pan).toBe('uncertain')
+  })
+
+  it('marks a landline as uncertain rather than storing it as a mobile', () => {
+    const bad = extractPolicyFields([[line(700, [at(40, 'Contact No: 0278-2422222')])]])
+    expect(bad.status.mobile).toBe('uncertain')
+  })
+})
+
+describe('splitExtractedFields', () => {
+  const { client, policy } = splitExtractedFields(extractPolicyFields(WITH_CLIENT).fields)
+
+  // normalisePolicyPayload does NOT allow-list, so a stray mobile would be
+  // written onto the policy document itself.
+  it('keeps personal details off the policy record', () => {
+    expect(policy.mobile).toBeUndefined()
+    expect(policy.email).toBeUndefined()
+    expect(policy.pan).toBeUndefined()
+    expect(policy.dob).toBeUndefined()
+    expect(policy.address).toBeUndefined()
+  })
+
+  it('renames clientName to name for the client record', () => {
+    expect(client.name).toBe('MEHUL SHAH')
+    expect(client.clientName).toBeUndefined()
+  })
+
+  // The policy denormalises the client's name and relies on it.
+  it('keeps clientName on the policy as well', () => {
+    expect(policy.clientName).toBe('MEHUL SHAH')
+  })
+
+  it('drops blanks from both sides', () => {
+    const { client: c, policy: p } = splitExtractedFields({ clientName: 'A B', mobile: '', premium: '  ' })
+    expect(c).toEqual({ name: 'A B' })
+    expect(p).toEqual({ clientName: 'A B' })
+  })
+})
+
+describe('matchExtractedClient', () => {
+  const clients = [
+    { id: 'c1', name: 'MEHUL SHAH', mobile: '9825012345', pan: 'ABCDE1234F' },
+    { id: 'c2', name: 'MEHUL SHAHA', mobile: '9825099999' },
+    { id: 'c3', name: 'RAJU PATEL', mobile: '9099099099' },
+  ]
+
+  it('links on an exact mobile match without asking', () => {
+    const r = matchExtractedClient({ mobile: '+91 98250 12345', clientName: 'Anything' }, clients)
+    expect(r.action).toBe('link')
+    expect(r.client.id).toBe('c1')
+  })
+
+  it('links on PAN when no mobile was read', () => {
+    const r = matchExtractedClient({ pan: 'abcde1234f' }, clients)
+    expect(r.action).toBe('link')
+    expect(r.client.id).toBe('c1')
+  })
+
+  // Two brothers routinely share a surname. Filing a policy under the wrong
+  // sibling is worse than asking one extra question.
+  it('only asks for confirmation on a name match', () => {
+    const r = matchExtractedClient({ clientName: 'RAJU PATEL' }, clients)
+    expect(r.action).toBe('confirm')
+    expect(r.client.id).toBe('c3')
+  })
+
+  it('makes the user choose when several names are close', () => {
+    const r = matchExtractedClient({ clientName: 'MEHUL SHAH' }, [clients[0], clients[1]])
+    expect(r.action).toBe('choose')
+    expect(r.candidates).toHaveLength(2)
+  })
+
+  it('offers to create when nobody resembles the name', () => {
+    expect(matchExtractedClient({ clientName: 'BRAND NEW PERSON' }, clients).action).toBe('create')
+  })
+
+  it('offers to create when the PDF had no name at all', () => {
+    expect(matchExtractedClient({}, clients).action).toBe('create')
+  })
+
+  it('makes the user choose when one mobile is on two records', () => {
+    const dupes = [{ id: 'a', name: 'A', mobile: '9825012345' }, { id: 'b', name: 'B', mobile: '9825012345' }]
+    expect(matchExtractedClient({ mobile: '9825012345' }, dupes).action).toBe('choose')
+  })
+
+  it('creates rather than crashing against an empty book', () => {
+    expect(matchExtractedClient({ clientName: 'ANY' }, []).action).toBe('create')
   })
 })
