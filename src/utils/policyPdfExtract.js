@@ -367,6 +367,34 @@ export function matchExtractedClient(fields = {}, clients = []) {
   return { client: null, action: 'create', reason: 'No client on file with this name' }
 }
 
+/**
+ * SHA-256 of the file's own bytes, via the browser's built-in Web Crypto — no
+ * dependency, no upload. Two files with the same hash are the same document,
+ * whatever they were renamed to.
+ */
+export async function fileFingerprint(arrayBuffer) {
+  const digest = await crypto.subtle.digest('SHA-256', arrayBuffer)
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** The policy this exact file is already attached to, if any. */
+export function findPdfDuplicate(hash, policies = []) {
+  if (!hash) return null
+  return policies.find(p => p.policyPdfHash === hash) || null
+}
+
+/**
+ * Everything OCR read is downgraded to 'uncertain', so the whole review comes
+ * up yellow. OCR confuses 8/B, 0/O and 1/7, and a misread premium that looked
+ * confidently green would go straight onto the record.
+ */
+export function markAllUncertain(result) {
+  const status = Object.fromEntries(
+    Object.entries(result.status).map(([field, state]) => [field, state === 'missing' ? 'missing' : 'uncertain'])
+  )
+  return { ...result, status, source: 'ocr' }
+}
+
 export function buildFieldReview(extracted, policy = null) {
   const { fields, status } = extracted
   return Object.keys(fields).map(field => {

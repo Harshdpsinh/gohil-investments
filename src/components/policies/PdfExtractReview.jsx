@@ -11,7 +11,8 @@ import { useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import {
-  buildFieldReview, extractPolicyFields, matchExtractedClient, matchExtractedPolicy, splitExtractedFields,
+  buildFieldReview, extractPolicyFields, fileFingerprint, findPdfDuplicate,
+  markAllUncertain, matchExtractedClient, matchExtractedPolicy, splitExtractedFields,
 } from '../../utils/policyPdfExtract'
 import { fmtCurrency } from '../../utils/dateUtils'
 
@@ -54,6 +55,13 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
   const [extracted, setExtracted] = useState(null)
   const [edits, setEdits] = useState({})
   const [clientChoice, setClientChoice] = useState(undefined) // undefined = follow the match
+  const [hash, setHash] = useState('')
+  // Set when the text layer is empty: the raw bytes are held so OCR can run on
+  // demand, rather than downloading 10MB before the user has asked for it.
+  const [scanned, setScanned] = useState(null)
+  const [ocrStatus, setOcrStatus] = useState('')
+
+  const duplicate = useMemo(() => findPdfDuplicate(hash, policies), [hash, policies])
 
   const fields = useMemo(
     () => (extracted ? { ...extracted.fields, ...edits } : {}),
@@ -86,7 +94,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
 
   const reset = () => {
     setExtracted(null); setEdits({}); setFileName(''); setFile(null)
-    setClientChoice(undefined)
+    setClientChoice(undefined); setHash(''); setScanned(null); setOcrStatus('')
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -97,15 +105,25 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
     if (!/\.pdf$/i.test(file.name)) { toast.error('Please choose a PDF policy schedule.'); return }
     setBusy(true)
     try {
+      const bytes = await file.arrayBuffer()
+      // Fingerprint before anything else, so a file already on record is
+      // flagged even when its contents read badly.
+      setHash(await fileFingerprint(bytes.slice(0)))
+
       // pdfjs is ~330KB — loaded only when someone actually reads a PDF.
       const { extractLines } = await import('../../utils/pdfStatement')
-      const pages = await extractLines(await file.arrayBuffer())
+      const pages = await extractLines(bytes.slice(0))
       const result = extractPolicyFields(pages)
       if (!result.found.length) {
-        toast.error('Nothing readable found. This may be a scanned PDF — those need typing in by hand.')
+        // Almost certainly a scan. Hold the bytes and offer OCR rather than
+        // pulling a 10MB engine down before the user has asked for it.
+        setScanned(bytes)
+        setFileName(file.name)
+        setFile(file)
         setBusy(false)
         return
       }
+      setScanned(null)
       setExtracted(result)
       setEdits({})
       setClientChoice(undefined)
@@ -119,6 +137,34 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
     }
   }
 
+  const runOcr = async () => {
+    if (!scanned) return
+    setBusy(true)
+    setOcrStatus('Downloading the reader (first time only)…')
+    try {
+      const { ocrPdfToLines } = await import('../../utils/pdfOcr')
+      const pages = await ocrPdfToLines(scanned, {
+        onProgress: ({ stage, page, pages: total }) =>
+          setOcrStatus(stage === 'starting' ? 'Starting the reader…' : `Reading page ${page} of ${total}…`),
+      })
+      const result = extractPolicyFields(pages)
+      if (!result.found.length) {
+        toast.error('OCR could not find any policy details. This scan may be too faint — type it in by hand.')
+        return
+      }
+      // Every value comes back yellow. OCR confuses 8/B, 0/O and 1/7, and a
+      // misread premium shown as confidently correct would go onto the record.
+      setExtracted(markAllUncertain(result))
+      setScanned(null)
+      toast.success('Read from the scan — please check every value.')
+    } catch (err) {
+      toast.error(err.message || 'Could not read the scan.')
+    } finally {
+      setBusy(false)
+      setOcrStatus('')
+    }
+  }
+
   const use = () => {
     // Personal details go to the client record, policy details to the policy.
     // Sending everything to the policy would write a mobile number onto the
@@ -128,6 +174,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       mode: match.action === 'update' ? 'edit' : 'add',
       policy: match.policy || null,
       fields: policyFields,
+      hash,
       client: chosenClient,
       clientFields,
       createClient: clientAction === 'create',
@@ -173,7 +220,40 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
         </>
       }
     >
-      {!extracted ? (
+      {/* Shown above everything: the file itself is already on record. */}
+      {duplicate && (
+        <div className="mb-4 rounded-xl border border-red-300 bg-red-50 p-3 text-sm dark:border-red-800 dark:bg-red-950/30">
+          <p className="font-bold text-red-900 dark:text-red-200">You have already filed this exact PDF</p>
+          <p className="mt-0.5 text-red-800 dark:text-red-300">
+            It is attached to policy <strong>{duplicate.policyNumber}</strong>
+            {duplicate.clientName ? ` for ${duplicate.clientName}` : ''}. Carry on only if you
+            genuinely mean to enter it a second time.
+          </p>
+        </div>
+      )}
+
+      {scanned ? (
+        <div className="rounded-2xl border-2 border-dashed border-amber-300 p-8 text-center dark:border-amber-700">
+          <p className="font-semibold text-gray-800 dark:text-gray-100">
+            {fileName} has no text in it — it is a scan or a photo
+          </p>
+          <p className="mx-auto mt-2 max-w-lg text-xs text-gray-600 dark:text-gray-300">
+            It can still be read by OCR, which runs on this device. Nothing is uploaded anywhere
+            and there is no charge, however many you read. The first run downloads about 10 MB,
+            and each page takes a few seconds.
+          </p>
+          <p className="mx-auto mt-2 max-w-lg text-xs font-semibold text-amber-700 dark:text-amber-300">
+            A scan is read far less reliably than a normal PDF — every value will be marked for
+            checking, and you should check it.
+          </p>
+          <button className="btn-primary mt-4" disabled={busy} onClick={runOcr}>
+            {busy ? (ocrStatus || 'Reading…') : 'Read it anyway with OCR'}
+          </button>
+          <button className="btn-secondary mt-2 block w-full sm:mt-4 sm:inline-block sm:w-auto" disabled={busy} onClick={reset}>
+            Choose another file
+          </button>
+        </div>
+      ) : !extracted ? (
         <div
           onDragOver={e => { e.preventDefault(); setDragging(true) }}
           onDragLeave={() => setDragging(false)}
@@ -190,7 +270,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
             {busy ? 'Reading the policy…' : 'Drop the policy schedule here, or click to choose'}
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Text PDFs only. A scanned or photographed policy cannot be read.
+            A scan or photo can be read too — you will be offered OCR for it.
           </p>
         </div>
       ) : (

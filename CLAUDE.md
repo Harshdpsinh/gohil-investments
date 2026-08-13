@@ -143,8 +143,27 @@ The schedule is uploaded and attached automatically in `onAdd` once the policy h
 `pendingPdf` must be cleared when the add form closes, or the next manually-created policy
 gets the previous PDF.
 
-Text-layer PDFs only — a scan reads nothing and says so. OCR (Tesseract.js, free and
-browser-side) is the intended fallback and is not built.
+A scan (no text layer) falls back to OCR via `pdfOcr.js` — Tesseract.js WASM running on the
+device. Free and unmetered, and the document never leaves the browser, but the engine and
+language data (~10MB) are fetched from jsDelivr on first use, so it needs internet once.
+It is dynamically imported and only offered after the text layer comes back empty, so it
+never touches the main bundle.
+
+Two things that will silently break it:
+
+- `recognize()` **must** be passed `{ text: true, blocks: true }`. tesseract.js v7 defaults
+  to `{ text: true }`, which returns no word positions at all — extraction then degrades to
+  flat text and two-column schedules read wrongly, without any error.
+- Positions arrive as `blocks[].paragraphs[].lines[].words[]` in **canvas** coordinates
+  (y down). `ocrLines.js` flips them to PDF coordinates and divides by the render scale;
+  the extractor's column window is a fixed 60 points and would be meaningless at 2x.
+
+Everything OCR reads is forced to `uncertain` by `markAllUncertain`, so the whole review
+comes up yellow. OCR confuses 8/B, 0/O and 1/7, and a misread premium shown as confidently
+green would go straight onto the record.
+
+Re-reading a file already on record is caught by `policyPdfHash`, a SHA-256 of the bytes
+taken with the browser's built-in Web Crypto and stored by `savePolicyPdfUrl`.
 
 ## Insurer names
 
