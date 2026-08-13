@@ -476,10 +476,12 @@ export default function PoliciesPage() {
       // Attach the schedule this policy was read from. A failure here is
       // reported but never fails the save — the policy is already correct, and
       // the PDF can be uploaded again from the policy row.
-      if (pendingPdf && ref?.id) {
+      if (pendingPdf?.file && ref?.id) {
         try {
-          const uploaded = await uploadPolicyPdf(ref.id, pendingPdf, () => {}, String(form.startDate || '').slice(0, 4))
-          await savePolicyPdfUrl(ref.id, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, uploaded)
+          const uploaded = await uploadPolicyPdf(ref.id, pendingPdf.file, () => {}, String(form.startDate || '').slice(0, 4))
+          // The hash goes on the policy so re-reading this same file later is
+          // recognised instead of quietly creating a second policy.
+          await savePolicyPdfUrl(ref.id, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, { ...uploaded, hash: pendingPdf.hash })
           toast.success('Policy PDF attached.')
         } catch (pdfErr) {
           toast.error(`Policy saved, but the PDF was not attached: ${pdfErr.message}`)
@@ -783,11 +785,11 @@ export default function PoliciesPage() {
         onClose={() => setReadPdfOpen(false)}
         policies={policies}
         clients={clients}
-        onUse={async ({ mode, policy, fields, client, clientFields, createClient, file, fileName }) => {
+        onUse={async ({ mode, policy, fields, hash, client, clientFields, createClient, file, fileName }) => {
           const note = `Read from ${fileName}`
           // Held for the save handler, which uploads it once the policy has an
           // id — so the same document never has to be chosen twice.
-          setPendingPdf(file || null)
+          setPendingPdf(file ? { file, hash } : null)
 
           if (mode === 'edit' && policy) {
             // Only fills blanks — an extracted value never overwrites something
