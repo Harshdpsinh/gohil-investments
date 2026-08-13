@@ -17,6 +17,7 @@ import {
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
+import { KNOWN_INSURERS } from '../utils/insurers'
 import {
   defaultRenewalReminderSettings,
   normaliseReminderSettings,
@@ -70,22 +71,6 @@ function isTermRenewalDue(policy) {
 // RENEW MODAL — collects new policy details before creating
 // ─────────────────────────────────────────────────────────────
 // Full Indian insurer list reused in RenewModal
-const RENEW_INSURERS = [
-  'Star Health and Allied Insurance','New India Assurance','National Insurance',
-  'United India Insurance','Oriental Insurance','HDFC ERGO General Insurance',
-  'ICICI Lombard General Insurance','Bajaj Allianz General Insurance',
-  'Reliance General Insurance','Royal Sundaram General Insurance',
-  'Niva Bupa Health Insurance','Aditya Birla Health Insurance',
-  'Care Health Insurance','ManipalCigna Health Insurance',
-  'SBI General Insurance','Tata AIG General Insurance',
-  'Cholamandalam MS General Insurance','Future Generali India Insurance',
-  'Iffco Tokio General Insurance','Kotak Mahindra General Insurance',
-  'Liberty General Insurance','Universal Sompo General Insurance',
-  'LIC of India','HDFC Life Insurance','ICICI Prudential Life Insurance',
-  'SBI Life Insurance','Max Life Insurance','Bajaj Allianz Life Insurance',
-  'Tata AIA Life Insurance','Canara HSBC Life Insurance',
-  'PNB MetLife India Insurance','IndiaFirst Life Insurance',
-]
 
 function RenewModal({ policy, onConfirm, onClose }) {
   const originalFrequency = normaliseFrequency(policy.frequency || 'Yearly')
@@ -332,7 +317,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
                 autoFocus
               />
               <datalist id="renew-insurer-datalist">
-                {RENEW_INSURERS.map(ins => <option key={ins} value={ins} />)}
+                {KNOWN_INSURERS.map(ins => <option key={ins} value={ins} />)}
               </datalist>
               {form.insurer && (
                 <p className="text-xs text-amber-700 dark:text-amber-300 mt-1 font-medium">
