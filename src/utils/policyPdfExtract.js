@@ -51,6 +51,44 @@ const LABELS = {
   maturityDate: [/\bmaturity\s*date\b/i, /\bdate\s*of\s*maturity\b/i],
   nominee: [/\bnominee(?:'s)?\s*name\b/i, /\bnominee\b/i],
   registrationNo: [/\bregistration\s*(?:no|number)\b/i, /\bvehicle\s*(?:no|number)\b/i],
+  // ── Client fields ──────────────────────────────────────────────────────
+  // Kept in the same pass because a schedule prints them alongside the policy
+  // details, but routed to the client record, never onto the policy — see
+  // CLIENT_FIELD_NAMES below.
+  mobile: [
+    /\b(?:mobile|contact|phone)\s*(?:no|number)\b/i,
+    /\bmobile\b/i, /\bcontact\s*details\b/i,
+  ],
+  email: [/\be-?mail\s*(?:id|address)?\b/i],
+  dob: [/\bdate\s*of\s*birth\b/i, /\bd\.?\s?o\.?\s?b\.?\b/i, /\bbirth\s*date\b/i],
+  pan: [/\bpan\s*(?:no|number|card)?\b/i],
+  address: [
+    /\b(?:communication|correspondence|residential|mailing)\s*address\b/i,
+    /\baddress\b/i,
+  ],
+}
+
+/**
+ * Which extracted fields describe the person rather than the policy. The policy
+ * payload is NOT allow-listed on the way into Firestore, so letting a mobile
+ * number through would silently write it onto the policy document.
+ */
+export const CLIENT_FIELD_NAMES = ['clientName', 'mobile', 'email', 'dob', 'pan', 'address']
+
+/** Splits one extraction into the two records it actually feeds. */
+export function splitExtractedFields(fields = {}) {
+  const client = {}
+  const policy = {}
+  for (const [field, value] of Object.entries(fields)) {
+    if (!String(value ?? '').trim()) continue
+    if (CLIENT_FIELD_NAMES.includes(field)) {
+      // The client record calls it `name`; the policy denormalises `clientName`.
+      client[field === 'clientName' ? 'name' : field] = value
+    }
+    // clientName is also kept on the policy, which stores its own copy.
+    if (!CLIENT_FIELD_NAMES.includes(field) || field === 'clientName') policy[field] = value
+  }
+  return { client, policy }
 }
 
 const ALL_LABELS = Object.values(LABELS).flat()
@@ -70,10 +108,22 @@ const DATE = raw => {
 }
 const TEXT = raw => String(raw).replace(/\s+/g, ' ').replace(/[.,;:]+$/, '').trim()
 
+// Schedules print +91, 0-prefixes and spaces; the client record stores ten
+// digits, so normalise here rather than making the user retype it.
+const MOBILE = raw => {
+  const digits = String(raw).replace(/\D/g, '')
+  const national = digits.length > 10 ? digits.slice(-10) : digits
+  return /^[6-9]\d{9}$/.test(national) ? national : ''
+}
+
 const CLEAN = {
   policyNumber: raw => TEXT(raw).replace(/\s+/g, '').replace(/^[:#-]+/, ''),
   premium: MONEY, sumInsured: MONEY,
   startDate: DATE, expiryDate: DATE, maturityDate: DATE,
+  dob: DATE,
+  mobile: MOBILE,
+  email: raw => (String(raw).match(/[^\s<>()[\]]+@[^\s<>()[\]]+\.[a-z]{2,}/i) || [''])[0].toLowerCase(),
+  pan: raw => (String(raw).toUpperCase().match(/[A-Z]{5}\d{4}[A-Z]/) || [''])[0],
 }
 
 const VALID = {
@@ -85,6 +135,13 @@ const VALID = {
   maturityDate: v => !!v,
   clientName: v => /^[A-Za-z][A-Za-z\s.'-]{2,}$/.test(v) && v.split(/\s+/).length <= 6,
   registrationNo: v => /^[A-Z]{2}[\s-]?\d{1,2}[\s-]?[A-Z]{0,3}[\s-]?\d{1,4}$/i.test(v.replace(/\s/g, ' ')),
+  mobile: v => /^[6-9]\d{9}$/.test(v),
+  email: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+  // Firestore rejects a malformed PAN outright, so a half-read one must not
+  // reach the save — better to show it yellow and let the user finish it.
+  pan: v => /^[A-Z]{5}\d{4}[A-Z]$/.test(v),
+  dob: v => !!v,
+  address: v => v.length >= 8,
 }
 
 const isLabel = text => ALL_LABELS.some(re => re.test(text))
@@ -269,6 +326,45 @@ const sameValue = (a, b, field) => {
   if (!x || !y) return false
   if (x === y) return true
   return field === 'insurer' && (x.includes(y) || y.includes(x))
+}
+
+/**
+ * Which client on file this schedule belongs to.
+ *
+ *   link    — a mobile or PAN matched exactly; safe to attach without asking
+ *   confirm — the name matches closely but nothing unique does; ask first
+ *   choose  — several clients could be it; the user must pick
+ *   create  — nobody resembles it; offer to add the client
+ *
+ * Mobile and PAN are treated as identifiers and a name never is: two brothers
+ * at one address routinely share a surname, and silently filing a policy under
+ * the wrong sibling is far worse than asking one extra question.
+ */
+export function matchExtractedClient(fields = {}, clients = []) {
+  const mobile = String(fields.mobile || '').replace(/\D/g, '').slice(-10)
+  const pan = String(fields.pan || '').toUpperCase()
+
+  if (mobile) {
+    const hits = clients.filter(c => String(c.mobile || '').replace(/\D/g, '').slice(-10) === mobile)
+    if (hits.length === 1) return { client: hits[0], action: 'link', reason: 'Mobile number already on file' }
+    if (hits.length > 1) return { client: null, action: 'choose', reason: `${hits.length} clients share this mobile number` }
+  }
+  if (pan) {
+    const hits = clients.filter(c => String(c.pan || '').toUpperCase() === pan)
+    if (hits.length === 1) return { client: hits[0], action: 'link', reason: 'PAN already on file' }
+  }
+
+  const name = String(fields.clientName || '').trim()
+  if (!name) return { client: null, action: 'create', reason: 'No client name found in the PDF' }
+
+  const near = fuzzyMatch(name, clients, 0.85)
+  if (near.length === 1) {
+    return { client: near[0], action: 'confirm', reason: 'Name matches a client on file — confirm it is the same person' }
+  }
+  if (near.length > 1) {
+    return { client: null, action: 'choose', reason: `${near.length} clients have a similar name`, candidates: near }
+  }
+  return { client: null, action: 'create', reason: 'No client on file with this name' }
 }
 
 export function buildFieldReview(extracted, policy = null) {

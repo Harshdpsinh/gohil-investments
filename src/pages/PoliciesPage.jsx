@@ -7,9 +7,9 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addPolicy, updatePolicy, deletePolicy, bulkDeletePolicies,
   getDeletedPolicies, restorePolicy, permanentDeletePolicy,
-  subscribeProposals, updateProposal,
+  subscribeProposals, updateProposal, addClient, savePolicyPdfUrl,
 } from '../firebase/firestore'
-import { deletePolicyPdfAsset } from '../firebase/storage'
+import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
@@ -258,6 +258,9 @@ export default function PoliciesPage() {
   const [proposals,      setProposals]      = useState([])
   const [proposalPrefill,setProposalPrefill]= useState(null)
   const [readPdfOpen, setReadPdfOpen] = useState(false)
+  // The schedule that was just read. Uploaded and attached in onAdd, once the
+  // policy exists and has an id to attach it to.
+  const [pendingPdf, setPendingPdf] = useState(null)
   const [page,           setPage]           = useState(1)
   const consumedProposalRef = useRef(null)
   const tableScrollRef = useRef(null)
@@ -468,7 +471,22 @@ export default function PoliciesPage() {
 
   const onAdd    = async form => {
     try {
-      await addPolicy(form)
+      const ref = await addPolicy(form)
+
+      // Attach the schedule this policy was read from. A failure here is
+      // reported but never fails the save — the policy is already correct, and
+      // the PDF can be uploaded again from the policy row.
+      if (pendingPdf && ref?.id) {
+        try {
+          const uploaded = await uploadPolicyPdf(ref.id, pendingPdf, () => {}, String(form.startDate || '').slice(0, 4))
+          await savePolicyPdfUrl(ref.id, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, uploaded)
+          toast.success('Policy PDF attached.')
+        } catch (pdfErr) {
+          toast.error(`Policy saved, but the PDF was not attached: ${pdfErr.message}`)
+        }
+        setPendingPdf(null)
+      }
+
       if (form.proposalId) {
         await updateProposal(form.proposalId, {
           status: 'Converted',
@@ -764,8 +782,13 @@ export default function PoliciesPage() {
         open={readPdfOpen}
         onClose={() => setReadPdfOpen(false)}
         policies={policies}
-        onUse={({ mode, policy, fields, fileName }) => {
+        clients={clients}
+        onUse={async ({ mode, policy, fields, client, clientFields, createClient, file, fileName }) => {
           const note = `Read from ${fileName}`
+          // Held for the save handler, which uploads it once the policy has an
+          // id — so the same document never has to be chosen twice.
+          setPendingPdf(file || null)
+
           if (mode === 'edit' && policy) {
             // Only fills blanks — an extracted value never overwrites something
             // already on the record. Conflicts were shown in the review.
@@ -774,14 +797,32 @@ export default function PoliciesPage() {
             merged.notes = [policy.notes, note].filter(Boolean).join(' · ')
             setSelected(merged)
             setModal('edit')
-          } else {
-            setProposalPrefill({ ...fields, notes: note })
-            setDupWarning('')
-            setModal('add')
+            return
           }
+
+          let linked = client
+          if (createClient && clientFields?.name) {
+            try {
+              const ref = await addClient({ ...clientFields, notes: note })
+              linked = { id: ref.id, ...clientFields }
+              toast.success(`Client "${clientFields.name}" created.`)
+            } catch (err) {
+              // The policy form can still be filled in by hand, so let the user
+              // continue rather than throwing the whole extraction away.
+              toast.error(`Could not create the client: ${err.message}`)
+            }
+          }
+
+          setProposalPrefill({
+            ...fields,
+            ...(linked ? { clientId: linked.id, clientName: linked.name || fields.clientName } : {}),
+            notes: note,
+          })
+          setDupWarning('')
+          setModal('add')
         }}
       />
-      <Modal open={modal==='add'} onClose={()=>{setModal(null);setProposalPrefill(null)}} title="Add New Policy" size="xl">
+      <Modal open={modal==='add'} onClose={()=>{setModal(null);setProposalPrefill(null);setPendingPdf(null)}} title="Add New Policy" size="xl">
         {proposals.length > 0 && (
           <div className="mb-4 p-3 rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30">
             <label className="form-label">Auto-fill from proposal</label>
@@ -808,7 +849,7 @@ export default function PoliciesPage() {
           initial={proposalPrefill || undefined}
           clients={clients}
           onSave={onAdd}
-          onCancel={()=>{setModal(null);setProposalPrefill(null)}}
+          onCancel={()=>{setModal(null);setProposalPrefill(null);setPendingPdf(null)}}
           onPolicyNumberChange={checkDup}
           dupWarning={dupWarning}
         />

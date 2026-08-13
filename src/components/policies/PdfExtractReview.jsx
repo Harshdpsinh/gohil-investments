@@ -10,7 +10,9 @@
 import { useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
-import { extractPolicyFields, matchExtractedPolicy, buildFieldReview } from '../../utils/policyPdfExtract'
+import {
+  buildFieldReview, extractPolicyFields, matchExtractedClient, matchExtractedPolicy, splitExtractedFields,
+} from '../../utils/policyPdfExtract'
 import { fmtCurrency } from '../../utils/dateUtils'
 
 const LABEL = {
@@ -18,6 +20,15 @@ const LABEL = {
   policyType: 'Policy type', planName: 'Plan', premium: 'Premium',
   sumInsured: 'Sum insured', startDate: 'Start date', expiryDate: 'Expiry date',
   maturityDate: 'Maturity date', nominee: 'Nominee', registrationNo: 'Registration no',
+  mobile: 'Mobile', email: 'Email', dob: 'Date of birth', pan: 'PAN', address: 'Address',
+}
+
+// How the client match is described, and what confirming it will do.
+const CLIENT_PLAN = {
+  link:    { tone: 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30', title: 'Existing client — will be linked' },
+  confirm: { tone: 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30',        title: 'Is this the same person?' },
+  choose:  { tone: 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30',        title: 'Several clients could be this person' },
+  create:  { tone: 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30',            title: 'New client — will be created' },
 }
 
 // Red for nothing found, yellow for found-but-unsure — as specified.
@@ -31,13 +42,18 @@ const STATE = {
 
 const MONEY_FIELDS = new Set(['premium', 'sumInsured'])
 
-export default function PdfExtractReview({ open, onClose, policies = [], onUse }) {
+export default function PdfExtractReview({ open, onClose, policies = [], clients = [], onUse }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [fileName, setFileName] = useState('')
+  // The File itself, not just its name: it is uploaded and attached to the
+  // policy once saving produces an id, so the same document never has to be
+  // picked twice.
+  const [file, setFile] = useState(null)
   const [extracted, setExtracted] = useState(null)
   const [edits, setEdits] = useState({})
+  const [clientChoice, setClientChoice] = useState(undefined) // undefined = follow the match
 
   const fields = useMemo(
     () => (extracted ? { ...extracted.fields, ...edits } : {}),
@@ -56,8 +72,21 @@ export default function PdfExtractReview({ open, onClose, policies = [], onUse }
     return buildFieldReview({ fields, status: extracted.status }, match?.policy || null)
   }, [extracted, fields, match])
 
+  const clientMatch = useMemo(
+    () => (extracted ? matchExtractedClient(fields, clients) : null),
+    [extracted, fields, clients]
+  )
+
+  // undefined means "whatever the matcher decided"; null means the user
+  // explicitly chose to create a new client instead.
+  const chosenClient = clientChoice === undefined ? clientMatch?.client || null : clientChoice
+  const clientAction = clientChoice === undefined
+    ? clientMatch?.action
+    : (clientChoice ? 'link' : 'create')
+
   const reset = () => {
-    setExtracted(null); setEdits({}); setFileName('')
+    setExtracted(null); setEdits({}); setFileName(''); setFile(null)
+    setClientChoice(undefined)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -79,7 +108,9 @@ export default function PdfExtractReview({ open, onClose, policies = [], onUse }
       }
       setExtracted(result)
       setEdits({})
+      setClientChoice(undefined)
       setFileName(file.name)
+      setFile(file)
     } catch (err) {
       toast.error(err.message || 'Could not read that PDF.')
       reset()
@@ -89,13 +120,18 @@ export default function PdfExtractReview({ open, onClose, policies = [], onUse }
   }
 
   const use = () => {
-    const cleaned = Object.fromEntries(
-      Object.entries(fields).filter(([, v]) => String(v ?? '').trim() !== '')
-    )
+    // Personal details go to the client record, policy details to the policy.
+    // Sending everything to the policy would write a mobile number onto the
+    // policy document, which normalisePolicyPayload does not filter out.
+    const { client: clientFields, policy: policyFields } = splitExtractedFields(fields)
     onUse({
       mode: match.action === 'update' ? 'edit' : 'add',
       policy: match.policy || null,
-      fields: cleaned,
+      fields: policyFields,
+      client: chosenClient,
+      clientFields,
+      createClient: clientAction === 'create',
+      file,
       fileName,
     })
     closeAll()
@@ -118,8 +154,20 @@ export default function PdfExtractReview({ open, onClose, policies = [], onUse }
         <>
           <button className="btn-secondary" disabled={busy} onClick={closeAll}>Cancel</button>
           {extracted && (
-            <button className="btn-primary" disabled={busy} onClick={use}>
-              {match?.action === 'update' ? 'Fill in this policy' : 'Create policy from these details'}
+            <button
+              className="btn-primary"
+              // 'choose' means the matcher could not tell people apart. Saving
+              // then would file the policy under a guess.
+              disabled={busy || clientAction === 'choose'}
+              onClick={use}
+            >
+              {clientAction === 'choose'
+                ? 'Pick the client first'
+                : match?.action === 'update'
+                  ? 'Fill in this policy'
+                  : clientAction === 'create'
+                    ? 'Create client + policy'
+                    : 'Create policy for this client'}
             </button>
           )}
         </>
@@ -161,6 +209,57 @@ export default function PdfExtractReview({ open, onClose, policies = [], onUse }
               {match.reason}
               {match.policy && ` · ${match.policy.clientName || ''} ${match.policy.policyNumber}`}
             </p>
+          </div>
+
+          {/* Which person this policy gets filed against. */}
+          <div className={`rounded-xl border p-3 text-sm ${CLIENT_PLAN[clientAction]?.tone || ''}`}>
+            <p className="font-bold text-gray-900 dark:text-gray-100">{CLIENT_PLAN[clientAction]?.title}</p>
+            <p className="mt-0.5 text-gray-700 dark:text-gray-300">
+              {clientChoice === undefined ? clientMatch.reason : 'You chose this yourself.'}
+            </p>
+
+            {chosenClient && (
+              <p className="mt-2 font-semibold text-gray-900 dark:text-gray-100">
+                {chosenClient.name}
+                {chosenClient.mobile && <span className="font-normal text-gray-500"> · {chosenClient.mobile}</span>}
+              </p>
+            )}
+
+            {clientAction === 'create' && (
+              <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                A client will be created from the name, mobile, email, date of birth, PAN and
+                address read below. Anything blank can be filled in later.
+              </p>
+            )}
+
+            {/* Candidates, so a wrong guess can be corrected without leaving. */}
+            {(clientMatch.candidates?.length > 0 || clientAction === 'confirm') && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(clientMatch.candidates || [clientMatch.client]).filter(Boolean).map(candidate => (
+                  <button
+                    key={candidate.id}
+                    onClick={() => setClientChoice(candidate)}
+                    className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
+                      chosenClient?.id === candidate.id
+                        ? 'border-blue-500 bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
+                        : 'border-slate-300 dark:border-slate-600'
+                    }`}
+                  >
+                    Yes — {candidate.name}{candidate.mobile ? ` · ${candidate.mobile}` : ''}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setClientChoice(null)}
+                  className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
+                    clientChoice === null
+                      ? 'border-blue-500 bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-100'
+                      : 'border-slate-300 dark:border-slate-600'
+                  }`}
+                >
+                  No — create a new client
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-3 gap-2 text-center">
