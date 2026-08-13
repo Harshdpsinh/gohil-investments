@@ -9,6 +9,7 @@ import { legacyPostingKey, matchStatement, normaliseStatement, postingKey, summa
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
+import { insurerOptions } from '../../utils/insurers'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -43,10 +44,10 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const [format, setFormat] = useState('')
   const [noDetail, setNoDetail] = useState(false)
 
-  const insurerOptions = useMemo(
-    () => [...new Set(policies.map(p => p.insurer).filter(Boolean))].sort(),
-    [policies]
-  )
+  // Every known carrier plus whatever the book already uses, deduped. It used
+  // to list only insurers already on a policy, so a statement from a carrier
+  // whose first policy had not been entered yet could not be imported at all.
+  const carriers = useMemo(() => insurerOptions(policies.map(p => p.insurer)), [policies])
 
   // Gate: nothing may be uploaded until the statement is described.
   const ready = Boolean(month && year && mode && (mode === 'multi' || insurer))
@@ -219,12 +220,19 @@ export default function StatementImportModal({ open, onClose, policies, user, on
             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
               {mode === 'multi' ? 'Carrier (per row)' : 'Carrier *'}
             </span>
-            <select className="form-input mt-1" value={insurer}
-                    disabled={mode !== 'single' || !!parsed.length}
-                    onChange={e => setInsurer(e.target.value)}>
-              <option value="">{mode === 'multi' ? 'Read from each row' : 'Select…'}</option>
-              {insurerOptions.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
+            {/* Free-type, not a fixed select: a carrier missing from the list
+                must never block an import. Anything typed is kept verbatim. */}
+            <input
+              className="form-input mt-1"
+              list="statement-carrier-options"
+              value={insurer}
+              disabled={mode !== 'single' || !!parsed.length}
+              placeholder={mode === 'multi' ? 'Read from each row' : 'Type or select carrier…'}
+              onChange={e => setInsurer(e.target.value)}
+            />
+            <datalist id="statement-carrier-options">
+              {carriers.map(name => <option key={name} value={name} />)}
+            </datalist>
           </label>
         </div>
 

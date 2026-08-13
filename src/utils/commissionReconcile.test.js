@@ -210,12 +210,25 @@ describe('insurerScorecard', () => {
       { asOf: ASOF }
     )
     const [top, second] = insurerScorecard(rows)
-    expect(top.insurer).toBe('HDFC ERGO')
+    // Canonical spellings: the scorecard merges variants so one carrier is not
+    // reported as two each paying half of what it owes.
+    expect(top.insurer).toBe('HDFC ERGO General Insurance')
     expect(top.settledPct).toBe(100)
     expect(top.avgDaysToPay).toBe(30)
-    expect(second.insurer).toBe('Star Health')
+    expect(second.insurer).toBe('Star Health and Allied Insurance')
     expect(second.unpaid).toBe(1)
     expect(second.outstanding).toBe(1500)
+  })
+
+  it('merges a carrier entered under two spellings into one line', () => {
+    const rows = reconcilePolicies(
+      [policy({ id: 'a', insurer: 'HDFC ERGO' }), policy({ id: 'b', insurer: 'HDFC ERGO General Insurance' })],
+      [],
+      { asOf: ASOF }
+    )
+    const card = insurerScorecard(rows)
+    expect(card).toHaveLength(1)
+    expect(card[0]).toMatchObject({ insurer: 'HDFC ERGO General Insurance', policies: 2, unpaid: 2 })
   })
 
   it('reports never-paid as null rather than zero days', () => {

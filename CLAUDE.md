@@ -68,6 +68,7 @@ Pure logic worth testing has been pulled out of the Firebase and React layers in
 - `src/utils/policyImport.js` — fuzzy matching and proposal/lead → policy conversion
 - `src/utils/dateUtils.js` — date parsing, frequency, due dates
 - `src/utils/commissionImport.js` — statement column vocabulary, matching, posting keys
+- `src/utils/insurers.js` — the insurer list, name canonicalisation, duplicate detection
 - `src/utils/commissionReconcile.js` — policy book joined to the posted ledger
 - `src/utils/businessDone.js` — financial-year periods, fresh/renewal split, persistency
 - `src/utils/pdfProfiles.js` — the six insurer PDF layout parsers
@@ -121,6 +122,27 @@ The email workflow authenticates with the `FIREBASE_SERVICE_ACCOUNT` repo secret
 `deploy-firestore-rules.yml` already needs, so its only unique secret is
 `GMAIL_APP_PASSWORD` (`GMAIL_USER` and `ALERT_EMAIL_TO` are set). Until that one is set
 the job fails; nothing else is blocked on it.
+
+## Insurer names
+
+`src/utils/insurers.js` is the only list. There were three — `constants.js`,
+`policySchemas.js` and an inline one in `RenewalsPage` — and they had drifted, so a company
+appeared in one dropdown and not another. Both `KNOWN_INSURERS` exports now re-export from
+here; do not reintroduce a local list.
+
+Every insurer field is **free-type** (a `datalist`, never a closed `<select>`). A carrier
+missing from the list must never block entering a policy or importing a statement, and
+whatever is typed is stored verbatim and offered back as an option afterwards.
+
+`insurerKey()` strips line-of-business and legal-form noise so "HDFC ERGO", "HDFC ERGO
+General Insurance" and "HDFC ERGO Motor" collapse to one key. It deliberately does **not**
+strip `life` or `health`: those are the only thing separating Aditya Birla Health Insurance
+from Aditya Birla Sun Life, ICICI Lombard from ICICI Prudential, and SBI General from SBI
+Life. Grouping goes through `groupKey()` (alias first, then key) — a raw key would leave
+"Star Health" and "Star Health and Allied Insurance" as two companies.
+
+Reports canonicalise; **stored data is never rewritten**. Business Done lists the variants
+it merged so the owner can decide whether to clean the underlying records.
 
 ## Revenue reporting
 

@@ -8,6 +8,7 @@
 //
 // Pure — no firebase, no react.
 import { getDueDate, parseAnyDate } from './dateUtils'
+import { canonicalInsurer } from './insurers'
 
 // India runs April-March. Grouping production by calendar year would not match
 // any insurer's target sheet or the owner's own tax year.
@@ -137,7 +138,10 @@ export function groupBusiness(policies = [], range, pick) {
 
 export const GROUP_KEYS = {
   category: policy => policy.policyType || 'Other',
-  company: policy => policy.insurer || 'Unknown',
+  // Canonicalised, so "HDFC ERGO" and "HDFC ERGO General Insurance" are one
+  // row rather than two half-sized ones. Reporting only — the policy keeps the
+  // spelling it was saved with.
+  company: policy => canonicalInsurer(policy.insurer) || 'Unknown',
   month: policy => String(policy.startDate || '').slice(0, 7),
   client: policy => policy.clientName || 'Unknown',
 }

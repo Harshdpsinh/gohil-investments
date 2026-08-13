@@ -158,8 +158,24 @@ describe('groupBusiness', () => {
 
   it('groups by company with a fresh/renewal split and a share', () => {
     const rows = groupBusiness(book, range, GROUP_KEYS.company)
-    expect(rows[0]).toMatchObject({ key: 'HDFC ERGO', freshCount: 1, renewalCount: 0, premium: 25000, sharePct: 62.5 })
-    expect(rows[1]).toMatchObject({ key: 'Star Health', freshCount: 1, renewalCount: 1, premium: 15000, sharePct: 37.5 })
+    expect(rows[0]).toMatchObject({ key: 'HDFC ERGO General Insurance', freshCount: 1, renewalCount: 0, premium: 25000, sharePct: 62.5 })
+    expect(rows[1]).toMatchObject({ key: 'Star Health and Allied Insurance', freshCount: 1, renewalCount: 1, premium: 15000, sharePct: 37.5 })
+  })
+
+  // The reason company grouping canonicalises: one carrier entered three ways
+  // used to appear as three companies each holding a third of the business.
+  it('counts one company however many ways it was spelled', () => {
+    const rows = groupBusiness(
+      [
+        policy({ id: 'x', insurer: 'HDFC ERGO', premium: 1000 }),
+        policy({ id: 'y', insurer: 'HDFC ERGO General Insurance', premium: 1000 }),
+        policy({ id: 'z', insurer: 'hdfc ergo motor', premium: 1000 }),
+      ],
+      range,
+      GROUP_KEYS.company
+    )
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ key: 'HDFC ERGO General Insurance', count: 3, premium: 3000, sharePct: 100 })
   })
 
   it('groups by category', () => {

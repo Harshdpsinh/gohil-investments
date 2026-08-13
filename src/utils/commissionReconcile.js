@@ -9,6 +9,7 @@
 //
 // Pure — no firebase, no react — so the money rules are testable.
 import { getDueDate, parseAnyDate } from './dateUtils'
+import { canonicalInsurer } from './insurers'
 
 /** Rupee value of one transaction. netReceived is what actually landed. */
 export const txnAmount = txn => Number(txn?.netReceived ?? txn?.receivedCommission ?? 0)
@@ -197,7 +198,9 @@ export function reconcileSummary(rows = []) {
 export function insurerScorecard(rows = []) {
   const map = new Map()
   for (const row of rows) {
-    const key = row.insurer || 'Unknown'
+    // One row per company, not per spelling — otherwise a carrier entered two
+    // ways looks like two carriers each paying half of what they owe.
+    const key = canonicalInsurer(row.insurer) || 'Unknown'
     const entry = map.get(key) || {
       insurer: key, policies: 0, expected: 0, received: 0,
       outstanding: 0, unpaid: 0, short: 0, tds: 0, payDays: [],

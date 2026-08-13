@@ -20,6 +20,7 @@ import {
   summariseBusiness,
   yearOnYear,
 } from '../utils/businessDone'
+import { duplicateInsurers } from '../utils/insurers'
 import PageHeader from '../components/ui/PageHeader'
 import EmptyState from '../components/ui/EmptyState'
 import toast from 'react-hot-toast'
@@ -84,6 +85,9 @@ export default function BusinessDonePage() {
     [policies, range, view]
   )
   const periodPolicies = useMemo(() => policiesInPeriod(policies, range), [policies, range])
+  // Whole book, not just this period — a spelling that needs fixing is worth
+  // knowing about whenever it was entered.
+  const dupes = useMemo(() => duplicateInsurers(policies.map(p => p.insurer)), [policies])
 
   const slug = `business-done-${range.from}-to-${range.to}`
   const download = async (kind, format) => {
@@ -134,6 +138,26 @@ export default function BusinessDonePage() {
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
           <strong>Could not load policies.</strong> {error.message || String(error)}
         </div>
+      )}
+
+      {dupes.length > 0 && (
+        <details className="fintech-panel p-3 text-xs sm:p-4">
+          <summary className="cursor-pointer font-bold text-amber-700 dark:text-amber-300">
+            {dupes.length} insurance {dupes.length === 1 ? 'company is' : 'companies are'} spelled more than one way
+          </summary>
+          <p className="mt-2 text-gray-600 dark:text-gray-300">
+            These are counted as one company in every report below. Fixing the spelling on the
+            policies themselves is optional — nothing here changes your records.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {dupes.map(dupe => (
+              <li key={dupe.canonical}>
+                <span className="font-semibold">{dupe.canonical}</span>
+                <span className="text-gray-500"> ← {dupe.variants.join(' · ')}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {/* Period */}

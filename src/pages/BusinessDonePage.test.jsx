@@ -61,8 +61,9 @@ describe('BusinessDonePage', () => {
     expect(screen.getByText('Health')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Company-wise' }))
-    expect(screen.getByText('Star Health')).toBeTruthy()
-    expect(screen.getByText('HDFC ERGO')).toBeTruthy()
+    // Canonical spellings — the breakdown merges variants of one carrier.
+    expect(screen.getByText('Star Health and Allied Insurance')).toBeTruthy()
+    expect(screen.getByText('HDFC ERGO General Insurance')).toBeTruthy()
   })
 
   it('changing the period changes what is counted', () => {
