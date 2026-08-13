@@ -7,6 +7,7 @@ import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
 import { legacyPostingKey, matchStatement, normaliseStatement, postingKey, summarise } from '../../utils/commissionImport'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
+import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -130,6 +131,13 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           premium: row.premium || Number(row.policy.premium) || 0,
           receivedCommission: row.commissionAmount,
           netReceived: row.commissionAmount,
+          // These three were written as 0 on every row ever posted, which is
+          // why a short payment could not be seen. expectedCommission prices
+          // the policy at its own FY/RY rate; difference is what to chase.
+          expectedCommission: expectedCommission(row.policy),
+          difference: row.commissionAmount - expectedCommission(row.policy),
+          tds: row.tds || 0,
+          gst: row.gst || 0,
           payoutMonth,
           payoutDate: row.payoutDate || '',
           status: 'posted',

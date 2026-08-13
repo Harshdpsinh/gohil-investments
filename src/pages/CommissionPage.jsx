@@ -8,6 +8,11 @@ import { useAuth }       from '../hooks/useAuth'
 import { updatePolicy, getCommissionTransactionsPage } from '../firebase/firestore'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
+import {
+  AGEING_BUCKETS, RECONCILE_STATUS, ageingSummary, insurerScorecard,
+  receivablesForecast, reconcilePolicies, reconcileSummary, tdsSummary,
+} from '../utils/commissionReconcile'
+import { financialYearOf, financialYearRange } from '../utils/businessDone'
 import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import toast from 'react-hot-toast'
@@ -28,6 +33,73 @@ const COMM_COLS = [
   { header:'Total Comm ₹',  accessor: r => r.totalComm     },
   { header:'Start Date',    accessor: r => fmtDate(r.startDate) },
   { header:'Policy Year',   accessor: r => r.policyYear || 1 },
+]
+
+const STATUS_LABEL = {
+  received: 'Settled', short: 'Short paid', over: 'Overpaid',
+  awaited: 'Not received', 'no-rate': 'No rate on file', 'not-due': 'Not due yet',
+}
+const STATUS_TONE = {
+  received: 'text-emerald-600 dark:text-emerald-400',
+  short: 'text-red-600 dark:text-red-400',
+  over: 'text-amber-600 dark:text-amber-400',
+  awaited: 'text-red-600 dark:text-red-400',
+  'no-rate': 'text-gray-500',
+  'not-due': 'text-gray-400',
+}
+
+// Every column needed to chase an insurer, or to tick the row off by hand.
+const RECON_COLS = [
+  { header:'Status',       accessor: r => STATUS_LABEL[r.status] || r.status },
+  { header:'Policy No',    accessor: r => r.policyNumber },
+  { header:'Client',       accessor: r => r.clientName },
+  { header:'Company',      accessor: r => r.insurer },
+  { header:'Category',     accessor: r => r.policyType },
+  { header:'Policy Year',  accessor: r => r.policyYear },
+  { header:'Premium',      accessor: r => r.premium },
+  { header:'Expected ₹',   accessor: r => r.expected },
+  { header:'Received ₹',   accessor: r => r.received },
+  { header:'Difference ₹', accessor: r => r.difference },
+  { header:'TDS ₹',        accessor: r => r.tds },
+  { header:'Reversals ₹',  accessor: r => r.reversals },
+  { header:'Days Pending', accessor: r => r.ageingDays },
+  { header:'Days To Pay',  accessor: r => (r.daysToPay === null ? '' : r.daysToPay) },
+  { header:'Premium Collected', accessor: r => (r.premiumCollected ? 'Yes' : 'Not marked') },
+  { header:'Start Date',   accessor: r => fmtDate(r.startDate) },
+  { header:'Due Date',     accessor: r => fmtDate(r.dueDate) },
+]
+
+const SCORECARD_COLS = [
+  { header:'Company',        accessor: r => r.insurer },
+  { header:'Policies',       accessor: r => r.policies },
+  { header:'Expected ₹',     accessor: r => r.expected },
+  { header:'Received ₹',     accessor: r => r.received },
+  { header:'Variance ₹',     accessor: r => r.variance },
+  { header:'Settled %',      accessor: r => r.settledPct },
+  { header:'Unpaid',         accessor: r => r.unpaid },
+  { header:'Short Paid',     accessor: r => r.short },
+  { header:'Outstanding ₹',  accessor: r => r.outstanding },
+  { header:'Avg Days To Pay',accessor: r => (r.avgDaysToPay === null ? 'Never paid' : r.avgDaysToPay) },
+  { header:'TDS ₹',          accessor: r => r.tds },
+]
+
+const TDS_COLS = [
+  { header:'Company',   accessor: r => r.insurer },
+  { header:'Entries',   accessor: r => r.rows },
+  { header:'Gross ₹',   accessor: r => r.gross },
+  { header:'TDS ₹',     accessor: r => r.tds },
+  { header:'Net Received ₹', accessor: r => r.net },
+]
+
+const AGEING_COLS = [
+  { header:'Ageing Bucket', accessor: r => r.bucket },
+  { header:'Policies',      accessor: r => r.count },
+  { header:'Amount ₹',      accessor: r => r.amount },
+]
+
+const FORECAST_COLS = [
+  { header:'Month',            accessor: r => r.month },
+  { header:'Expected Commission ₹', accessor: r => r.amount },
 ]
 
 function commAmt(premium, pct) {
@@ -124,6 +196,9 @@ export default function CommissionPage() {
   const [ledgerPlan, setLedgerPlan] = useState('All')   // plan / LOB, as the statement said
   const [ledgerError, setLedgerError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
+  const [reconView, setReconView] = useState('outstanding')
+  const [reconStatus, setReconStatus] = useState('all')
+  const [loadingAll, setLoadingAll] = useState(false)
 
   useEffect(() => {
     if (!isAdmin) return
@@ -135,6 +210,37 @@ export default function CommissionPage() {
       .then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') })
       .catch(err => toast.error(err.message || 'Could not refresh commission ledger.'))
   }, [])
+
+  /**
+   * Reconciliation compares every policy against the WHOLE ledger. On a partial
+   * ledger a policy whose payout sits on an unloaded page reads as unpaid, so
+   * the panel below refuses to be trusted until this has run.
+   */
+  const loadEntireLedger = async () => {
+    if (loadingAll) return
+    setLoadingAll(true)
+    try {
+      let cursor = transactionCursor
+      let more = hasMoreTransactions
+      const collected = []
+      while (more) {
+        const page = await getCommissionTransactionsPage({ pageSize: 500, cursor })
+        collected.push(...page.rows)
+        cursor = page.cursor
+        more = page.hasMore
+      }
+      setTransactions(current => [...current, ...collected])
+      setTransactionCursor(cursor)
+      setHasMoreTransactions(false)
+      setLedgerError('')
+    } catch (err) {
+      const message = err.message || 'Could not load the full commission ledger.'
+      setLedgerError(message)
+      toast.error(message)
+    } finally {
+      setLoadingAll(false)
+    }
+  }
 
   const loadMoreTransactions = async () => {
     if (!hasMoreTransactions || loadingMore) return
@@ -231,6 +337,55 @@ export default function CommissionPage() {
       byPlan: tally(item => item.planName || 'Unspecified'),
     }
   }, [ledgerRows, policies])
+  // ── Reconciliation: the policy book joined to the posted ledger ──────────
+  // Answers "which policy earned commission that never arrived", which neither
+  // the estimate nor the ledger can answer alone.
+  const reconciled = useMemo(
+    () => reconcilePolicies(policies, transactions),
+    [policies, transactions]
+  )
+  const reconTotals = useMemo(() => reconcileSummary(reconciled), [reconciled])
+  const ageing = useMemo(() => ageingSummary(reconciled), [reconciled])
+  const scorecard = useMemo(() => insurerScorecard(reconciled), [reconciled])
+  const forecast = useMemo(() => receivablesForecast(policies), [policies])
+  const currentFy = useMemo(() => financialYearRange(financialYearOf(new Date())), [])
+  const tds = useMemo(
+    () => tdsSummary(transactions, { from: currentFy.from.slice(0, 7), to: currentFy.to.slice(0, 7) }),
+    [transactions, currentFy]
+  )
+
+  const reconRows = useMemo(() => {
+    const rows = reconStatus === 'all'
+      ? reconciled.filter(row => row.chaseable || row.status === RECONCILE_STATUS.SHORT || row.status === RECONCILE_STATUS.OVER)
+      : reconciled.filter(row => row.status === reconStatus)
+    // Oldest unpaid first — that is the chase order.
+    return [...rows].sort((a, b) => b.ageingDays - a.ageingDays || b.expected - a.expected)
+  }, [reconciled, reconStatus])
+
+  // Object-shaped summaries flattened for the tables and the Excel export.
+  const ageingRows = useMemo(
+    () => AGEING_BUCKETS.map(bucket => ({ bucket, ...ageing[bucket] })),
+    [ageing]
+  )
+  const forecastRows = useMemo(
+    () => Object.entries(forecast.byMonth).map(([month, amount]) => ({ month, amount })),
+    [forecast]
+  )
+
+  const downloadSimple = async (rows, cols, sheet, name, format) => {
+    if (!rows.length) return toast.error('Nothing to download in this view.')
+    try {
+      if (format === 'excel') await exportToExcel(rows, cols, sheet, name)
+      else await exportToCSV(rows, cols, name)
+      toast.success('Download ready.')
+    } catch (err) {
+      toast.error(err.message || 'Could not build the file.')
+    }
+  }
+
+  const downloadRecon = format =>
+    downloadSimple(reconRows, RECON_COLS, 'Reconciliation', `commission-reconciliation-${reconStatus}`, format)
+
   const actualBreakdown = {
     client: actualStats.byClient, category: actualStats.byCategory, month: actualStats.byMonth,
     business: actualStats.byBusinessType, plan: actualStats.byPlan,
@@ -282,6 +437,198 @@ export default function CommissionPage() {
         ].map(({ label, val, note, tone }) => (
           <div key={label} className="commission-metric"><p className="commission-metric-label">{label}</p><p className={`commission-metric-value ${tone || ''}`}>{val}</p><p className="commission-metric-note">{note}</p></div>
         ))}
+      </div>
+
+      {/* ── Reconciliation ─────────────────────────────────────────────── */}
+      <div className="fintech-panel p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-sm font-extrabold text-gray-950 dark:text-white">Reconciliation · what the insurers still owe you</p>
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              Every policy priced at its own FY/RY rate and matched against posted receipts.
+            </p>
+          </div>
+          <div className="commission-segmented">
+            {[['outstanding','Outstanding'],['ageing','Ageing'],['scorecard','Company scorecard'],['forecast','Forecast'],['tds','TDS']].map(([key,label]) => (
+              <button key={key} className={reconView === key ? 'active' : ''} onClick={() => setReconView(key)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        {hasMoreTransactions && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <span>
+              <strong>These figures are incomplete.</strong> Only {transactions.length} ledger entries are loaded,
+              so a policy paid on an unloaded page still shows as unpaid.
+            </span>
+            <button className="btn-secondary text-xs" disabled={loadingAll} onClick={loadEntireLedger}>
+              {loadingAll ? 'Loading…' : 'Load full ledger'}
+            </button>
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            ['Outstanding', fmtCurrency(reconTotals.outstanding), `${reconTotals.counts.awaited} unpaid · ${reconTotals.counts.short} short`, 'text-red-600 dark:text-red-400'],
+            ['Settled', reconTotals.counts.received, 'policies fully paid', 'text-emerald-600 dark:text-emerald-400'],
+            ['TDS this FY', fmtCurrency(tds.total), currentFy.label],
+            ['Next 90 days', fmtCurrency(forecast.total), `${forecast.count} renewals due`],
+          ].map(([label, value, note, tone]) => (
+            <div key={label} className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
+              <p className={`text-lg font-extrabold ${tone || ''}`}>{value}</p>
+              <p className="text-[11px] text-gray-500">{note}</p>
+            </div>
+          ))}
+        </div>
+
+        {reconView === 'outstanding' && (
+          <>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <select value={reconStatus} onChange={e => setReconStatus(e.target.value)} className="form-select w-auto text-xs">
+                <option value="all">Needs action (unpaid, short, over)</option>
+                <option value={RECONCILE_STATUS.AWAITED}>Not received only</option>
+                <option value={RECONCILE_STATUS.SHORT}>Short paid only</option>
+                <option value={RECONCILE_STATUS.OVER}>Overpaid only</option>
+                <option value={RECONCILE_STATUS.RECEIVED}>Settled only</option>
+                <option value={RECONCILE_STATUS.NO_RATE}>Missing commission rate</option>
+              </select>
+              <span className="text-xs text-gray-500">{reconRows.length} policies</span>
+              <div className="ml-auto flex gap-2">
+                <button className="btn-primary text-xs" onClick={() => downloadRecon('excel')}>⬇ Excel</button>
+                <button className="btn-secondary text-xs" onClick={() => downloadRecon('csv')}>⬇ CSV</button>
+              </div>
+            </div>
+            <div className="mt-3 max-h-[52vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="min-w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
+                  <tr>{['Status','Policy / Client','Company','Expected','Received','Difference','Pending'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {reconRows.map(row => (
+                    <tr key={row.policyId}>
+                      <td className="table-cell"><span className={`font-bold ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>{!row.premiumCollected && row.chaseable && <p className="text-[10px] text-gray-500">premium not marked paid</p>}</td>
+                      <td className="table-cell"><p className="font-mono">{row.policyNumber}</p><p className="text-[11px] text-gray-500">{row.clientName}</p></td>
+                      <td className="table-cell">{row.insurer}</td>
+                      <td className="table-cell">{fmtCurrency(row.expected)}</td>
+                      <td className="table-cell">{fmtCurrency(row.received)}</td>
+                      <td className={`table-cell font-bold ${row.difference < 0 ? 'text-red-600 dark:text-red-400' : row.difference > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>{fmtCurrency(row.difference)}</td>
+                      <td className="table-cell">{row.chaseable ? `${row.ageingDays}d` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!reconRows.length && <p className="p-6 text-center text-xs text-gray-500">Nothing in this bucket. Every policy here is settled.</p>}
+            </div>
+          </>
+        )}
+
+        {reconView === 'ageing' && (
+          <div className="mt-3">
+            <div className="mb-3 flex justify-end gap-2">
+              <button className="btn-primary text-xs" onClick={() => downloadSimple(ageingRows, AGEING_COLS, 'Ageing', 'commission-ageing', 'excel')}>⬇ Excel</button>
+              <button className="btn-secondary text-xs" onClick={() => downloadSimple(ageingRows, AGEING_COLS, 'Ageing', 'commission-ageing', 'csv')}>⬇ CSV</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {AGEING_BUCKETS.map(bucket => (
+                <div key={bucket} className={`rounded-xl border p-3 ${bucket === '90+' ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/30' : 'border-slate-200 dark:border-slate-700'}`}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{bucket} days</p>
+                  <p className="text-lg font-extrabold">{fmtCurrency(ageing[bucket].amount)}</p>
+                  <p className="text-[11px] text-gray-500">{ageing[bucket].count} policies</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Counted from the day cover started. Anything past 90 days needs escalating, not chasing.</p>
+          </div>
+        )}
+
+        {reconView === 'scorecard' && (
+          <div className="mt-3">
+            <div className="mb-3 flex justify-end gap-2">
+              <button className="btn-primary text-xs" onClick={() => downloadSimple(scorecard, SCORECARD_COLS, 'Scorecard', 'commission-company-scorecard', 'excel')}>⬇ Excel</button>
+              <button className="btn-secondary text-xs" onClick={() => downloadSimple(scorecard, SCORECARD_COLS, 'Scorecard', 'commission-company-scorecard', 'csv')}>⬇ CSV</button>
+            </div>
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="min-w-full text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-800"><tr>{['Company','Policies','Expected','Received','Settled %','Outstanding','Avg days to pay'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr></thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {scorecard.map(row => (
+                    <tr key={row.insurer}>
+                      <td className="table-cell font-semibold">{row.insurer}</td>
+                      <td className="table-cell">{row.policies}</td>
+                      <td className="table-cell">{fmtCurrency(row.expected)}</td>
+                      <td className="table-cell">{fmtCurrency(row.received)}</td>
+                      <td className={`table-cell font-bold ${row.settledPct >= 95 ? 'text-emerald-600 dark:text-emerald-400' : row.settledPct >= 70 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{row.settledPct}%</td>
+                      <td className="table-cell">{fmtCurrency(row.outstanding)}</td>
+                      <td className="table-cell">{row.avgDaysToPay === null ? <span className="text-red-600 dark:text-red-400">never paid</span> : `${row.avgDaysToPay}d`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {reconView === 'forecast' && (
+          <div className="mt-3">
+            <div className="mb-3 flex justify-end gap-2">
+              <button className="btn-primary text-xs" onClick={() => downloadSimple(forecastRows, FORECAST_COLS, 'Forecast', 'commission-forecast', 'excel')}>⬇ Excel</button>
+              <button className="btn-secondary text-xs" onClick={() => downloadSimple(forecastRows, FORECAST_COLS, 'Forecast', 'commission-forecast', 'csv')}>⬇ CSV</button>
+            </div>
+            {!forecastRows.length ? (
+              <p className="p-6 text-center text-xs text-gray-500">No renewals fall due in the next 90 days.</p>
+            ) : (
+              <div className="space-y-2">
+                {forecastRows.map(row => (
+                  <div key={row.month} className="flex items-center gap-3">
+                    <span className="w-20 text-xs font-semibold">{row.month}</span>
+                    <div className="h-2 flex-1 rounded-full bg-slate-200 dark:bg-slate-700">
+                      <div className="h-2 rounded-full bg-blue-500" style={{ width: `${(row.amount / Math.max(...forecastRows.map(r => r.amount), 1)) * 100}%` }} />
+                    </div>
+                    <span className="w-24 text-right text-xs font-bold">{fmtCurrency(row.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-3 text-xs text-gray-500">Renewals already on the book, priced at the RY rate. Excludes anything already renewed.</p>
+          </div>
+        )}
+
+        {reconView === 'tds' && (
+          <div className="mt-3">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-xs text-gray-600 dark:text-gray-300">{currentFy.label} · check against Form 26AS</p>
+              <div className="flex gap-2">
+                <button className="btn-primary text-xs" onClick={() => downloadSimple(tds.byInsurer, TDS_COLS, 'TDS', `tds-${currentFy.label.replace(/\s/g,'-')}`, 'excel')}>⬇ Excel</button>
+                <button className="btn-secondary text-xs" onClick={() => downloadSimple(tds.byInsurer, TDS_COLS, 'TDS', `tds-${currentFy.label.replace(/\s/g,'-')}`, 'csv')}>⬇ CSV</button>
+              </div>
+            </div>
+            {!tds.total ? (
+              <p className="rounded-lg border border-slate-200 p-6 text-center text-xs text-gray-500 dark:border-slate-700">
+                No TDS captured yet. Statements imported before this release did not record it —
+                re-import a statement that has a TDS column and it will appear here.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-800"><tr>{['Company','Entries','Gross','TDS','Net received'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr></thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {tds.byInsurer.map(row => (
+                      <tr key={row.insurer}>
+                        <td className="table-cell font-semibold">{row.insurer}</td>
+                        <td className="table-cell">{row.rows}</td>
+                        <td className="table-cell">{fmtCurrency(row.gross)}</td>
+                        <td className="table-cell font-bold text-blue-600 dark:text-blue-400">{fmtCurrency(row.tds)}</td>
+                        <td className="table-cell">{fmtCurrency(row.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="bg-slate-50 dark:bg-slate-800"><td className="table-cell font-extrabold">Total</td><td className="table-cell" /><td className="table-cell font-extrabold">{fmtCurrency(tds.gross)}</td><td className="table-cell font-extrabold">{fmtCurrency(tds.total)}</td><td className="table-cell" /></tr></tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="fintech-panel p-4 sm:p-5">

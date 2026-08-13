@@ -15,6 +15,7 @@ import AdminUsersPage        from './pages/AdminUsersPage'
 import ClaimsPage            from './pages/ClaimsPage'
 import BackupPage            from './pages/BackupPage'
 import ReportsPage           from './pages/ReportsPage'
+import BusinessDonePage      from './pages/BusinessDonePage'
 
 // Pipeline 3D is disabled. The page and src/three/ are still in the repo — to
 // switch it back on, restore the lazy import, the /pipeline route below and the
@@ -51,6 +52,7 @@ export default function App() {
                 <Route path="/policies"            element={<PoliciesPage />} />
                 <Route path="/renewals"            element={<RenewalsPage />} />
                 <Route path="/proposals"           element={<ProposalsPage />} />
+                <Route path="/business"            element={<BusinessDonePage />} />
                 <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/claims"              element={<ClaimsPage />} />
                 <Route path="/reports"             element={<ReportsPage />} />
