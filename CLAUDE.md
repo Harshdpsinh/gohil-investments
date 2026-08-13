@@ -68,6 +68,8 @@ Pure logic worth testing has been pulled out of the Firebase and React layers in
 - `src/utils/policyImport.js` — fuzzy matching and proposal/lead → policy conversion
 - `src/utils/dateUtils.js` — date parsing, frequency, due dates
 - `src/utils/commissionImport.js` — statement column vocabulary, matching, posting keys
+- `src/utils/commissionReconcile.js` — policy book joined to the posted ledger
+- `src/utils/businessDone.js` — financial-year periods, fresh/renewal split, persistency
 - `src/utils/pdfProfiles.js` — the six insurer PDF layout parsers
 
 Keep those free of any `firebase` or `react` import — and keep `pdfProfiles.js` free of
@@ -119,6 +121,29 @@ The email workflow authenticates with the `FIREBASE_SERVICE_ACCOUNT` repo secret
 `deploy-firestore-rules.yml` already needs, so its only unique secret is
 `GMAIL_APP_PASSWORD` (`GMAIL_USER` and `ALERT_EMAIL_TO` are set). Until that one is set
 the job fails; nothing else is blocked on it.
+
+## Revenue reporting
+
+Two questions the app answers separately, and they must not be merged:
+
+- **Business Done** (`/business`) — what was *sold*. Driven by the policy book, keyed on
+  `startDate`, because insurer statements land 30-90 days late and a ledger-driven
+  production report would understate the current month forever. Fresh vs Renewal comes
+  from `parentPolicyId`/`policyYear`, which `renewPolicy` writes — no statement needed.
+- **Commission reconciliation** (on `/commission`) — what was *paid for*. Joins each
+  policy to `commission_transactions` and buckets it: settled, short paid, overpaid, not
+  received, no rate on file.
+
+Periods are **April-March**. A calendar year matches no insurer's target sheet and no tax
+year, so `businessDone.js` owns the FY maths and nothing should reimplement it.
+
+Reconciliation reads the **whole** ledger. `getCommissionTransactionsPage` pages 100 at a
+time, and on a partial ledger a policy paid on an unloaded page reads as unpaid — the
+panel shows an amber warning until the full ledger is loaded. Do not remove that guard.
+
+`expectedCommission`, `difference`, `tds` and `gst` were written as `0` on every row
+posted before Aug 2026. Historical rows will show no TDS and a misleading difference;
+re-import a statement to backfill it.
 
 ## WhatsApp
 

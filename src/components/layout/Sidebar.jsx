@@ -17,6 +17,7 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/renewals',   icon:'renewals', label:'Renewals'    },
     { to:'/claims',     icon:'claims', label:'Claims'      },
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
+    { to:'/business',   icon:'work', label:'Business Done' },
     ...(isAdmin ? [
       { to:'/commission',  icon:'commission', label:'Commission'  },
       { to:'/reports',     icon:'reports', label:'Reports'      },

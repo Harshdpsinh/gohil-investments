@@ -18,6 +18,11 @@ const ALIASES = {
   premium: ['premiumforcommission', 'gwpbeforetax', 'grosspremium', 'premium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull', 'amount'],
   commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'rate'],
   commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'expense', 'payout', 'netpayable', 'netpayment', 'commission'],
+  // Insurers deduct 5% TDS under s.194D. Capturing it turns the ledger into
+  // something that can be checked against Form 26AS at year end instead of
+  // being reconciled by hand.
+  tds: ['tds', 'tdsamount', 'tdsdeducted', 'taxdeducted', 'incometax', 'tdsdeduction'],
+  gst: ['gst', 'gstamount', 'igst', 'cgst', 'sgst', 'servicetax', 'gstonbrokerage'],
   payoutDate: ['payoutdate', 'paymentdate', 'transactiondate', 'date'],
   payoutMonth: ['month', 'payoutmonth', 'paymentmonth', 'cycle'],
 }
@@ -100,6 +105,8 @@ export function normaliseStatement(rows = []) {
         premium: toNumber(row[cols.premium]),
         commissionPct: toNumber(row[cols.commissionPct]),
         commissionAmount: toNumber(row[cols.commissionAmount]),
+        tds: toNumber(row[cols.tds]),
+        gst: toNumber(row[cols.gst]),
         payoutDate,
         payoutMonth: toPayoutMonth(row[cols.payoutMonth]) || payoutDate.slice(0, 7),
       }
