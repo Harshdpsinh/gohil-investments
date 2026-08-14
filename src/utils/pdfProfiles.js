@@ -176,7 +176,11 @@ export function parseAdityaBirla(pages) {
         premium: toNumber(r.premium),
         commissionPct: toNumber(r.commissionPct),
         commissionAmount: toNumber(r.commissionAmount),
-        businessType: /retail new|new/i.test(r.businessType) ? 'New' : r.businessType || '',
+        // Never pass the band text through. Aditya Birla prints reward lines
+        // ("Booster") in this column, and passing them through filed them in
+        // the ledger as if "Booster" were a kind of business.
+        businessType: /renew/i.test(r.businessType) ? 'Renewal'
+          : /retail new|fresh|new/i.test(r.businessType) ? 'Fresh' : '',
       })
     }
   }

@@ -43,12 +43,29 @@ describe('parseAdityaBirla', () => {
       premium: 41626,
       commissionPct: 32,
       commissionAmount: 13320.32,
-      businessType: 'New',
+      // 'Fresh', not 'New' — the same word the spreadsheet path and the
+      // Commission page filter use. 'New' never matched the "Fresh" filter.
+      businessType: 'Fresh',
     })
   })
 
   it('skips the totals line', () => {
     expect(parseAdityaBirla(ADITYA_BIRLA)).toHaveLength(1)
+  })
+
+  // Aditya Birla prints reward lines in the same column as the business type.
+  // The parser used to pass the band text straight through, so the ledger ended
+  // up with "Booster" filed as if it were a kind of business.
+  it('does not treat a Booster reward line as a business type', () => {
+    const withBooster = [[
+      ADITYA_BIRLA[0][0], ADITYA_BIRLA[0][1],
+      line(600, [at(30, '31-26-'), at(70, 'JATIN')]),
+      line(596, [at(150, 'ACTIV ONE MAX')]),
+      line(592, [at(30, '0164666-'), at(70, 'BELADIYA'), at(115, 'Booster'),
+        at(260, '41,626'), at(320, '5'), at(360, '2,300.00'), at(510, '2,070.00')]),
+      line(584, [at(30, '00')]),
+    ]]
+    expect(parseAdityaBirla(withBooster)[0].businessType).toBe('')
   })
 
   it('ignores a page without the annexure heading', () => {
