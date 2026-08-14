@@ -10,9 +10,10 @@ import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import {
   AGEING_BUCKETS, RECONCILE_STATUS, ageingSummary, insurerScorecard,
-  receivablesForecast, reconcilePolicies, reconcileSummary, tdsSummary,
+  receivablesForecast, reconcilePolicies, reconcileSummary, resolveBusinessType, tdsSummary,
 } from '../utils/commissionReconcile'
 import { financialYearOf, financialYearRange } from '../utils/businessDone'
+import { canonicalInsurer, duplicateInsurers } from '../utils/insurers'
 import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import toast from 'react-hot-toast'
@@ -294,7 +295,10 @@ export default function CommissionPage() {
     const byMonth    = Array(12).fill(0)
     filtered.forEach(p => {
       byType[p.policyType]  = (byType[p.policyType]  || 0) + p.totalComm
-      byInsurer[p.insurer]  = (byInsurer[p.insurer]  || 0) + p.totalComm
+      // Canonicalised: "HDFC ERGO" and "HDFC ERGO General Insurance" are one
+      // company, not two each showing half the earnings.
+      const company = canonicalInsurer(p.insurer) || 'Other'
+      byInsurer[company] = (byInsurer[company] || 0) + p.totalComm
       if (p.startDate) {
         try {
           const d = parseAnyDate(p.startDate)
@@ -315,10 +319,22 @@ export default function CommissionPage() {
     () => [...new Set(transactions.map(t => t.planName).filter(Boolean))].sort(),
     [transactions]
   )
+  // Business type is resolved against the policy book, not read raw. Most
+  // statements carry no Fresh/Renewal column, and the ones that do disagree on
+  // the wording — so the policy's own year is the reliable answer.
+  const policyById = useMemo(
+    () => new Map(policies.map(policy => [policy.id, policy])),
+    [policies]
+  )
+  const businessTypeOf = useCallback(
+    item => resolveBusinessType(item, policyById.get(item.policyId) || null),
+    [policyById]
+  )
+
   const ledgerRows = useMemo(() => transactions.filter(item =>
-    (ledgerType === 'All' || (item.businessType || '') === ledgerType) &&
+    (ledgerType === 'All' || businessTypeOf(item) === ledgerType) &&
     (ledgerPlan === 'All' || (item.planName || '') === ledgerPlan)
-  ), [transactions, ledgerType, ledgerPlan])
+  ), [transactions, ledgerType, ledgerPlan, businessTypeOf])
 
   const actualStats = useMemo(() => {
     const amount = item => Number(item.netReceived || item.receivedCommission || 0)
@@ -328,15 +344,21 @@ export default function CommissionPage() {
     }, {})
     return {
       total: ledgerRows.reduce((sum, item) => sum + amount(item), 0),
-      byInsurer: tally(item => item.insurer || 'Other'),
+      // Same company however the statement spelled it. Anything unrecognised
+      // and anything blank falls into "Other" rather than fragmenting the list.
+      byInsurer: tally(item => canonicalInsurer(item.insurer) || 'Other'),
       byClient: tally(item => item.clientName || 'Unknown'),
       byCategory: tally(item => policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'),
       byMonth: tally(item => item.payoutMonth || 'Unknown'),
-      // Blank on statements that carry no such column (Star Health's does not).
-      byBusinessType: tally(item => item.businessType || 'Unspecified'),
+      // Falls back to the policy's own year when the statement carried no
+      // Fresh/Renewal column — which is most of them.
+      byBusinessType: tally(businessTypeOf),
       byPlan: tally(item => item.planName || 'Unspecified'),
     }
-  }, [ledgerRows, policies])
+    // businessTypeOf is listed because the policy book usually finishes loading
+    // after the ledger — without it the Fresh/Renewal split would stay stuck on
+    // the first render, when no policy was available to derive from.
+  }, [ledgerRows, policies, businessTypeOf])
   // ── Reconciliation: the policy book joined to the posted ledger ──────────
   // Answers "which policy earned commission that never arrived", which neither
   // the estimate nor the ledger can answer alone.
@@ -385,6 +407,18 @@ export default function CommissionPage() {
 
   const downloadRecon = format =>
     downloadSimple(reconRows, RECON_COLS, 'Reconciliation', `commission-reconciliation-${reconStatus}`, format)
+
+  // Spellings across BOTH sides — the policy book and the posted ledger. A
+  // statement writing "HDFC ERGO" against a policy saved as "HDFC ERGO General
+  // Insurance" is the common case, and it splits one company across two rows
+  // until it is merged.
+  const insurerDupes = useMemo(
+    () => duplicateInsurers([
+      ...policies.map(p => p.insurer),
+      ...transactions.map(t => t.insurer),
+    ]),
+    [policies, transactions]
+  )
 
   const actualBreakdown = {
     client: actualStats.byClient, category: actualStats.byCategory, month: actualStats.byMonth,
@@ -633,12 +667,29 @@ export default function CommissionPage() {
 
       <div className="fintech-panel p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only · {ledgerRows.length} of {transactions.length} entries</p></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise'],['business','Fresh vs Renewal'],['plan','Plan-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
+        {actualView === 'insurer' && insurerDupes.length > 0 && (
+          <details className="mt-3 rounded-lg border border-slate-200 p-2.5 text-xs dark:border-slate-700">
+            <summary className="cursor-pointer font-bold text-amber-700 dark:text-amber-300">
+              {insurerDupes.length} {insurerDupes.length === 1 ? 'company is' : 'companies are'} spelled more than one way — counted as one here
+            </summary>
+            <ul className="mt-2 space-y-1">
+              {insurerDupes.map(dupe => (
+                <li key={dupe.canonical}>
+                  <span className="font-semibold">{dupe.canonical}</span>
+                  <span className="text-gray-500"> ← {dupe.variants.join(' · ')}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-gray-500">Your records are untouched. A company we do not recognise is kept exactly as written, and grouped under <strong>Other</strong> only if it has no name at all.</p>
+          </details>
+        )}
+
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <select value={ledgerType} onChange={e=>setLedgerType(e.target.value)} className="form-select w-auto text-xs">
             <option value="All">All business</option>
             <option value="Fresh">Fresh only</option>
             <option value="Renewal">Renewal only</option>
-            <option value="">Unspecified only</option>
+            <option value="Unspecified">Unspecified only</option>
           </select>
           <select value={ledgerPlan} onChange={e=>setLedgerPlan(e.target.value)} className="form-select w-auto text-xs">
             <option value="All">All plans / LOB</option>

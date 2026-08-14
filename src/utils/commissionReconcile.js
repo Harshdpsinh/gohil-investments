@@ -10,6 +10,8 @@
 // Pure — no firebase, no react — so the money rules are testable.
 import { getDueDate, parseAnyDate } from './dateUtils'
 import { canonicalInsurer } from './insurers'
+import { normaliseBusinessType } from './commissionImport'
+import { isRenewalPolicy } from './businessDone'
 
 /** Rupee value of one transaction. netReceived is what actually landed. */
 export const txnAmount = txn => Number(txn?.netReceived ?? txn?.receivedCommission ?? 0)
@@ -141,6 +143,30 @@ export function reconcilePolicies(policies = [], transactions = [], { asOf = new
       chaseable: !entry.count && !notStarted && expected > 0 && inForce(policy),
     }
   })
+}
+
+/**
+ * Fresh or Renewal for one ledger row.
+ *
+ * The statement's own column is preferred but is usually not there: Star Health
+ * and ICICI Lombard print no such column at all, and the carriers that do print
+ * one disagree on the words — "New", "Retail New Business", "RYC". Worse, the
+ * Aditya Birla parser used to pass its band text straight through, so a reward
+ * line called "Booster" was filed as if it were a kind of business.
+ *
+ * So: normalise whatever the statement said, and when that leaves nothing, ask
+ * the policy. `policyYear` and `parentPolicyId` already answer this exactly —
+ * renewPolicy writes both — and they are right whether or not the insurer
+ * bothered to say. Only a row with no policy at all stays unspecified.
+ *
+ * Read-time only. Nothing stored is rewritten, so historical rows are corrected
+ * on screen without a migration.
+ */
+export function resolveBusinessType(txn = {}, policy = null) {
+  const stated = normaliseBusinessType(txn.businessType)
+  if (stated) return stated
+  if (!policy) return 'Unspecified'
+  return isRenewalPolicy(policy) ? 'Renewal' : 'Fresh'
 }
 
 export const AGEING_BUCKETS = ['0-30', '31-60', '61-90', '90+']

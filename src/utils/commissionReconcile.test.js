@@ -10,6 +10,7 @@ import {
   receivablesForecast,
   reconcilePolicies,
   reconcileSummary,
+  resolveBusinessType,
   tdsSummary,
   toleranceFor,
 } from './commissionReconcile'
@@ -282,5 +283,55 @@ describe('tdsSummary', () => {
     const summary = tdsSummary(rows, { from: '2026-04', to: '2027-03' })
     expect(summary.total).toBe(125)
     expect(summary.byInsurer).toHaveLength(2)
+  })
+})
+
+describe('resolveBusinessType', () => {
+  const fresh = { id: 'p1', policyYear: 1 }
+  const renewed = { id: 'p2', policyYear: 3, parentPolicyId: 'p1' }
+
+  // Every spelling the six statement parsers and the spreadsheet path emit.
+  it.each([
+    ['Fresh', 'Fresh'],
+    ['New', 'Fresh'],
+    ['Retail New Business', 'Fresh'],
+    ['Renewal', 'Renewal'],
+    ['Renewed', 'Renewal'],
+    // Tata AIA's "RYC" is turned into 'Renewal' by its own parser, so it never
+    // reaches here as a raw token.
+  ])('takes %s from the statement as %s', (stated, expected) => {
+    expect(resolveBusinessType({ businessType: stated }, fresh)).toBe(expected)
+  })
+
+  // The bug this exists for: Star Health and ICICI print no such column, so
+  // nearly the whole ledger read as "Unspecified".
+  it.each([
+    ['a blank column', ''],
+    ['no column at all', undefined],
+    ['whitespace', '   '],
+  ])('falls back to the policy year given %s', (_label, stated) => {
+    expect(resolveBusinessType({ businessType: stated }, fresh)).toBe('Fresh')
+    expect(resolveBusinessType({ businessType: stated }, renewed)).toBe('Renewal')
+  })
+
+  // "Booster" is an Aditya Birla reward line, not a kind of business. It used
+  // to be stored verbatim and shown as its own category on the dashboard.
+  it('ignores a reward line and uses the policy instead', () => {
+    expect(resolveBusinessType({ businessType: 'Booster' }, fresh)).toBe('Fresh')
+    expect(resolveBusinessType({ businessType: 'Booster' }, renewed)).toBe('Renewal')
+  })
+
+  it('reads a renewal from the parent link even when policyYear is missing', () => {
+    expect(resolveBusinessType({}, { id: 'x', parentPolicyId: 'old' })).toBe('Renewal')
+  })
+
+  // Only a row that matched no policy can honestly stay unknown.
+  it('stays unspecified when there is no policy to ask', () => {
+    expect(resolveBusinessType({ businessType: '' }, null)).toBe('Unspecified')
+    expect(resolveBusinessType({}, undefined)).toBe('Unspecified')
+  })
+
+  it('trusts the statement over the policy when the two disagree', () => {
+    expect(resolveBusinessType({ businessType: 'Renewal' }, fresh)).toBe('Renewal')
   })
 })
