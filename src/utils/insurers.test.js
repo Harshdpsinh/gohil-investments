@@ -6,6 +6,7 @@ import {
   insurerKey,
   insurerOptions,
   sameInsurer,
+  unrecognisedInsurers,
 } from './insurers'
 
 describe('KNOWN_INSURERS', () => {
@@ -78,6 +79,37 @@ describe('canonicalInsurer', () => {
   })
 
   // Losing what the user typed is worse than showing a spelling we did not pick.
+  // Statements truncate. "ICIC" appeared as its own ₹53.8K company on the
+  // dashboard, separate from ICICI Lombard.
+  it.each([
+    ['Star Heal', 'Star Health and Allied Insurance'],
+    ['Niva Bup', 'Niva Bupa Health Insurance'],
+    ['Cholamandal', 'Cholamandalam MS General Insurance'],
+  ])('resolves the truncation %s to %s', (input, expected) => {
+    expect(canonicalInsurer(input)).toBe(expected)
+  })
+
+  // A prefix that fits two real companies must NOT be guessed: ICIC prefixes
+  // both ICICI Lombard (general) and ICICI Prudential (life).
+  it('leaves an ambiguous truncation alone rather than guessing', () => {
+    expect(canonicalInsurer('ICIC')).toBe('ICIC')
+  })
+
+  // Under four characters is never prefix-matched, or a fragment would swallow
+  // whole families of companies.
+  it.each(['HDF', 'Tat', 'Nat'])('does not prefix-match the short fragment %s', value => {
+    expect(canonicalInsurer(value)).toBe(value)
+  })
+
+  // Not a prefix guess: stripping "General"/"Insurance" reduces the full name
+  // to the key `sbi`, so a bare "SBI" is an exact hit. SBI Life keeps its
+  // `life` token and stays separate. Where it matters, the Commission page
+  // prefers the matched policy's own spelling over the statement's anyway.
+  it('reads a bare SBI as the general insurer, and keeps SBI Life apart', () => {
+    expect(canonicalInsurer('SBI')).toBe('SBI General Insurance')
+    expect(canonicalInsurer('SBI Life')).toBe('SBI Life Insurance')
+  })
+
   it('keeps an unknown company exactly as typed', () => {
     expect(canonicalInsurer('Saurashtra Mutual Insurance')).toBe('Saurashtra Mutual Insurance')
     expect(canonicalInsurer('  Trimmed Co  ')).toBe('Trimmed Co')
@@ -140,5 +172,31 @@ describe('duplicateInsurers', () => {
 
   it('does not report the two Aditya Birla companies as duplicates', () => {
     expect(duplicateInsurers(['Aditya Birla Health Insurance', 'Aditya Birla Sun Life Insurance'])).toEqual([])
+  })
+})
+
+describe('unrecognisedInsurers', () => {
+  it('flags a truncation too ambiguous to resolve', () => {
+    // The exact case from the dashboard: ICIC showed as its own ₹53.8K company.
+    expect(unrecognisedInsurers(['ICIC', 'ICICI Lombard General Insurance'])).toEqual(['ICIC'])
+  })
+
+  it('says nothing about names it resolved', () => {
+    expect(unrecognisedInsurers([
+      'HDFC ERGO', 'Star Heal', 'Max Bupa', 'LIC', 'New India Assurance',
+    ])).toEqual([])
+  })
+
+  it('lists a genuinely unknown company once, however often it appears', () => {
+    expect(unrecognisedInsurers(['Saurashtra Mutual', 'saurashtra  mutual', 'Saurashtra Mutual']))
+      .toEqual(['Saurashtra Mutual'])
+  })
+
+  it('ignores blanks', () => {
+    expect(unrecognisedInsurers(['', '   ', null, undefined])).toEqual([])
+  })
+
+  it('comes back sorted', () => {
+    expect(unrecognisedInsurers(['Zzz Co', 'Aaa Co'])).toEqual(['Aaa Co', 'Zzz Co'])
   })
 })

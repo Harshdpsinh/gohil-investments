@@ -13,7 +13,7 @@ import {
   receivablesForecast, reconcilePolicies, reconcileSummary, resolveBusinessType, tdsSummary,
 } from '../utils/commissionReconcile'
 import { financialYearOf, financialYearRange } from '../utils/businessDone'
-import { canonicalInsurer, duplicateInsurers } from '../utils/insurers'
+import { canonicalInsurer, duplicateInsurers, unrecognisedInsurers } from '../utils/insurers'
 import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import toast from 'react-hot-toast'
@@ -338,17 +338,28 @@ export default function CommissionPage() {
 
   const actualStats = useMemo(() => {
     const amount = item => Number(item.netReceived || item.receivedCommission || 0)
+    // Mutate the accumulator; the old `{ ...map }` spread rebuilt the whole
+    // object on every row.
     const tally = pick => ledgerRows.reduce((map, item) => {
       const key = pick(item)
-      return { ...map, [key]: (map[key] || 0) + amount(item) }
+      map[key] = (map[key] || 0) + amount(item)
+      return map
     }, {})
+
+    // The policy is the authority for who the company and client are; the
+    // statement's spelling is only a hint. Statements abbreviate ("ICIC"),
+    // truncate, and use legal names the book does not — reading the matched
+    // policy first collapses all of that without needing an alias for every
+    // variant a carrier might invent.
+    const policyOf = item => policyById.get(item.policyId) || null
+    const companyOf = item => canonicalInsurer(policyOf(item)?.insurer || item.insurer) || 'Other'
+    const clientOf = item => policyOf(item)?.clientName || item.clientName || 'Unknown'
+
     return {
       total: ledgerRows.reduce((sum, item) => sum + amount(item), 0),
-      // Same company however the statement spelled it. Anything unrecognised
-      // and anything blank falls into "Other" rather than fragmenting the list.
-      byInsurer: tally(item => canonicalInsurer(item.insurer) || 'Other'),
-      byClient: tally(item => item.clientName || 'Unknown'),
-      byCategory: tally(item => policies.find(policy => policy.id === item.policyId)?.policyType || 'Other'),
+      byInsurer: tally(companyOf),
+      byClient: tally(clientOf),
+      byCategory: tally(item => policyOf(item)?.policyType || 'Other'),
       byMonth: tally(item => item.payoutMonth || 'Unknown'),
       // Falls back to the policy's own year when the statement carried no
       // Fresh/Renewal column — which is most of them.
@@ -358,7 +369,7 @@ export default function CommissionPage() {
     // businessTypeOf is listed because the policy book usually finishes loading
     // after the ledger — without it the Fresh/Renewal split would stay stuck on
     // the first render, when no policy was available to derive from.
-  }, [ledgerRows, policies, businessTypeOf])
+  }, [ledgerRows, policyById, businessTypeOf])
   // ── Reconciliation: the policy book joined to the posted ledger ──────────
   // Answers "which policy earned commission that never arrived", which neither
   // the estimate nor the ledger can answer alone.
@@ -412,13 +423,15 @@ export default function CommissionPage() {
   // statement writing "HDFC ERGO" against a policy saved as "HDFC ERGO General
   // Insurance" is the common case, and it splits one company across two rows
   // until it is merged.
-  const insurerDupes = useMemo(
-    () => duplicateInsurers([
-      ...policies.map(p => p.insurer),
-      ...transactions.map(t => t.insurer),
-    ]),
+  const allInsurerNames = useMemo(
+    () => [...policies.map(p => p.insurer), ...transactions.map(t => t.insurer)],
     [policies, transactions]
   )
+  const insurerDupes = useMemo(() => duplicateInsurers(allInsurerNames), [allInsurerNames])
+  // Names tied to no known company — typos and truncations too ambiguous to
+  // resolve, like "ICIC", which prefixes both ICICI Lombard and ICICI
+  // Prudential and so is never guessed at.
+  const unknownInsurers = useMemo(() => unrecognisedInsurers(allInsurerNames), [allInsurerNames])
 
   const actualBreakdown = {
     client: actualStats.byClient, category: actualStats.byCategory, month: actualStats.byMonth,
@@ -681,6 +694,25 @@ export default function CommissionPage() {
               ))}
             </ul>
             <p className="mt-2 text-gray-500">Your records are untouched. A company we do not recognise is kept exactly as written, and grouped under <strong>Other</strong> only if it has no name at all.</p>
+          </details>
+        )}
+
+        {actualView === 'insurer' && unknownInsurers.length > 0 && (
+          <details className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs dark:border-amber-800 dark:bg-amber-950/30">
+            <summary className="cursor-pointer font-bold text-amber-800 dark:text-amber-200">
+              {unknownInsurers.length} company {unknownInsurers.length === 1 ? 'name is' : 'names are'} not recognised — check for a typo
+            </summary>
+            <p className="mt-2 text-amber-900 dark:text-amber-200">
+              Each of these is counted on its own. Some will be genuine companies not on our
+              list, which is fine. Others are truncations too short to resolve safely — “ICIC”
+              could be ICICI Lombard or ICICI Prudential, so it is never guessed at. Correct
+              them on the policy and they merge automatically.
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {unknownInsurers.map(name => (
+                <li key={name} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 font-mono dark:border-amber-800 dark:bg-slate-900">{name}</li>
+              ))}
+            </ul>
           </details>
         )}
 

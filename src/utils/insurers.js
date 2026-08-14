@@ -160,10 +160,28 @@ const CANONICAL_BY_KEY = new Map([
  * a company this file has not heard of, and losing what they typed is worse
  * than showing a spelling we did not choose.
  */
+/**
+ * Statements truncate names — "ICIC" for ICICI, "Star Heal" for Star Health.
+ * A prefix is accepted only when it matches exactly ONE known company, so
+ * "ICIC" (which prefixes both ICICI Lombard and ICICI Prudential) is left
+ * alone rather than being filed under a coin toss. Four characters minimum,
+ * or "SBI" would swallow half the market.
+ */
+function prefixMatch(key) {
+  if (key.length < 4) return ''
+  const hits = [...new Set(
+    [...CANONICAL_BY_KEY.entries()]
+      .filter(([candidate]) => candidate.startsWith(key))
+      .map(([, name]) => name)
+  )]
+  return hits.length === 1 ? hits[0] : ''
+}
+
 export function canonicalInsurer(name) {
   const text = String(name ?? '').trim()
   if (!text) return ''
-  return CANONICAL_BY_KEY.get(insurerKey(text)) || text
+  const key = insurerKey(text)
+  return CANONICAL_BY_KEY.get(key) || prefixMatch(key) || text
 }
 
 /**
@@ -203,6 +221,29 @@ export function insurerOptions(existing = []) {
     if (!byKey.has(key)) byKey.set(key, name)
   }
   return [...byKey.values()].sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * Names we could not tie to any known company — typos, truncations too short or
+ * too ambiguous to resolve ("ICIC"), and genuinely new insurers.
+ *
+ * Rather than guessing at each one, this lists them so a wrong spelling can be
+ * corrected at the source. A real company that simply is not in KNOWN_INSURERS
+ * will show up here too, which is fine: it is a prompt to look, not an error.
+ */
+export function unrecognisedInsurers(names = []) {
+  const seen = new Map()
+  for (const name of names) {
+    const text = String(name ?? '').trim()
+    if (!text) continue
+    const key = insurerKey(text)
+    // Ask the lookup directly. Testing whether canonicalInsurer echoed the
+    // input back does not work: a name that is already canonical also echoes,
+    // so every correctly-spelled company was being reported as unknown.
+    if (!key || CANONICAL_BY_KEY.has(key) || prefixMatch(key)) continue
+    if (!seen.has(key)) seen.set(key, text)
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b))
 }
 
 /**
