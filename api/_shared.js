@@ -113,3 +113,54 @@ export async function sendWhatsAppTemplate(config, mobile, detail) {
     return { ok: false, to, error: `Could not reach the WhatsApp Cloud API: ${error.message}` }
   }
 }
+
+/**
+ * Free text or media, allowed ONLY inside the 24-hour window opened by the
+ * client's own last message. Meta rejects it outside that window, which is why
+ * the inbox shows the countdown rather than discovering it on send.
+ */
+export async function sendWhatsAppFreeform(config, mobile, { text = '', linkUrl = '', caption = '' } = {}) {
+  const to = toE164(mobile, config.countryCode)
+  if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number.' }
+
+  const payload = linkUrl
+    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'document', document: { link: linkUrl, caption: caption || text } }
+    : { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: true, body: text } }
+
+  try {
+    const response = await fetch(graphMessagesUrl(config), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}` },
+      body: JSON.stringify(payload),
+    })
+    const raw = await response.text()
+    let body = null
+    try { body = raw ? JSON.parse(raw) : null } catch { /* non-JSON */ }
+    if (!response.ok) return { ok: false, to, error: describeGraphError(response.status, body) }
+    return { ok: true, to, messageId: messageIdFrom(body) }
+  } catch (error) {
+    return { ok: false, to, error: `Could not reach the WhatsApp Cloud API: ${error.message}` }
+  }
+}
+
+/**
+ * Mirrors an outbound message into the inbox so a reply and the reminder that
+ * prompted it sit in one thread. Never throws — failing to log must not undo a
+ * message that has already left.
+ */
+export async function recordOutboundMessage(db, { messageId, waId, text, type = 'text', sentBy = '' }) {
+  if (!waId) return
+  try {
+    const ref = messageId
+      ? db.collection('whatsapp_messages').doc(messageId)
+      : db.collection('whatsapp_messages').doc()
+    await ref.set({
+      messageId: messageId || ref.id,
+      waId, direction: 'out', type, text,
+      timestamp: Date.now(),
+      status: 'sent', read: true, sentBy,
+    }, { merge: true })
+  } catch (error) {
+    console.error('Could not record outbound WhatsApp message:', error.message)
+  }
+}
