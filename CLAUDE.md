@@ -235,10 +235,30 @@ order**, set `WHATSAPP_TEMPLATE_PARAMS` to match or every send fails.
 The green "WhatsApp Reminder" buttons on Renewals and Policies are unrelated: they are
 `wa.me` deeplinks that open WhatsApp for a human to press send, and need no API at all.
 
+### Inbox
+
+`/inbox` reads `whatsapp_messages`, written **only** by the server: `api/whatsapp-webhook.js`
+(inbound messages and delivery receipts) and `api/whatsapp-send.js` (outbound). The browser
+may read, and may set `read` — nothing else, enforced in `firestore.rules`.
+
+The webhook URL is public, so every POST is checked against `WHATSAPP_APP_SECRET` with
+`timingSafeEqual` before anything is trusted. The signature covers the **raw bytes**, which
+is why `bodyParser` is disabled — re-serialising the JSON reorders keys and the digest stops
+matching. It always answers 200; Meta retries anything else.
+
+Message id is the Firestore doc id, so Meta's retries overwrite instead of duplicating a
+conversation.
+
+The 24-hour window is driven by the client's **inbound** messages only — our own replies do
+not extend it. That is the most common misunderstanding of this API, and `windowState`
+is the single place it is decided.
+
 Server env vars (Vercel): `WHATSAPP_TOKEN` (a **System User** token — the dashboard's
 temporary token dies after 24h), `WHATSAPP_PHONE_NUMBER_ID`, and optionally
 `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANG`, `WHATSAPP_TEMPLATE_PARAMS`,
 `WHATSAPP_API_VERSION`, `WHATSAPP_DEFAULT_COUNTRY_CODE`.
+The inbox additionally needs `WHATSAPP_VERIFY_TOKEN` (any string you choose, entered in
+Meta when saving the webhook) and `WHATSAPP_APP_SECRET` (from the app's Basic Settings).
 
 ## Security constraints
 

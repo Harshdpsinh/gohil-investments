@@ -14,7 +14,7 @@ export const phoneToNumber = toE164
  * human-readable reminder, kept for the log only — Meta will not send free text
  * for a conversation the business starts.
  */
-export async function sendWhatsApp({ number, chatId, detail = {} }) {
+export async function sendWhatsApp({ number, chatId, detail = {}, text = '', linkUrl = '', caption = '' }) {
   const to = toE164(number || chatId)
   if (!to) return { ok: false, error: 'Invalid WhatsApp phone number.' }
 
@@ -28,7 +28,7 @@ export async function sendWhatsApp({ number, chatId, detail = {} }) {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${await user.getIdToken()}`,
       },
-      body: JSON.stringify({ mobile: to, detail }),
+      body: JSON.stringify({ mobile: to, detail, text, linkUrl, caption }),
     })
     const body = await response.json().catch(() => null)
     if (!response.ok) {

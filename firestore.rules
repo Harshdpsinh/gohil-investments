@@ -92,6 +92,15 @@ service cloud.firestore {
       allow read, create, update: if isStaff();
       allow delete: if isAdmin();
     }
+    // Written only by the server (webhook and sender) using the admin SDK,
+    // which bypasses these rules. Staff read, and may mark a message read —
+    // nothing else from the browser.
+    match /whatsapp_messages/{messageId} {
+      allow read: if isStaff();
+      allow update: if isStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
     match /commission_master/{commissionMasterId} {
       allow read, create, update, delete: if isAdmin();
     }

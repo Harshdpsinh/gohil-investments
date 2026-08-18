@@ -34,6 +34,7 @@ const COMMISSION_MASTER = 'commission_master'
 const COMMISSION_TRANSACTIONS = 'commission_transactions'
 const RENEWAL_REMINDER_SETTINGS = 'renewal_reminder_settings'
 const RENEWAL_REMINDER_LOGS = 'renewal_reminder_logs'
+const WHATSAPP_MESSAGES = 'whatsapp_messages'
 const SUB_BROKERS = 'sub_brokers'
 const SALES_MANAGERS = 'sales_managers'
 const REPORTS_SAVED_FILTERS = 'reports_saved_filters'
@@ -47,7 +48,7 @@ const BACKUP_COLLECTIONS = [
   CLIENTS, POLICIES, PROPOSALS, CLAIMS, USERS, FAMILIES,
   AUDIT_LOGS, DOCUMENTS, MESSAGE_LOGS, LEADS, LEAD_FOLLOWUPS, ENDORSEMENTS,
   COMMISSION_MASTER, COMMISSION_TRANSACTIONS,
-  RENEWAL_REMINDER_SETTINGS, RENEWAL_REMINDER_LOGS,
+  RENEWAL_REMINDER_SETTINGS, RENEWAL_REMINDER_LOGS, WHATSAPP_MESSAGES,
   SUB_BROKERS, SALES_MANAGERS, REPORTS_SAVED_FILTERS,
 ]
 
@@ -68,6 +69,7 @@ export const CRM_COLLECTIONS = Object.freeze({
   COMMISSION_TRANSACTIONS,
   RENEWAL_REMINDER_SETTINGS,
   RENEWAL_REMINDER_LOGS,
+  WHATSAPP_MESSAGES,
   SUB_BROKERS,
   SALES_MANAGERS,
   REPORTS_SAVED_FILTERS,
@@ -1379,6 +1381,35 @@ export function subscribeProposals(callback, onError) {
     s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))),
     onError || (err => console.error('subscribeProposals:', err.code, err.message))
   )
+}
+
+
+// ── WHATSAPP INBOX ────────────────────────────────────────────
+// Written by api/whatsapp-webhook.js (inbound and delivery receipts) and by
+// api/whatsapp-send.js (outbound). The client only reads and marks as read.
+export function subscribeWhatsAppMessages(callback, onError, days = 90) {
+  // A cutoff rather than the whole history: the inbox is a working view, and an
+  // unbounded onSnapshot on a busy number would grow without limit.
+  const since = Date.now() - days * 86400000
+  return onSnapshot(
+    query(collection(db, WHATSAPP_MESSAGES), where('timestamp', '>=', since), orderBy('timestamp', 'asc')),
+    s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeWhatsAppMessages:', err.code, err.message))
+  )
+}
+
+/** Clears the unread badge for one conversation. Inbound messages only. */
+export async function markConversationRead(waId, messageIds = []) {
+  const ids = messageIds.filter(Boolean)
+  if (!waId || !ids.length) return
+  // Chunked: Firestore refuses a batch of more than 500 writes.
+  for (let i = 0; i < ids.length; i += 400) {
+    const batch = writeBatch(db)
+    ids.slice(i, i + 400).forEach(id => {
+      batch.set(doc(db, WHATSAPP_MESSAGES, id), { read: true }, { merge: true })
+    })
+    await batch.commit()
+  }
 }
 
 // ── CLIENT DOCUMENTS ──────────────────────────────────────────
