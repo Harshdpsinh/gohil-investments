@@ -109,10 +109,16 @@ export default function WhatsAppInboxPage() {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
           <strong>Could not load messages.</strong> {error}
+          {/^Missing or insufficient permissions/i.test(error) && (
+            <span className="mt-1 block text-red-700 dark:text-red-300">
+              The Firestore rules for <code>whatsapp_messages</code> have not been published yet.
+              Publish <code>firestore.rules</code> in the Firebase Console and this will clear.
+            </span>
+          )}
         </div>
       )}
 
-      {!loading && !conversations.length && !error ? (
+      {error ? null : !loading && !conversations.length ? (
         <EmptyState
           icon="message"
           title="No conversations yet"

@@ -11,8 +11,18 @@
 #     pasting the entire file contents)
 # 3. That's it. Rules deploy on every push that touches them, forever.
 #
-# If the deploy fails with a permissions error, grant the service account the
-# "Firebase Rules Admin" role in Google Cloud Console → IAM.
+# The service account needs TWO roles in Google Cloud Console -> IAM:
+#   * Firebase Rules Admin      (roles/firebaserules.admin)   - writes the rules
+#   * Service Usage Consumer    (roles/serviceusage.serviceUsageConsumer)
+#
+# The second one is the non-obvious one. Before deploying, the Firebase CLI asks
+# serviceusage.googleapis.com whether the Firestore API is enabled; without that
+# role the call 403s and the deploy dies before it ever touches the rules:
+#
+#   Error: ... had HTTP Error: 403, Permission denied to get service
+#   [firestore.googleapis.com]
+#
+# Every run of this workflow failed that way until the role was granted.
 name: Deploy Firestore Rules
 
 on:
