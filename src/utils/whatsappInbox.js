@@ -4,7 +4,7 @@
 // 24-hour window?
 //
 // Pure — no firebase, no react, no network.
-import { toE164 } from './whatsappCloud'
+import { toE164 } from './whatsappCloud.js'
 
 /**
  * Meta nests everything four levels deep and batches unrelated events into one
