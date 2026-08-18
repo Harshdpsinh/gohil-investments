@@ -10,9 +10,14 @@ import { toE164 } from './whatsappCloud'
 export const phoneToNumber = toE164
 
 /**
- * `detail` fills the approved template's variables. `text` is the composed
- * human-readable reminder, kept for the log only — Meta will not send free text
- * for a conversation the business starts.
+ * Two modes, and the caller picks by what it passes.
+ *
+ * `text` or `linkUrl` sends free-form, which Meta only accepts inside the
+ * 24-hour window opened by the client's own last message — the inbox checks
+ * that before offering a composer.
+ *
+ * `detail` sends the approved template instead, filling its variables. That is
+ * the only thing Meta will deliver to a conversation the business starts.
  */
 export async function sendWhatsApp({ number, chatId, detail = {}, text = '', linkUrl = '', caption = '' }) {
   const to = toE164(number || chatId)
