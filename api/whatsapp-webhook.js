@@ -7,8 +7,17 @@
 // anyone who learns the URL could write messages into the inbox.
 import crypto from 'node:crypto'
 import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminDb } from './_shared.js'
+import {
+  fetchWhatsAppMedia, getAdminDb, getWhatsAppConfig,
+  markWhatsAppRead, uploadMediaToCloudinary,
+} from './_shared.js'
 import { parseWebhookPayload } from '../src/utils/whatsappInbox.js'
+import { isStorableMedia, mediaFilename } from '../src/utils/whatsappFeatures.js'
+
+// Meta keeps inbound media for only a few days, so it has to be captured now
+// rather than fetched on demand later. Bounded per call: the webhook must
+// answer quickly, and a client sending an album should not stall it.
+const MAX_MEDIA_PER_CALL = 4
 
 export const config = { api: { bodyParser: false } }
 
@@ -38,6 +47,35 @@ export default async function handler(req, res) {
 
     const db = getAdminDb()
     const batch = db.batch()
+
+    // Capture files and send read receipts before writing, so the stored row
+    // already carries its permanent URL. Both are best-effort: a failure here
+    // must never cost us the message itself.
+    let config = null
+    try { config = getWhatsAppConfig() } catch { /* not configured yet */ }
+    if (config) {
+      let captured = 0
+      for (const message of messages) {
+        markWhatsAppRead(config, message.messageId).catch(() => {})
+        if (!isStorableMedia(message) || captured >= MAX_MEDIA_PER_CALL) continue
+        try {
+          const { buffer, mimeType } = await fetchWhatsAppMedia(config, message.mediaId)
+          const stored = await uploadMediaToCloudinary({
+            buffer,
+            mimeType: mimeType || message.mimeType,
+            filename: mediaFilename(message),
+            folder: `whatsapp/${message.waId}`,
+          })
+          message.mediaUrl = stored.url
+          message.mediaPublicId = stored.publicId
+          message.mediaBytes = stored.bytes
+          captured += 1
+        } catch (error) {
+          // Keep the mediaId; the file can still be retrieved by hand for a few days.
+          message.mediaError = error.message
+        }
+      }
+    }
 
     for (const message of messages) {
       // Meta retries a delivery it thinks failed, so the message id is the doc
