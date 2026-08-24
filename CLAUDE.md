@@ -253,6 +253,27 @@ The 24-hour window is driven by the client's **inbound** messages only — our o
 not extend it. That is the most common misunderstanding of this API, and `windowState`
 is the single place it is decided.
 
+### Gateway features rebuilt natively
+
+Evolution API was assessed and deliberately not adopted — Baileys needs a persistent socket
+Vercel cannot give it, and a number on the Cloud API cannot run Baileys anyway. The genuinely
+useful parts were rebuilt on the official API instead, in `src/utils/whatsappFeatures.js`:
+
+- **Quick replies** with the same token vocabulary as the reminder, so one context object
+  fills either. An unknown token collapses to nothing — never send a client `{premium}`.
+- **Inbound media capture.** Meta deletes media after a few days, so the webhook pulls it
+  down and pushes it to Cloudinary immediately. Two hops, and the second still needs the
+  bearer token — fetching the resolved URL unauthenticated 401s, which is the usual reason
+  this appears to work and then stores nothing. Capped per call so an album cannot stall the
+  webhook, and a capture failure never costs the message.
+- **Read receipts**, sent automatically on inbound. Free, and it is why clients see blue ticks.
+- **Out-of-hours auto-reply**, off by default, once per cooldown, judged in IST rather than
+  UTC — a UTC hour check calls 23:30 local "midday".
+
+Cloudinary uploads from the server are **signed** (`CLOUDINARY_API_KEY`/`_SECRET`), unlike the
+browser's unsigned preset, and resource type must match the file: a PDF uploaded as `image`
+is rejected — documents go to `raw`, audio rides the `video` pipeline.
+
 Server env vars (Vercel): `WHATSAPP_TOKEN` (a **System User** token — the dashboard's
 temporary token dies after 24h), `WHATSAPP_PHONE_NUMBER_ID`, and optionally
 `WHATSAPP_TEMPLATE_NAME`, `WHATSAPP_TEMPLATE_LANG`, `WHATSAPP_TEMPLATE_PARAMS`,

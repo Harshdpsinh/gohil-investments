@@ -1,6 +1,7 @@
 // api/_shared.js
 // Server-only helpers for the two functions that talk to Firebase and Meta.
 // The leading underscore keeps Vercel from routing this as an endpoint.
+import crypto from 'node:crypto'
 import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import {
@@ -163,4 +164,82 @@ export async function recordOutboundMessage(db, { messageId, waId, text, type = 
   } catch (error) {
     console.error('Could not record outbound WhatsApp message:', error.message)
   }
+}
+
+/**
+ * Tells WhatsApp the client's message was read, so they see the blue ticks.
+ * Free, and it is the difference between "they are ignoring me" and "seen".
+ * Never throws — a failed receipt must not fail anything else.
+ */
+export async function markWhatsAppRead(config, messageId) {
+  if (!messageId) return { ok: false }
+  try {
+    const response = await fetch(graphMessagesUrl(config), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: messageId }),
+    })
+    return { ok: response.ok }
+  } catch {
+    return { ok: false }
+  }
+}
+
+/**
+ * Pulls an inbound file down from Meta. Two hops: the media id resolves to a
+ * short-lived URL, and that URL still needs the bearer token — fetching it
+ * unauthenticated returns 401, which is the usual reason this silently fails.
+ * Media is deleted by Meta after a few days, so it has to be captured now.
+ */
+export async function fetchWhatsAppMedia(config, mediaId) {
+  const base = `https://graph.facebook.com/${config.apiVersion}`
+  const auth = { Authorization: `Bearer ${config.token}` }
+
+  const lookup = await fetch(`${base}/${encodeURIComponent(mediaId)}`, { headers: auth })
+  if (!lookup.ok) throw new Error(`Media lookup failed (HTTP ${lookup.status})`)
+  const { url, mime_type: mimeType } = await lookup.json()
+  if (!url) throw new Error('Media lookup returned no URL')
+
+  const file = await fetch(url, { headers: auth })
+  if (!file.ok) throw new Error(`Media download failed (HTTP ${file.status})`)
+  return { buffer: Buffer.from(await file.arrayBuffer()), mimeType }
+}
+
+// Cloudinary splits uploads by resource type, and a PDF sent as "image" is
+// rejected. Documents go to raw; audio rides the video pipeline.
+function cloudinaryResourceType(mimeType = '') {
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) return 'video'
+  return 'raw'
+}
+
+/**
+ * Signed server-side upload. The browser preset is unsigned and deliberately
+ * limited; the webhook has the real key pair, so it signs properly.
+ */
+export async function uploadMediaToCloudinary({ buffer, mimeType, filename, folder = 'whatsapp' }) {
+  const cloud = process.env.CLOUDINARY_CLOUD_NAME
+  const key = process.env.CLOUDINARY_API_KEY
+  const secret = process.env.CLOUDINARY_API_SECRET
+  if (!cloud || !key || !secret) throw new Error('Cloudinary server credentials are not configured.')
+
+  const timestamp = Math.floor(Date.now() / 1000)
+  const params = { folder, public_id: filename.replace(/\.[^.]+$/, ''), timestamp }
+  // Cloudinary signs the parameters sorted by key, joined with &, then the secret.
+  const toSign = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&')
+  const signature = crypto.createHash('sha1').update(toSign + secret).digest('hex')
+
+  const form = new FormData()
+  form.append('file', new Blob([buffer], { type: mimeType || 'application/octet-stream' }), filename)
+  Object.entries(params).forEach(([k, v]) => form.append(k, String(v)))
+  form.append('api_key', key)
+  form.append('signature', signature)
+
+  const resourceType = cloudinaryResourceType(mimeType)
+  const response = await fetch(`https://api.cloudinary.com/v1_1/${cloud}/${resourceType}/upload`, {
+    method: 'POST', body: form,
+  })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(body?.error?.message || `Cloudinary upload failed (HTTP ${response.status})`)
+  return { url: body.secure_url, publicId: body.public_id, resourceType, bytes: body.bytes }
 }

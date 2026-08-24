@@ -14,6 +14,7 @@ import { sendWhatsApp } from '../utils/whatsappSender'
 import {
   buildConversations, formatWindow, matchConversationClient,
 } from '../utils/whatsappInbox'
+import { quickRepliesFor } from '../utils/whatsappFeatures'
 import { fmtCurrency, fmtDate, getDueDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import PageHeader from '../components/ui/PageHeader'
 import EmptyState from '../components/ui/EmptyState'
@@ -63,6 +64,20 @@ export default function WhatsAppInboxPage() {
       .sort((a, b) => daysUntilPolicyDue(a) - daysUntilPolicyDue(b))
   }, [activeClient, policies])
 
+  // Tokens for the canned replies come from the client's most urgent policy,
+  // which is almost always what the conversation is about.
+  const quickReplies = useMemo(() => {
+    const policy = clientPolicies[0]
+    return quickRepliesFor({
+      clientName: activeClient?.name || active?.profileName || '',
+      policyType: policy?.policyType || '',
+      policyNumber: policy?.policyNumber || '',
+      insurer: policy?.insurer || '',
+      dueDate: policy ? fmtDate(getDueDate(policy)) : '',
+      premium: policy ? fmtCurrency(policy.premium) : '',
+    })
+  }, [activeClient, active, clientPolicies])
+
   // Opening a conversation clears its badge.
   useEffect(() => {
     if (!active?.unread) return
@@ -87,6 +102,22 @@ export default function WhatsAppInboxPage() {
       } else {
         toast.error(result.error || 'Could not send.')
       }
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const sendDocument = async policy => {
+    if (!policy?.policyPdfUrl || !active || sending) return
+    setSending(true)
+    try {
+      const result = await sendWhatsApp({
+        number: active.waId,
+        linkUrl: policy.policyPdfUrl,
+        caption: `${policy.policyType} policy ${policy.policyNumber}`,
+      })
+      if (result.ok) toast.success('Policy document sent.')
+      else toast.error(result.error || 'Could not send the document.')
     } finally {
       setSending(false)
     }
@@ -218,6 +249,23 @@ export default function WhatsAppInboxPage() {
                           : 'bg-slate-100 dark:bg-slate-800'
                       }`}
                     >
+                      {message.mediaUrl && message.type === 'image' && (
+                        <a href={message.mediaUrl} target="_blank" rel="noreferrer">
+                          <img src={message.mediaUrl} alt={message.text || 'Photo from client'}
+                               className="mb-1 max-h-56 rounded-lg" />
+                        </a>
+                      )}
+                      {message.mediaUrl && message.type !== 'image' && (
+                        <a href={message.mediaUrl} target="_blank" rel="noreferrer"
+                           className="mb-1 flex items-center gap-1.5 font-semibold text-blue-700 underline dark:text-blue-300">
+                          <AppIcon name="file" size={14} /> {message.filename || 'Open file'}
+                        </a>
+                      )}
+                      {message.mediaError && (
+                        <p className="mb-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300">
+                          File could not be saved — open it in WhatsApp within a few days.
+                        </p>
+                      )}
                       <p className="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">{message.text || `[${message.type}]`}</p>
                       <p className="mt-0.5 text-right text-[10px] text-gray-500">
                         {time(message.timestamp)}
@@ -234,6 +282,30 @@ export default function WhatsAppInboxPage() {
 
                 <div className="border-t border-slate-200 p-3 dark:border-slate-700">
                   {active.window.open ? (
+                    <>
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {quickReplies.map(reply => (
+                        <button
+                          key={reply.id}
+                          onClick={() => setDraft(reply.filled)}
+                          disabled={sending}
+                          title={reply.filled}
+                          className="rounded-full border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:border-blue-400 hover:text-blue-700 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300"
+                        >
+                          {reply.label}
+                        </button>
+                      ))}
+                      {clientPolicies.filter(p => p.policyPdfUrl).slice(0, 2).map(policy => (
+                        <button
+                          key={policy.id}
+                          onClick={() => sendDocument(policy)}
+                          disabled={sending}
+                          className="rounded-full border border-emerald-400 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300"
+                        >
+                          Send {policy.policyType} PDF
+                        </button>
+                      ))}
+                    </div>
                     <div className="flex gap-2">
                       <input
                         value={draft}
@@ -247,6 +319,7 @@ export default function WhatsAppInboxPage() {
                         {sending ? '…' : <AppIcon name="message" size={16} />}
                       </button>
                     </div>
+                    </>
                   ) : (
                     <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                       <strong>The 24-hour window has closed.</strong> Meta will not deliver free text now — only
