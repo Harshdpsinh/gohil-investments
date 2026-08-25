@@ -43,6 +43,9 @@ const STATE = {
 
 const MONEY_FIELDS = new Set(['premium', 'sumInsured'])
 
+// Newline for the diagnostic dump, named so the JSX below stays readable.
+const NL = '\n'
+
 export default function PdfExtractReview({ open, onClose, policies = [], clients = [], onUse }) {
   const fileRef = useRef(null)
   const [busy, setBusy] = useState(false)
@@ -60,8 +63,15 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
   // demand, rather than downloading 10MB before the user has asked for it.
   const [scanned, setScanned] = useState(null)
   const [ocrStatus, setOcrStatus] = useState('')
+  // The raw text the reader saw. Kept so a poor extraction can be diagnosed
+  // from inside the app — the usual cause is that the carrier simply does not
+  // print the label we look for, and that is invisible without this.
+  const [seenLines, setSeenLines] = useState([])
 
   const duplicate = useMemo(() => findPdfDuplicate(hash, policies), [hash, policies])
+
+  // Capped: a long policy wording would otherwise dump hundreds of lines.
+  const seenText = useMemo(() => seenLines.slice(0, 120).join(NL), [seenLines])
 
   const fields = useMemo(
     () => (extracted ? { ...extracted.fields, ...edits } : {}),
@@ -94,7 +104,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
 
   const reset = () => {
     setExtracted(null); setEdits({}); setFileName(''); setFile(null)
-    setClientChoice(undefined); setHash(''); setScanned(null); setOcrStatus('')
+    setClientChoice(undefined); setHash(''); setScanned(null); setOcrStatus(''); setSeenLines([])
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -113,6 +123,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       // pdfjs is ~330KB — loaded only when someone actually reads a PDF.
       const { extractLines } = await import('../../utils/pdfStatement')
       const pages = await extractLines(bytes.slice(0))
+      setSeenLines(pages.flat().map(line => line.cells.map(c => c.text).join(' ')).filter(Boolean))
       const result = extractPolicyFields(pages)
       if (!result.found.length) {
         // Almost certainly a scan. Hold the bytes and offer OCR rather than
@@ -147,6 +158,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
         onProgress: ({ stage, page, pages: total }) =>
           setOcrStatus(stage === 'starting' ? 'Starting the reader…' : `Reading page ${page} of ${total}…`),
       })
+      setSeenLines(pages.flat().map(line => line.cells.map(c => c.text).join(' ')).filter(Boolean))
       const result = extractPolicyFields(pages)
       if (!result.found.length) {
         toast.error('OCR could not find any policy details. This scan may be too faint — type it in by hand.')
@@ -389,6 +401,23 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
               </tbody>
             </table>
           </div>
+
+          {seenLines.length > 0 && (
+            <details className="rounded-lg border border-slate-200 p-2.5 text-xs dark:border-slate-700">
+              <summary className="cursor-pointer font-bold text-gray-700 dark:text-gray-200">
+                What the reader actually saw in this PDF ({seenLines.length} lines)
+              </summary>
+              <p className="mt-2 text-gray-600 dark:text-gray-300">
+                A field comes back empty when this carrier does not print the label we search for.
+                Look below for the value you expected: if it is here but the row above is blank,
+                the label is worded differently and we can teach the reader that wording. If it is
+                not here at all, the PDF is a scan or the text is drawn as an image.
+              </p>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 font-mono text-[10px] leading-relaxed dark:bg-slate-900">
+{seenText}
+              </pre>
+            </details>
+          )}
 
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Read from <strong>{fileName}</strong>. Red rows were not in the document and yellow rows
