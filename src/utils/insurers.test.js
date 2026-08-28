@@ -3,6 +3,7 @@ import {
   KNOWN_INSURERS,
   canonicalInsurer,
   duplicateInsurers,
+  insurerFieldPatch,
   insurerKey,
   insurerOptions,
   sameInsurer,
@@ -21,7 +22,6 @@ describe('KNOWN_INSURERS', () => {
 })
 
 describe('insurerKey', () => {
-  // The exact complaint: one company entered several ways.
   it.each([
     ['HDFC ERGO', 'HDFC ERGO General Insurance'],
     ['HDFC ERGO', 'HDFC ERGO Motor'],
@@ -35,8 +35,6 @@ describe('insurerKey', () => {
     expect(sameInsurer(a, b)).toBe(true)
   })
 
-  // The trap. These share a parent brand but are separate insurers, and merging
-  // them would put life and health business under one name.
   it.each([
     ['Aditya Birla Health Insurance', 'Aditya Birla Sun Life Insurance'],
     ['HDFC ERGO General Insurance', 'HDFC Life Insurance'],
@@ -78,9 +76,6 @@ describe('canonicalInsurer', () => {
     expect(canonicalInsurer('Aditya Birla Sun Life')).toBe('Aditya Birla Sun Life Insurance')
   })
 
-  // Losing what the user typed is worse than showing a spelling we did not pick.
-  // Statements truncate. "ICIC" appeared as its own ₹53.8K company on the
-  // dashboard, separate from ICICI Lombard.
   it.each([
     ['Star Heal', 'Star Health and Allied Insurance'],
     ['Niva Bup', 'Niva Bupa Health Insurance'],
@@ -89,22 +84,14 @@ describe('canonicalInsurer', () => {
     expect(canonicalInsurer(input)).toBe(expected)
   })
 
-  // A prefix that fits two real companies must NOT be guessed: ICIC prefixes
-  // both ICICI Lombard (general) and ICICI Prudential (life).
   it('leaves an ambiguous truncation alone rather than guessing', () => {
     expect(canonicalInsurer('ICIC')).toBe('ICIC')
   })
 
-  // Under four characters is never prefix-matched, or a fragment would swallow
-  // whole families of companies.
   it.each(['HDF', 'Tat', 'Nat'])('does not prefix-match the short fragment %s', value => {
     expect(canonicalInsurer(value)).toBe(value)
   })
 
-  // Not a prefix guess: stripping "General"/"Insurance" reduces the full name
-  // to the key `sbi`, so a bare "SBI" is an exact hit. SBI Life keeps its
-  // `life` token and stays separate. Where it matters, the Commission page
-  // prefers the matched policy's own spelling over the statement's anyway.
   it('reads a bare SBI as the general insurer, and keeps SBI Life apart', () => {
     expect(canonicalInsurer('SBI')).toBe('SBI General Insurance')
     expect(canonicalInsurer('SBI Life')).toBe('SBI Life Insurance')
@@ -130,10 +117,9 @@ describe('insurerOptions', () => {
     expect(options.filter(name => insurerKey(name) === insurerKey('HDFC ERGO'))).toHaveLength(1)
   })
 
-  // Showing our spelling would not match the records already on file.
-  it('prefers the spelling already used in the book', () => {
-    expect(insurerOptions(['HDFC ERGO'])).toContain('HDFC ERGO')
-    expect(insurerOptions(['HDFC ERGO'])).not.toContain('HDFC ERGO General Insurance')
+  it('shows the master spelling so a short name in the book does not stay a duplicate', () => {
+    expect(insurerOptions(['HDFC ERGO'])).toContain('HDFC ERGO General Insurance')
+    expect(insurerOptions(['HDFC ERGO'])).not.toContain('HDFC ERGO')
   })
 
   it('adds a company the list has never heard of', () => {
@@ -177,7 +163,6 @@ describe('duplicateInsurers', () => {
 
 describe('unrecognisedInsurers', () => {
   it('flags a truncation too ambiguous to resolve', () => {
-    // The exact case from the dashboard: ICIC showed as its own ₹53.8K company.
     expect(unrecognisedInsurers(['ICIC', 'ICICI Lombard General Insurance'])).toEqual(['ICIC'])
   })
 
@@ -198,5 +183,31 @@ describe('unrecognisedInsurers', () => {
 
   it('comes back sorted', () => {
     expect(unrecognisedInsurers(['Zzz Co', 'Aaa Co'])).toEqual(['Aaa Co', 'Zzz Co'])
+  })
+})
+
+describe('insurerFieldPatch', () => {
+  it('rewrites only the company-name fields that differ from the master spelling', () => {
+    expect(insurerFieldPatch({
+      insurer: 'HDFC ERGO',
+      prevInsurer: 'Max Bupa',
+      premium: 12000,
+      policyNumber: 'P-1',
+    })).toEqual({
+      insurer: 'HDFC ERGO General Insurance',
+      prevInsurer: 'Niva Bupa Health Insurance',
+    })
+  })
+
+  it('does not invent a patch when the name is already canonical or unknown', () => {
+    expect(insurerFieldPatch({
+      insurer: 'HDFC ERGO General Insurance',
+      latestPolicyInsurer: 'Saurashtra Mutual',
+    })).toEqual({})
+  })
+
+  it('leaves life and general arms of the same brand untouched as separate names', () => {
+    expect(insurerFieldPatch({ insurer: 'HDFC Life Insurance' })).toEqual({})
+    expect(insurerFieldPatch({ insurer: 'Aditya Birla Sun Life Insurance' })).toEqual({})
   })
 })
