@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 import { createCRMBackup, restoreCRMBackup } from '../firebase/firestore'
+import { mergeCanonicalInsurerNames } from '../firebase/insurerMerge'
 
 function downloadJson(data) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -33,6 +34,8 @@ export default function BackupPage() {
   const fileRef = useRef(null)
   const [backupLoading, setBackupLoading] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
+  const [mergeLoading, setMergeLoading] = useState(false)
+  const [mergeResult, setMergeResult] = useState(null)
   const [restoreFile, setRestoreFile] = useState(null)
   const [restorePreview, setRestorePreview] = useState(null)
   const [progress, setProgress] = useState({ done: 0, total: 0 })
@@ -55,7 +58,6 @@ export default function BackupPage() {
       downloadJson(backup)
       toast.success('Backup downloaded successfully.')
     } catch (err) {
-      // Surface the real reason — these messages name the collection that failed.
       toast.error(err.message || 'Could not create backup.', { duration: 8000 })
       console.error('Backup failed:', err)
     } finally {
@@ -112,9 +114,32 @@ export default function BackupPage() {
     }
   }
 
+  const onMergeInsurers = async () => {
+    const ok = window.confirm(
+      'Merge company names now? Short spellings such as HDFC ERGO, LIC, Max Bupa and Digit will be rewritten to one master name on policies, commission, claims and proposals. Premium and commission amounts are not changed.'
+    )
+    if (!ok) return
+    setMergeLoading(true)
+    setMergeResult(null)
+    try {
+      const result = await mergeCanonicalInsurerNames((done, total) => setProgress({ done, total }))
+      setMergeResult(result)
+      toast.success(result.updated
+        ? `${result.updated} records updated to the master company name.`
+        : 'Every stored company name was already the master spelling.')
+    } catch (err) {
+      toast.error(err.message || 'Could not merge company names.')
+    } finally {
+      setMergeLoading(false)
+      setProgress({ done: 0, total: 0 })
+    }
+  }
+
   const totalPreview = restorePreview
     ? Object.values(restorePreview.totals || {}).reduce((sum, n) => sum + (Number(n) || 0), 0)
     : 0
+
+  const busy = backupLoading || restoreLoading || mergeLoading
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
@@ -133,7 +158,7 @@ export default function BackupPage() {
               Saves clients, policies, proposals, claims, staff roles, and document/PDF links into one file.
             </p>
           </div>
-          <button onClick={onDownloadBackup} disabled={backupLoading || restoreLoading} className="btn-primary">
+          <button onClick={onDownloadBackup} disabled={busy} className="btn-primary">
             {backupLoading ? 'Preparing backup...' : 'Download Full Backup'}
           </button>
           {backupLoading && backupStep && (
@@ -157,7 +182,7 @@ export default function BackupPage() {
             type="file"
             accept="application/json,.json"
             onChange={onPickRestoreFile}
-            disabled={restoreLoading || backupLoading}
+            disabled={busy}
             className="form-input"
           />
 
@@ -188,11 +213,41 @@ export default function BackupPage() {
             </div>
           )}
 
-          <button onClick={onRestore} disabled={!restoreFile || restoreLoading || backupLoading} className="btn-success">
+          <button onClick={onRestore} disabled={!restoreFile || busy} className="btn-success">
             {restoreLoading ? 'Restoring...' : 'Restore Selected Backup'}
           </button>
         </section>
       </div>
+
+      <section className="card space-y-4">
+        <div>
+          <p className="font-semibold text-gray-900 dark:text-white">Merge company names</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Writes one master spelling on policies, commission ledger, claims, proposals and related fields.
+            Life stays separate from general of the same brand (HDFC Life ≠ HDFC ERGO). Amounts are not changed.
+          </p>
+        </div>
+        <button onClick={onMergeInsurers} disabled={busy} className="btn-primary">
+          {mergeLoading ? 'Merging names…' : 'Merge company names now'}
+        </button>
+        {mergeLoading && progress.total > 0 && (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Updating {progress.done}/{progress.total} records
+          </p>
+        )}
+        {mergeResult && (
+          <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+            <p>Scanned {mergeResult.scanned} records · updated {mergeResult.updated}</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+              {Object.entries(mergeResult.byCollection || {}).map(([name, info]) => (
+                <span key={name} className="rounded bg-white/70 dark:bg-gray-800/60 px-2 py-1">
+                  {name}: {info.updated}/{info.scanned}{info.skipped ? ' (skipped)' : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="card-sm text-sm text-yellow-800 dark:text-yellow-200 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
         <p className="font-semibold mb-1">Important</p>
