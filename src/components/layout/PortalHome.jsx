@@ -40,8 +40,44 @@ export default function PortalHome({ stats }) {
         </div>
       </section>
 
+      {stats?.expiring30 > 0 && (
+        <div className="portal-announce">
+          <div>
+            <strong>Keep policy details up to date.</strong>
+            <span> {stats.expiring30} policies need renewal in 30 days.</span>
+          </div>
+          <button type="button" className="btn-secondary" onClick={() => navigate('/renewals')}>Visit now</button>
+        </div>
+      )}
+
+      <div className="portal-panel-stack">
+        <section className="portal-panel">
+          <h3>Update book</h3>
+          <p className="portal-panel-kicker">Keep client and policy details current</p>
+          <p>Add a client, attach a policy PDF, or work the renewal list without leaving this desk.</p>
+          <div className="portal-panel-links">
+            <button type="button" onClick={() => navigate('/clients')}>Add client</button>
+            <button type="button" onClick={() => navigate('/policies')}>Add policy from PDF</button>
+            <button type="button" onClick={() => navigate('/renewals')}>Check renewal status</button>
+            <button type="button" onClick={() => navigate('/installments')}>Installments</button>
+          </div>
+        </section>
+        <section className="portal-panel">
+          <h3>Desk services</h3>
+          <p className="portal-panel-kicker">An array of services for this book</p>
+          <p>Commission, claims, proposals and coverage gaps sit one click away.</p>
+          <div className="portal-panel-links">
+            <button type="button" onClick={() => navigate(isAdmin ? '/commission' : '/business')}>Commission / business</button>
+            <button type="button" onClick={() => navigate('/claims')}>Claims</button>
+            <button type="button" onClick={() => navigate('/proposals')}>Proposals</button>
+            <button type="button" onClick={() => navigate('/cross-sell')}>Coverage gaps</button>
+            <button type="button" onClick={() => navigate('/inbox')}>WhatsApp inbox</button>
+          </div>
+        </section>
+      </div>
+
       <div className="portal-section">
-        <h3 className="portal-section-title">You can do more with this desk</h3>
+        <h3 className="portal-section-title">Access services</h3>
         <div className="portal-service-grid">
           <button type="button" className="portal-service-card" onClick={() => navigate('/clients')}>
             <strong>Clients</strong>
@@ -60,6 +96,14 @@ export default function PortalHome({ stats }) {
             <span>{fmtCurrency(stats?.totalPremium || 0)}</span>
           </button>
         </div>
+      </div>
+
+      <div className="portal-helpband">
+        <p>
+          <strong>Need help with the desk?</strong>
+          Harshdipsinh Gohil · 7698997894 · Pradipsinh Gohil · 9426204547
+        </p>
+        <button type="button" onClick={() => navigate('/inbox')}>Open inbox</button>
       </div>
     </>
   )

@@ -1,0 +1,134 @@
+/* uidai.gov.in information-portal patterns. Presentation only. */
+
+.portal-govnav { display: none; }
+
+@media (min-width: 1024px) {
+  .portal-govnav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    min-height: 44px;
+    padding: 0 1.5rem;
+    background: #12315c;
+    color: #fff;
+  }
+
+  .portal-govnav a,
+  .portal-govnav .portal-govnav-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.85rem;
+    color: #fff;
+    font-size: 0.8125rem;
+    font-weight: 650;
+    text-decoration: none;
+    border-bottom: 3px solid transparent;
+  }
+
+  .portal-govnav a:hover,
+  .portal-govnav a.is-active,
+  .portal-govnav .portal-govnav-link.is-active {
+    background: rgba(255, 255, 255, 0.08);
+    border-bottom-color: #f4c430;
+  }
+}
+
+.portal-announce {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: min(1100px, 100%);
+  margin: 0.75rem auto 0;
+  padding: 0.7rem 1rem;
+  border-left: 4px solid #12315c;
+  background: #fff;
+  color: #12315c;
+  box-shadow: 0 4px 14px rgba(18, 49, 92, 0.06);
+}
+
+.portal-announce strong { font-size: 0.9rem; }
+.portal-announce span { color: #5c5670; font-size: 0.8rem; }
+
+.portal-panel-stack {
+  display: grid;
+  gap: 0.85rem;
+  width: min(1100px, 100%);
+  margin: 1rem auto 0;
+}
+
+.portal-panel {
+  padding: 1.1rem 1.2rem 1rem;
+  border: 1px solid #d7dde8;
+  border-top: 4px solid #12315c;
+  border-radius: 4px 4px 12px 12px;
+  background: #fff;
+  text-align: left;
+}
+
+.portal-panel h3 {
+  margin: 0;
+  color: #12315c;
+  font-size: 1.15rem;
+  font-weight: 750;
+}
+
+.portal-panel .portal-panel-kicker {
+  margin: 0.2rem 0 0.35rem;
+  color: #0b7a43;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.portal-panel p {
+  margin: 0;
+  color: #5c5670;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.portal-panel-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin-top: 0.7rem;
+}
+
+.portal-panel-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #12315c;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.portal-helpband {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: min(1100px, 100%);
+  margin: 1.25rem auto 0;
+  padding: 1rem 1.1rem;
+  border-radius: 12px;
+  background: #12315c;
+  color: #fff;
+}
+
+.portal-helpband p { margin: 0; font-size: 0.9rem; }
+.portal-helpband strong { display: block; font-size: 1.05rem; }
+.portal-helpband button {
+  min-height: 40px;
+  padding: 0.45rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: #12315c;
+  font-weight: 750;
+}
