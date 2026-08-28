@@ -13,6 +13,7 @@ import { getDocMeta } from '../firebase/firestore'
 import { openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
+import ClientTimeline from '../components/clients/ClientTimeline'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -214,6 +215,8 @@ export default function ClientProfilePage() {
           </div>
         </div>
       )}
+
+      <ClientTimeline client={client} policies={clientPolicies} claims={claims} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Personal details */}

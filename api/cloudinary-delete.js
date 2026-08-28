@@ -1,9 +1,26 @@
+import { getAdminDb, verifyIdToken, assertStaff } from './_shared.js'
 import crypto from 'node:crypto'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST')
     res.status(405).json({ error: 'Method not allowed' })
+    return
+  }
+
+  const idToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (!idToken) {
+    res.status(401).json({ error: 'Missing sign-in token.' })
+    return
+  }
+  const decoded = await verifyIdToken(idToken)
+  if (!decoded) {
+    res.status(401).json({ error: 'Sign-in token is invalid or expired.' })
+    return
+  }
+  const staff = await assertStaff(getAdminDb(), decoded)
+  if (!staff) {
+    res.status(403).json({ error: 'This account is not provisioned to delete files.' })
     return
   }
 

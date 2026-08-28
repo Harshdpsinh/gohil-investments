@@ -3,7 +3,7 @@
 // Images use /image/ endpoint. Both are publicly accessible.
 import { addDocMeta, addDocumentRecord, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
-import app, { firebaseConfig } from './config'
+import app, { auth, firebaseConfig } from './config'
 import { downloadNativeDocument, isNativeAndroid, openNativeDocument } from '../services/nativeDocumentService'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
@@ -431,9 +431,14 @@ async function deleteCloudinaryByToken(deleteToken) {
 
 async function deleteCloudinaryByPublicId(publicId, resourceType = 'image') {
   if (!publicId) return false
+  const user = auth.currentUser
+  if (!user) throw new Error('Sign in again to delete files.')
   const response = await fetch('/api/cloudinary-delete', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${await user.getIdToken()}`,
+    },
     body: JSON.stringify({ publicId, resourceType }),
   })
   if (!response.ok) {

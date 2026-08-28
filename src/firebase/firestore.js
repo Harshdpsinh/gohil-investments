@@ -38,6 +38,8 @@ const WHATSAPP_MESSAGES = 'whatsapp_messages'
 const SUB_BROKERS = 'sub_brokers'
 const SALES_MANAGERS = 'sales_managers'
 const REPORTS_SAVED_FILTERS = 'reports_saved_filters'
+const CLIENT_ACTIVITIES = 'client_activities'
+const OCCASION_LOGS = 'occasion_logs'
 const CLIENT_FIELDS = [
   'name', 'mobile', 'email', 'pan', 'aadhar', 'dob', 'gender',
   'address', 'city', 'state', 'occupation', 'employment', 'income',
@@ -50,6 +52,7 @@ const BACKUP_COLLECTIONS = [
   COMMISSION_MASTER, COMMISSION_TRANSACTIONS,
   RENEWAL_REMINDER_SETTINGS, RENEWAL_REMINDER_LOGS, WHATSAPP_MESSAGES,
   SUB_BROKERS, SALES_MANAGERS, REPORTS_SAVED_FILTERS,
+  CLIENT_ACTIVITIES, OCCASION_LOGS,
 ]
 
 export const CRM_COLLECTIONS = Object.freeze({
@@ -73,6 +76,8 @@ export const CRM_COLLECTIONS = Object.freeze({
   SUB_BROKERS,
   SALES_MANAGERS,
   REPORTS_SAVED_FILTERS,
+  CLIENT_ACTIVITIES,
+  OCCASION_LOGS,
 })
 
 function serialiseBackupValue(value) {
@@ -181,14 +186,21 @@ export async function restoreCRMBackup(backup, onProgress = () => {}) {
     throw new Error('This backup file is not a valid Gohil Investments CRM backup.')
   }
 
+  // Browser SDK cannot create webhook-owned inbox rows, and cannot update
+  // existing audit_logs (rules: create only). Skip / create-if-missing.
+  const skipOnClient = new Set([WHATSAPP_MESSAGES])
+  const createOnly = new Set([AUDIT_LOGS])
+
   const writes = []
   for (const name of BACKUP_COLLECTIONS) {
+    if (skipOnClient.has(name)) continue
     const records = backup.collections[name] || []
     records.forEach(record => {
       if (!record?.id || !record.data) return
       writes.push({
         ref: doc(db, name, record.id),
         data: deserialiseBackupValue(record.data),
+        createOnly: createOnly.has(name),
       })
     })
   }
@@ -202,8 +214,18 @@ export async function restoreCRMBackup(backup, onProgress = () => {}) {
   })
 
   if (writes.length === 0) throw new Error('Backup file does not contain any records to restore.')
-  await commitBackupWritesInChunks(writes, onProgress)
-  return writes.length
+
+  const createOnlyWrites = writes.filter(w => w.createOnly)
+  const mergeWrites = writes.filter(w => !w.createOnly)
+  const fresh = []
+  for (let i = 0; i < createOnlyWrites.length; i += 20) {
+    const chunk = createOnlyWrites.slice(i, i + 20)
+    const snaps = await Promise.all(chunk.map(w => getDoc(w.ref)))
+    snaps.forEach((snap, idx) => { if (!snap.exists()) fresh.push(chunk[idx]) })
+  }
+
+  await commitBackupWritesInChunks([...mergeWrites, ...fresh], onProgress)
+  return mergeWrites.length + fresh.length
 }
 
 // ── USER ROLES ────────────────────────────────────────────────
@@ -797,10 +819,13 @@ export async function mergeClients(duplicateId, masterId) {
   const dup = await getClient(duplicateId)
   if (!dup) throw new Error('Duplicate client not found')
 
-  const [dupPolicies, dupClaims, dupDocs] = await Promise.all([
+  const [dupPolicies, dupClaims, dupDocs, dupProposals, dupEndorsements, dupLeads] = await Promise.all([
     getDocs(query(collection(db, POLICIES), where('clientId', '==', duplicateId))),
     getDocs(query(collection(db, CLAIMS),   where('clientId', '==', duplicateId))),
     getDocs(collection(db, CLIENTS, duplicateId, DOCS_META)),
+    getDocs(query(collection(db, PROPOSALS), where('clientId', '==', duplicateId))),
+    getDocs(query(collection(db, ENDORSEMENTS), where('clientId', '==', duplicateId))),
+    getDocs(query(collection(db, LEADS), where('clientId', '==', duplicateId))),
   ])
 
   const ops = []
@@ -820,6 +845,27 @@ export async function mergeClients(duplicateId, masterId) {
     }})
   })
   dupClaims.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:   masterId,
+      clientName: master.name,
+      updatedAt:  serverTimestamp(),
+    }})
+  })
+  dupProposals.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:   masterId,
+      clientName: master.name,
+      updatedAt:  serverTimestamp(),
+    }})
+  })
+  dupEndorsements.docs.forEach(d => {
+    ops.push({ ref: d.ref, data: {
+      clientId:   masterId,
+      clientName: master.name,
+      updatedAt:  serverTimestamp(),
+    }})
+  })
+  dupLeads.docs.forEach(d => {
     ops.push({ ref: d.ref, data: {
       clientId:   masterId,
       clientName: master.name,
@@ -867,6 +913,9 @@ export async function mergeClients(duplicateId, masterId) {
     policiesMoved: dupPolicies.size,
     claimsMoved:   dupClaims.size,
     docsMoved,
+    proposalsMoved: dupProposals.size,
+    endorsementsMoved: dupEndorsements.size,
+    leadsMoved: dupLeads.size,
   }
 }
 
@@ -1468,4 +1517,27 @@ export function subscribeClaims(callback, onError) {
 export async function getAllClaims() {
   const s = await getDocs(query(claimsRef(), orderBy('createdAt','desc')))
   return s.docs.map(d => ({ id:d.id, ...d.data() }))
+}
+
+export function subscribeClientActivities(clientId, callback, onError) {
+  if (!clientId) return () => {}
+  return onSnapshot(
+    query(collection(db, CLIENT_ACTIVITIES), where('clientId', '==', clientId)),
+    s => callback(s.docs.map(d => ({ id: d.id, ...d.data() }))),
+    onError || (err => console.error('subscribeClientActivities:', err.code, err.message))
+  )
+}
+
+export async function addClientActivity({ clientId, title, body = '', createdBy = '' }) {
+  if (!clientId) throw new Error('Client is required.')
+  const cleanTitle = String(title || '').trim()
+  if (!cleanTitle) throw new Error('A note is required.')
+  return addDoc(collection(db, CLIENT_ACTIVITIES), {
+    clientId,
+    type: 'note',
+    title: cleanTitle.slice(0, 80),
+    body: String(body || '').slice(0, 2000),
+    createdBy: String(createdBy || '').slice(0, 120),
+    createdAt: serverTimestamp(),
+  })
 }

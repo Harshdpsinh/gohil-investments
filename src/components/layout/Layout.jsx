@@ -1,9 +1,11 @@
 // UI MODERNIZATION - logic unchanged
 import { useCallback, useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
+import GlobalSearch from './GlobalSearch'
 import useAndroidBack from '../../hooks/useAndroidBack'
 import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
+import { NavLink } from 'react-router-dom'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -109,22 +111,19 @@ export default function Layout({ children }) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between px-2 lg:hidden">
-          {/* UI-only verification: the menu button still opens the existing mobile sidebar state. */}
+        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between gap-2 px-2 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:text-slate-300 dark:hover:bg-blue-500/15 dark:hover:text-blue-300"
+            className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-teal-50 hover:text-teal-800 dark:text-slate-300"
             aria-label="Open navigation"
           >
             <AppIcon name="menu" size={22} />
           </button>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
-            </span>
-            <span className="text-sm font-bold tracking-tight text-slate-950 dark:text-slate-100">Gohil Investments</span>
-          </div>
-          <div className="w-9" />
+          <GlobalSearch compact />
+        </header>
+
+        <header className="hidden h-16 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 lg:flex dark:border-slate-800 dark:bg-slate-950">
+          <GlobalSearch />
         </header>
 
         <main
@@ -139,7 +138,6 @@ export default function Layout({ children }) {
           <button
             id="back-to-top"
             className="back-to-top"
-            /* UI-only verification: this keeps the original scroll-to-top target and behavior. */
             onClick={() => document.getElementById('main-scroll')?.scrollTo({ top: 0, behavior: 'smooth' })}
             title="Back to top"
             aria-label="Back to top"
@@ -147,6 +145,24 @@ export default function Layout({ children }) {
             <AppIcon name="arrowUp" size={18} />
           </button>
         </main>
+        <nav className="mobile-tabbar lg:hidden" aria-label="Primary">
+          {[
+            { to: '/dashboard', icon: 'home', label: 'Home' },
+            { to: '/clients', icon: 'clients', label: 'Clients' },
+            { to: '/policies', icon: 'policies', label: 'Policies' },
+            { to: '/renewals', icon: 'renewals', label: 'Renewals' },
+            { to: '/inbox', icon: 'message', label: 'Inbox' },
+          ].map(item => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) => isActive ? 'mobile-tab is-active' : 'mobile-tab'}
+            >
+              <AppIcon name={item.icon} size={20} />
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
       </div>
     </div>
   )

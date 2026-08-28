@@ -75,7 +75,7 @@ export default function ReportsPage() {
         insurer: c.insurer,
         product: c.claimType || '',
         status: c.status || '',
-        amount: Number(c.claimAmount || c.amount || 0),
+        amount: Number(c.claimedAmount || c.claimAmount || c.amount || 0),
         detail: c.claimNumber || '',
       })),
       Clients: clients.map(c => ({

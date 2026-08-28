@@ -15,6 +15,7 @@ import { getUserRole, setUserRole } from '../firebase/firestore'
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = [
   'harshdeepgohil@gmail.com',
+  'harshdpsinh@gmail.com',
   ...(import.meta.env.VITE_ADMIN_EMAILS || '').split(','),
 ].map(email => String(email || '').trim().toLowerCase()).filter(Boolean)
 
@@ -23,11 +24,9 @@ function normaliseRole(value, email = '') {
   const cleanEmail = String(email || '').trim().toLowerCase()
   if (OWNER_ADMIN_EMAILS.includes(cleanEmail)) return 'admin'
   if (cleanRole === 'admin' || cleanRole === 'staff') return cleanRole
-  return 'staff'
+  return ''
 }
 
-// Wraps a promise with a timeout — if Firestore is blocked by
-// Brave Shields or a firewall, we fall back instead of hanging forever.
 function withTimeout(promise, ms = 5000) {
   return Promise.race([
     promise,
@@ -47,23 +46,27 @@ export function AuthProvider({ children }) {
         try {
           const profile = await withTimeout(getUserRole(u.uid), 5000)
           if (profile) {
-            setRole(normaliseRole(profile.role, u.email))
-          } else {
-            console.warn('First login or role fetch failed – creating default staff role')
-            const defaultRole = normaliseRole('', u.email)
+            setRole(normaliseRole(profile.role, u.email) || null)
+          } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
+            const defaultRole = 'admin'
             try {
               await withTimeout(
-                setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || (defaultRole === 'admin' ? 'Admin' : 'Staff') }),
+                setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || 'Admin' }),
                 3000
               )
             } catch (err) {
-              console.error('Failed to create default role:', err)
+              console.error('Failed to create owner profile:', err)
             }
             setRole(defaultRole)
+          } else {
+            // Signed in but not provisioned. Do NOT write a staff profile —
+            // Firestore rules reject it, and a client-side 'staff' role would
+            // show the CRM shell against empty data.
+            setRole(null)
           }
         } catch (err) {
           console.error('Role fetch error:', err)
-          setRole(normaliseRole('', u.email))
+          setRole(OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase()) ? 'admin' : null)
         }
       } else {
         setRole(null)
@@ -104,15 +107,13 @@ export function AuthProvider({ children }) {
     if (!cleanEmail) throw new Error('Email is required.')
     if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
 
-    const safeRole = normaliseRole(requestedRole)
+    const safeRole = normaliseRole(requestedRole) || 'staff'
     const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
       ? getApp('staffAccountCreation')
       : initializeApp(firebaseConfig, 'staffAccountCreation')
     const secondaryAuth = getAuth(secondaryApp)
     const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
     try {
-      // Keep the current admin signed into the CRM while the secondary Auth instance
-      // creates the new staff account.
       await secondaryAuth.signOut()
 
       let retries = 3
@@ -131,7 +132,7 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const isAdmin = normaliseRole(role, user?.email) === 'admin'
+  const isAdmin = role === 'admin'
 
   return (
     <AuthContext.Provider value={{ user, role, isAdmin, loading, signIn, signOut, resetPassword, createStaffAccount }}>

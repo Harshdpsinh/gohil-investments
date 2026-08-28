@@ -6,6 +6,7 @@ import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.j
 // its parser read legacy DD/MM/YYYY dates as MM/DD/YYYY whenever the day was 12
 // or lower — 01/12/2026 became 12 Jan, eleven months early. Import, never copy.
 import { getDueDate, daysUntilPolicyDue, parseAnyDate } from '../src/utils/dateUtils.js'
+import { isOccasionToday } from '../src/utils/occasions.js'
 
 const DEFAULT_PROMPT = 'Please renew your policy on time to keep your insurance protection active without interruption.'
 const DEFAULT_INTERVALS = [30, 15, 7, 1, 0].map(days => ({ id: `d${days}`, days, enabled: true }))
@@ -107,7 +108,64 @@ export default async function handler(req, res) {
       if (result.ok) sent += 1
     }
 
-    res.status(200).json({ sent, skipped })
+    let birthdaysSent = 0
+    let birthdaysSkipped = 0
+    const birthdayTemplate = process.env.WHATSAPP_BIRTHDAY_TEMPLATE_NAME
+    if (birthdayTemplate) {
+      const allClients = (await db.collection('clients').get()).docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(client => !client.mergedIntoClientId && !client.deleted)
+      const bdayConfig = {
+        ...whatsapp,
+        templateName: birthdayTemplate,
+        templateOrder: String(process.env.WHATSAPP_BIRTHDAY_TEMPLATE_PARAMS || 'clientName')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean),
+      }
+      const todayKey = new Date().toISOString().slice(0, 10)
+      for (const client of allClients) {
+        const kinds = []
+        if (isOccasionToday(client.dob)) kinds.push('birthday')
+        if (isOccasionToday(client.anniversary || client.weddingDate)) kinds.push('anniversary')
+        for (const kind of kinds) {
+          const logRef = db.collection('occasion_logs').doc(`${kind}-${client.id}-${todayKey}`)
+          const claimed = await db.runTransaction(async tx => {
+            const existing = await tx.get(logRef)
+            if (existing.exists) return false
+            tx.set(logRef, {
+              clientId: client.id,
+              clientName: client.name || '',
+              kind,
+              date: todayKey,
+              status: 'sending',
+              createdAt: FieldValue.serverTimestamp(),
+            })
+            return true
+          })
+          if (!claimed) {
+            birthdaysSkipped += 1
+            continue
+          }
+          if (!digits(client.mobile)) {
+            await logRef.set({ status: 'failed', error: 'No mobile' }, { merge: true })
+            birthdaysSkipped += 1
+            continue
+          }
+          const result = await sendWhatsAppTemplate(bdayConfig, client.mobile, { clientName: client.name || 'Customer' })
+          await logRef.set({
+            status: result.ok ? 'sent' : 'failed',
+            error: result.error || '',
+            messageId: result.messageId || '',
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true })
+          if (result.ok) birthdaysSent += 1
+          else birthdaysSkipped += 1
+        }
+      }
+    }
+
+    res.status(200).json({ sent, skipped, birthdaysSent, birthdaysSkipped })
   } catch (error) {
     res.status(500).json({ error: error.message || 'Renewal reminder cron failed' })
   }

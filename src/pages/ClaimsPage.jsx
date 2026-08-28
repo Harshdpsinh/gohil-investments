@@ -440,8 +440,8 @@ export default function ClaimsPage() {
                       <td className="table-cell"><span className="badge-blue text-xs">{c.claimType}</span></td>
                       <td className="table-cell text-xs">{c.insurer || '?'}</td>
                       <td className="table-cell">{fmtDate(c.intimationDate)}</td>
-                      <td className="table-cell text-right">{c.claimedAmount ? `?${Number(c.claimedAmount).toLocaleString('en-IN')}` : '?'}</td>
-                      <td className="table-cell text-right">{c.approvedAmount ? `?${Number(c.approvedAmount).toLocaleString('en-IN')}` : '?'}</td>
+                      <td className="table-cell text-right">{c.claimedAmount ? `₹${Number(c.claimedAmount).toLocaleString('en-IN')}` : '—'}</td>
+                      <td className="table-cell text-right">{c.approvedAmount ? `₹${Number(c.approvedAmount).toLocaleString('en-IN')}` : '—'}</td>
                       <td className="table-cell">
                         <select value={c.status}
                                 onChange={e => onStatusChange(c.id, e.target.value)}

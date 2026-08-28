@@ -1,4 +1,4 @@
-# Deploys firestore.rules automatically whenever the rules change on main.
+# Deploys firestore.rules and storage.rules whenever they change on main.
 #
 # ── ONE-TIME SETUP ────────────────────────────────────────────────────────
 # 1. Firebase Console → Project Settings → Service Accounts
@@ -23,13 +23,14 @@
 #   [firestore.googleapis.com]
 #
 # Every run of this workflow failed that way until the role was granted.
-name: Deploy Firestore Rules
+name: Deploy Firebase Rules
 
 on:
   push:
     branches: [main]
     paths:
       - 'firestore.rules'
+      - 'storage.rules'
       - 'firebase.json'
       - '.firebaserc'
       - '.github/workflows/deploy-firestore-rules.yml'
@@ -70,8 +71,8 @@ jobs:
             || { echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON."; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      - name: Deploy Firestore rules
-        run: firebase deploy --only firestore:rules --project gohil-investments --non-interactive
+      - name: Deploy Firestore and Storage rules
+        run: firebase deploy --only firestore:rules,storage --project gohil-investments --non-interactive
 
       - name: Remove credentials
         if: always()
