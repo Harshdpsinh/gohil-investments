@@ -84,15 +84,12 @@ export default function Layout({ children }) {
   return (
     <div className="app-shell flex h-screen overflow-hidden text-slate-950 dark:text-slate-100">
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:flex-shrink-0">
         <Sidebar />
       </div>
 
-      {/* Mobile sidebar */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 flex lg:hidden">
-          {/* UI-only verification: this keeps the original backdrop close action mapped to setSidebarOpen(false). */}
           <div className="fixed inset-0 bg-slate-950/60" onClick={() => setSidebarOpen(false)} />
           <div
             className="mobile-drawer open relative z-50 flex w-72 flex-col shadow-2xl"
@@ -109,12 +106,11 @@ export default function Layout({ children }) {
         </div>
       )}
 
-      {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between gap-2 px-2 lg:hidden">
+        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between gap-2 bg-white px-2 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-teal-50 hover:text-teal-800 dark:text-slate-300"
+            className="flex h-12 w-12 items-center justify-center rounded-xl text-[#2a2156] hover:bg-[#f6f0e8]"
             aria-label="Open navigation"
           >
             <AppIcon name="menu" size={22} />
@@ -122,7 +118,7 @@ export default function Layout({ children }) {
           <GlobalSearch compact />
         </header>
 
-        <header className="hidden h-16 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 lg:flex dark:border-slate-800 dark:bg-slate-950">
+        <header className="hidden h-16 shrink-0 items-center gap-4 border-b border-[#eadfce] bg-white px-6 lg:flex">
           <GlobalSearch />
         </header>
 
