@@ -1,0 +1,291 @@
+/* Portal look — inspired by public-service homepages. Presentation only. */
+
+:root {
+  --primary: #3d2a8c;
+  --primary-dark: #2a2156;
+  --accent: #5b3cc4;
+  --app-bg: #f6f0e8;
+  --surface: #ffffff;
+  --surface-2: #fbf6ee;
+  --surface-3: #efe6d8;
+  --text-primary: #2a2156;
+  --text-muted: #5c5670;
+  --border-soft: #eadfce;
+}
+
+.dark {
+  --primary: #c4b5fd;
+  --primary-dark: #a78bfa;
+  --accent: #8b6cf5;
+  --app-bg: #161226;
+  --surface: #221b36;
+  --surface-2: #2b2344;
+  --surface-3: #352c52;
+  --text-primary: #f6f0e8;
+  --text-muted: #c9c0d8;
+  --border-soft: #3d3458;
+}
+
+body {
+  font-family: "Source Sans 3", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  background: var(--app-bg);
+}
+
+.app-shell {
+  background:
+    radial-gradient(1200px 420px at 50% -80px, rgba(196, 181, 253, 0.28), transparent 60%),
+    var(--app-bg);
+}
+
+.portal-hero {
+  position: relative;
+  padding: 1.75rem 1rem 1.25rem;
+  text-align: center;
+}
+
+.portal-title {
+  margin: 0;
+  color: #2a2156;
+  font-family: Fraunces, "Source Serif 4", Georgia, serif;
+  font-size: clamp(2rem, 5vw, 3.15rem);
+  font-weight: 560;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+.dark .portal-title { color: #f6f0e8; }
+
+.portal-subtitle {
+  margin: 0.75rem 0 0;
+  color: #5c5670;
+  font-size: 1.05rem;
+}
+
+.portal-search {
+  position: relative;
+  width: min(560px, 100%);
+  margin: 1.35rem auto 0;
+}
+
+.portal-search input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0.7rem 3.6rem 0.7rem 1.2rem;
+  border: 1.5px solid #c4b5fd;
+  border-radius: 999px;
+  background: #fff;
+  color: #2a2156;
+  box-shadow: 0 8px 24px rgba(42, 33, 86, 0.06);
+}
+
+.portal-search input:focus {
+  border-color: #5b3cc4 !important;
+  box-shadow: 0 0 0 4px rgba(91, 60, 196, 0.14) !important;
+}
+
+.portal-search-go {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #2a2156;
+  transform: translateY(-50%);
+}
+
+.portal-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: min(560px, 100%);
+  margin: 1.5rem auto 0;
+}
+
+.portal-shortcut {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.25rem;
+  color: #2a2156;
+  background: transparent;
+  border: 0;
+}
+
+.portal-shortcut-icon {
+  display: flex;
+  width: 64px;
+  height: 64px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #2a2156;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(42, 33, 86, 0.08);
+}
+
+.portal-shortcut span {
+  max-width: 92px;
+  color: #2a2156;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.portal-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: min(640px, 100%);
+  margin: 1.5rem auto 0;
+  padding: 1rem 1rem 1rem 1.15rem;
+  border: 1px solid #eadfce;
+  border-radius: 22px;
+  background: #fbf6ee;
+}
+
+.portal-cta p {
+  margin: 0;
+  color: #2a2156;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.portal-cta-btn,
+.btn-primary {
+  border-radius: 999px !important;
+  background: #2a2156 !important;
+  border-color: #2a2156 !important;
+  box-shadow: 0 8px 18px rgba(42, 33, 86, 0.22) !important;
+}
+
+.btn-primary:hover {
+  background: #3d2a8c !important;
+  border-color: #3d2a8c !important;
+}
+
+.btn-secondary {
+  border-radius: 999px !important;
+}
+
+.portal-section {
+  width: min(1100px, 100%);
+  margin: 1.25rem auto 0;
+}
+
+.portal-section-title {
+  margin: 0 0 0.75rem;
+  color: #2a2156;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 560;
+}
+
+.portal-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.portal-service-card {
+  display: flex;
+  min-height: 96px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1rem;
+  border: 1px solid #eadfce;
+  border-radius: 18px;
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 6px 16px rgba(42, 33, 86, 0.04);
+}
+
+.portal-service-card strong {
+  color: #2a2156;
+  font-size: 0.95rem;
+}
+
+.portal-service-card span {
+  margin-top: 0.4rem;
+  color: #5c5670;
+  font-size: 0.78rem;
+}
+
+.app-sidebar {
+  color: #2a2156;
+  background: #fff;
+  border-right: 1px solid #eadfce;
+  box-shadow: none;
+}
+
+.app-sidebar .nav-item { color: #5c5670; }
+.app-sidebar .nav-item:hover,
+.app-sidebar .nav-item-active {
+  color: #2a2156;
+  background: #f6f0e8;
+}
+
+.app-sidebar .nav-item-active::before { background: #5b3cc4; }
+
+.nav-section-label { color: #8a829c; }
+
+.mobile-tab.is-active { color: #3d2a8c; background: rgba(91, 60, 196, 0.1); }
+
+.page-header-title,
+.fintech-title {
+  font-family: Fraunces, Georgia, serif;
+  font-weight: 560;
+  color: #2a2156;
+}
+
+.fintech-kicker { color: #5b3cc4; }
+
+.card,
+.card-sm,
+.stat-card,
+.pipeline-card,
+.table-container,
+.fintech-panel,
+.commission-metric {
+  border-color: #eadfce;
+  border-radius: 18px;
+}
+
+.form-input:focus,
+.form-select:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #5b3cc4 !important;
+  box-shadow: 0 0 0 3px rgba(91, 60, 196, 0.14) !important;
+}
+
+.login-portal {
+  min-height: 100vh;
+  background:
+    radial-gradient(900px 380px at 50% -60px, rgba(196, 181, 253, 0.35), transparent 58%),
+    #f6f0e8;
+}
+
+@media (min-width: 768px) {
+  .portal-service-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 639px) {
+  .portal-shortcuts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .portal-shortcut-icon { width: 54px; height: 54px; }
+  .portal-cta { flex-direction: column; align-items: stretch; }
+}
+
+.mobile-drawer.open { background: #fff; }
+.theme-switch.is-on { border-color: #5b3cc4; background: #5b3cc4; }
+.back-to-top { background: #2a2156 !important; }
