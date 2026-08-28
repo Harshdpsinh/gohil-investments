@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
-// The review table is the last gate before money is written to the ledger, and
-// it was untested. These drive the real matching logic through the real UI —
-// only Firebase, the file reader and toasts are stubbed.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import StatementImportModal from './StatementImportModal'
-import { addCommissionTransaction } from '../../firebase/firestore'
+import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
 import { parseImportFile } from '../../utils/exportUtils'
 
 vi.mock('../../firebase/firestore', () => ({
@@ -21,23 +18,22 @@ const POLICIES = [
   {
     id: 'p1', policyNumber: '6305162700008293', clientId: 'c1',
     clientName: 'Harendra Varmora', insurer: 'Star Health',
-    premium: 748, fyCommission: 12.71,
+    premium: 748, fyCommission: 12.71, policyYear: 1, status: 'Active',
   },
   {
     id: 'p2', policyNumber: '7489112502043449', clientId: 'c2',
     clientName: 'Mukeshbhai Bhupatbhai Vatukiya', insurer: 'Star Health',
-    premium: 18797, fyCommission: 10,
+    premium: 18797, fyCommission: 10, ryCommission: 7.5, policyYear: 2, status: 'Active',
   },
 ]
 
-// One row that matches the book, one that does not.
 const SHEET = [
   { 'Policy No.': '6305162700008293', 'Insured Name': 'Harendra Varmora', Premium: 748, 'Total Comm': 95 },
   { 'Policy No.': '9999999999', 'Insured Name': 'Unknown Person Entirely', Premium: 18797, 'Total Comm': 1880 },
 ]
 
-/** Describe the statement, then feed it a file — the dropzone is gated on both. */
-async function openWithStatement(props = {}) {
+async function openWithStatement(props = {}, sheet = SHEET) {
+  parseImportFile.mockResolvedValue(sheet)
   const view = render(
     <StatementImportModal
       open
@@ -51,7 +47,6 @@ async function openWithStatement(props = {}) {
   fireEvent.change(screen.getByLabelText('Year *'), { target: { value: '2026' } })
   fireEvent.change(screen.getByLabelText('Statement type *'), { target: { value: 'single' } })
   fireEvent.change(screen.getByLabelText('Carrier *'), { target: { value: 'Star Health' } })
-
   const fileInput = document.body.querySelector('input[type="file"]')
   fireEvent.change(fileInput, { target: { files: [new File(['x'], 'star-july.csv')] } })
   await screen.findByText('Matched')
@@ -64,9 +59,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   parseImportFile.mockResolvedValue(SHEET)
 })
-
-// Explicit: vitest runs without `globals`, so RTL cannot register its own
-// auto-cleanup and every render would otherwise pile up in document.body.
 afterEach(cleanup)
 
 describe('StatementImportModal review table', () => {
@@ -79,9 +71,6 @@ describe('StatementImportModal review table', () => {
     await openWithStatement()
     const inputs = rowCells(0).getAllByRole('textbox')
     expect(inputs).toHaveLength(5)
-    // .table-cell sets white-space:nowrap. Without `block` the five inline
-    // inputs sit on one line and spill across the neighbouring columns —
-    // jsdom has no layout engine, so the class is the only thing to assert.
     inputs.forEach(input => expect(input.className.split(' ')).toContain('block'))
   })
 
@@ -97,12 +86,23 @@ describe('StatementImportModal review table', () => {
     fireEvent.change(rowCells(1).getAllByRole('textbox')[0], {
       target: { value: '7489112502043449' },
     })
-    // Policy number alone only earns 'review' — the name has to corroborate.
     await waitFor(() => expect(rowCells(1).getByText('review')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Verify & Save 1 Record$/ })).toBeTruthy()
     fireEvent.change(rowCells(1).getAllByRole('textbox')[1], {
       target: { value: 'Mukeshbhai Bhupatbhai Vatukiya' },
     })
     await waitFor(() => expect(rowCells(1).getByText('matched')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Verify & Save 2 Records/ })).toBeTruthy()
+  })
+
+  it('does not auto-save a review row until Include is pressed', async () => {
+    await openWithStatement()
+    fireEvent.change(rowCells(1).getAllByRole('textbox')[0], {
+      target: { value: '7489112502043449' },
+    })
+    await waitFor(() => expect(rowCells(1).getByText('review')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Verify & Save 1 Record$/ })).toBeTruthy()
+    fireEvent.click(rowCells(1).getByRole('button', { name: 'Include' }))
     expect(screen.getByRole('button', { name: /Verify & Save 2 Records/ })).toBeTruthy()
   })
 
@@ -116,7 +116,6 @@ describe('StatementImportModal review table', () => {
     const onPosted = vi.fn()
     await openWithStatement({ onPosted })
     fireEvent.click(screen.getByRole('button', { name: /Verify & Save 1 Record$/ }))
-
     await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalledTimes(1))
     expect(addCommissionTransaction).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -139,9 +138,24 @@ describe('StatementImportModal review table', () => {
     await waitFor(() => expect(onPosted).toHaveBeenCalled())
   })
 
+  it('writes a renewal statement rate onto ryCommission', async () => {
+    await openWithStatement({}, [
+      {
+        'Policy No.': '7489112502043449',
+        'Insured Name': 'Mukeshbhai Bhupatbhai Vatukiya',
+        Premium: 18797,
+        'Total Comm': 1409,
+        'Commission %': 7.5,
+        'Fresh/Renewal': 'Renewal',
+      },
+    ])
+    fireEvent.click(screen.getByRole('button', { name: /Verify & Save 1 Record$/ }))
+    await waitFor(() => expect(updatePolicy).toHaveBeenCalled())
+    expect(updatePolicy).toHaveBeenCalledWith('p2', { ryCommission: 7.5 })
+  })
+
   it('never posts a row with no matching policy', async () => {
-    parseImportFile.mockResolvedValue([SHEET[1]])
-    await openWithStatement()
+    await openWithStatement({}, [SHEET[1]])
     expect(screen.getByRole('button', { name: /Verify & Save 0 Records/ }).disabled).toBe(true)
   })
 })
