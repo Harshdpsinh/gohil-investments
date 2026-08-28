@@ -1,27 +1,24 @@
 // src/utils/commissionReconcile.js
-// Joins the policy book to the posted commission ledger, per policy.
-//
-// The Commission page used to compute two totals that never met: estimated
-// earnings from the book, and posted receipts from commission_transactions.
-// Nothing joined them, so a policy whose premium was collected and whose
-// commission the insurer never paid looked identical to one that was settled.
-// Everything here answers that one question.
-//
-// Pure — no firebase, no react — so the money rules are testable.
 import { getDueDate, parseAnyDate } from './dateUtils'
 import { canonicalInsurer } from './insurers'
 import { normaliseBusinessType } from './commissionImport'
 import { isRenewalPolicy } from './businessDone'
 
-/** Rupee value of one transaction. netReceived is what actually landed. */
+/** Rupees that landed in the bank (after TDS when the importer split them). */
 export const txnAmount = txn => Number(txn?.netReceived ?? txn?.receivedCommission ?? 0)
 
 /**
- * What the insurer should pay on this policy. First-year policies earn the FY
- * rate, every later year earns the RY rate — the same split the policy form
- * captures. Returns 0 when no rate is on file, which is why 'no-rate' is its
- * own bucket rather than being reported as a shortfall.
+ * Gross commission the insurer credited. Expected rates are on premium, so
+ * this is what reconciliation compares — a 5% TDS haircut is tax, not a short.
  */
+export function txnGross(txn = {}) {
+  if (txn.receivedCommission != null && txn.receivedCommission !== '') {
+    const gross = Number(txn.receivedCommission)
+    if (Number.isFinite(gross)) return gross
+  }
+  return txnAmount(txn) + (Number(txn.tds) || 0)
+}
+
 export function expectedCommission(policy = {}) {
   const premium = Number(policy.premium) || 0
   const year = Number(policy.policyYear) || 1
@@ -30,10 +27,6 @@ export function expectedCommission(policy = {}) {
   return Math.round((premium * rate) / 100)
 }
 
-/**
- * Statements round, and some carriers pay commission on a premium net of GST.
- * A flat rupee tolerance would flag half the book, so allow 1% with a ₹1 floor.
- */
 export function toleranceFor(expected, pct = 0.01) {
   return Math.max(1, Math.abs(expected) * pct)
 }
@@ -48,22 +41,15 @@ const RECONCILE_STATUS = {
 }
 export { RECONCILE_STATUS }
 
-// A policy that was renewed away or cancelled still earned commission on the
-// term it ran, so only a future start date makes commission genuinely not due.
 const inForce = policy => !['Cancelled'].includes(String(policy?.status || '').trim())
 
-/**
- * Sums every posted transaction per policy. Reversals post as negative rows, so
- * summing IS the netting — a clawback cancels the payout it reverses instead of
- * both being counted as income.
- */
 export function netByPolicy(transactions = []) {
   const map = new Map()
   for (const txn of transactions) {
     const id = txn?.policyId
     if (!id) continue
     const current = map.get(id) || { received: 0, credits: 0, debits: 0, tds: 0, gst: 0, count: 0, rows: [] }
-    const amount = txnAmount(txn)
+    const amount = txnGross(txn)
     current.received += amount
     if (amount < 0) current.debits += amount
     else current.credits += amount
@@ -76,7 +62,6 @@ export function netByPolicy(transactions = []) {
   return map
 }
 
-/** Earliest payout date recorded against a policy, used for days-to-pay. */
 function firstPayoutDate(rows = []) {
   const dates = rows
     .map(row => parseAnyDate(row.payoutDate || (row.payoutMonth ? `${row.payoutMonth}-01` : '')))
@@ -87,10 +72,6 @@ function firstPayoutDate(rows = []) {
 
 const dayDiff = (from, to) => Math.floor((to - from) / 86400000)
 
-/**
- * One row per policy: what was expected, what landed, and which of those two
- * facts needs a human. `asOf` is injected so the ageing is deterministic.
- */
 export function reconcilePolicies(policies = [], transactions = [], { asOf = new Date(), tolerancePct = 0.01 } = {}) {
   const ledger = netByPolicy(transactions)
 
@@ -103,7 +84,6 @@ export function reconcilePolicies(policies = [], transactions = [], { asOf = new
 
     const start = parseAnyDate(policy.startDate)
     const notStarted = start ? start > asOf : false
-    // Commission becomes chaseable from the day cover starts.
     const ageingDays = start && !notStarted ? dayDiff(start, asOf) : 0
     const paidOn = firstPayoutDate(entry.rows)
 
@@ -125,8 +105,6 @@ export function reconcilePolicies(policies = [], transactions = [], { asOf = new
       premium: Number(policy.premium) || 0,
       startDate: policy.startDate || '',
       dueDate: getDueDate(policy) || '',
-      // markPremiumPaid stamps this. It is the only positive signal that the
-      // client's money actually arrived, as opposed to the policy being booked.
       premiumCollected: Boolean(policy.lastPremiumPaidAt),
       expected,
       received,
@@ -137,7 +115,6 @@ export function reconcilePolicies(policies = [], transactions = [], { asOf = new
       gst: Math.round(entry.gst),
       postings: entry.count,
       status,
-      // Only meaningful while nothing has been received.
       ageingDays: entry.count ? 0 : Math.max(0, ageingDays),
       daysToPay: start && paidOn ? Math.max(0, dayDiff(start, paidOn)) : null,
       chaseable: !entry.count && !notStarted && expected > 0 && inForce(policy),
@@ -145,23 +122,6 @@ export function reconcilePolicies(policies = [], transactions = [], { asOf = new
   })
 }
 
-/**
- * Fresh or Renewal for one ledger row.
- *
- * The statement's own column is preferred but is usually not there: Star Health
- * and ICICI Lombard print no such column at all, and the carriers that do print
- * one disagree on the words — "New", "Retail New Business", "RYC". Worse, the
- * Aditya Birla parser used to pass its band text straight through, so a reward
- * line called "Booster" was filed as if it were a kind of business.
- *
- * So: normalise whatever the statement said, and when that leaves nothing, ask
- * the policy. `policyYear` and `parentPolicyId` already answer this exactly —
- * renewPolicy writes both — and they are right whether or not the insurer
- * bothered to say. Only a row with no policy at all stays unspecified.
- *
- * Read-time only. Nothing stored is rewritten, so historical rows are corrected
- * on screen without a migration.
- */
 export function resolveBusinessType(txn = {}, policy = null) {
   const stated = normaliseBusinessType(txn.businessType)
   if (stated) return stated
@@ -179,10 +139,6 @@ export function ageingBucket(days) {
   return '90+'
 }
 
-/**
- * How much unpaid commission sits in each ageing band. Insurers routinely pay
- * 45-90 days late, so without this you cannot tell "late" from "never".
- */
 export function ageingSummary(rows = []) {
   const base = Object.fromEntries(AGEING_BUCKETS.map(bucket => [bucket, { count: 0, amount: 0 }]))
   for (const row of rows) {
@@ -217,15 +173,9 @@ export function reconcileSummary(rows = []) {
   }
 }
 
-/**
- * Which insurer short-pays, and which pays late. This is the number to take
- * into an agency-agreement renegotiation.
- */
 export function insurerScorecard(rows = []) {
   const map = new Map()
   for (const row of rows) {
-    // One row per company, not per spelling — otherwise a carrier entered two
-    // ways looks like two carriers each paying half of what they owe.
     const key = canonicalInsurer(row.insurer) || 'Unknown'
     const entry = map.get(key) || {
       insurer: key, policies: 0, expected: 0, received: 0,
@@ -244,7 +194,6 @@ export function insurerScorecard(rows = []) {
     .map(entry => ({
       ...entry,
       variance: entry.received - entry.expected,
-      // Null, not 0: "never been paid" and "paid same day" are different facts.
       avgDaysToPay: entry.payDays.length
         ? Math.round(entry.payDays.reduce((a, b) => a + b, 0) / entry.payDays.length)
         : null,
@@ -253,10 +202,6 @@ export function insurerScorecard(rows = []) {
     .sort((a, b) => b.expected - a.expected)
 }
 
-/**
- * Commission you can expect to bill over the next `days`, from renewals already
- * on the book. Turns the page from a rear-view mirror into a cash forecast.
- */
 export function receivablesForecast(policies = [], { asOf = new Date(), days = 90 } = {}) {
   const horizon = new Date(asOf.getTime() + days * 86400000)
   const months = new Map()
@@ -267,7 +212,6 @@ export function receivablesForecast(policies = [], { asOf = new Date(), days = 9
     if (!inForce(policy) || policy.is_renewed) continue
     const due = parseAnyDate(getDueDate(policy))
     if (!due || due < asOf || due > horizon) continue
-    // A renewal earns the RY rate, so price next year's rate, not this year's.
     const rate = Number(policy.ryCommission || policy.fyCommission) || 0
     const amount = Math.round(((Number(policy.premium) || 0) * rate) / 100)
     const key = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}`
@@ -279,10 +223,6 @@ export function receivablesForecast(policies = [], { asOf = new Date(), days = 9
   return { total, count, byMonth: Object.fromEntries([...months].sort(([a], [b]) => a.localeCompare(b))) }
 }
 
-/**
- * TDS deducted per insurer, for checking against Form 26AS at year end.
- * Insurers deduct 5% under s.194D and it is credited against your own tax.
- */
 export function tdsSummary(transactions = [], { from = '', to = '' } = {}) {
   const inRange = month => (!from || month >= from) && (!to || month <= to)
   const map = new Map()
@@ -294,14 +234,18 @@ export function tdsSummary(transactions = [], { from = '', to = '' } = {}) {
     if (month && !inRange(month)) continue
     const key = txn.insurer || 'Unknown'
     const tds = Number(txn.tds) || 0
+    const credited = txnGross(txn)
+    const net = (txn.netReceived != null && txn.netReceived !== '')
+      ? Number(txn.netReceived) || 0
+      : credited - tds
     const entry = map.get(key) || { insurer: key, gross: 0, tds: 0, net: 0, rows: 0 }
-    entry.gross += txnAmount(txn) + tds
+    entry.gross += credited
     entry.tds += tds
-    entry.net += txnAmount(txn)
+    entry.net += net
     entry.rows += 1
     map.set(key, entry)
     total += tds
-    gross += txnAmount(txn) + tds
+    gross += credited
   }
 
   return {
