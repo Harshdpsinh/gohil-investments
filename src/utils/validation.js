@@ -4,6 +4,7 @@
 // Firebase. Nothing in this file may import firebase or perform I/O — that is the
 // whole point of it existing.
 import { normaliseFrequency } from './dateUtils'
+import { canonicalInsurer } from './insurers'
 
 export const POLICY_TYPES = ['Health','Life','Motor','Home','Travel','Marine','Fire','Other']
 export const POLICY_STATUSES = ['Active','Lapsed','Cancelled','Matured','Renewed-Out']
@@ -88,7 +89,13 @@ export function normalisePolicyPayload(data, { partial = false } = {}) {
     next.coverageTermYears = years
     next.isMultiYearPolicy = years > 1
   }
-  if (next.insurer !== undefined && next.insurer !== null) next.insurer = String(next.insurer).trim()
+  if (next.insurer !== undefined && next.insurer !== null) next.insurer = canonicalInsurer(String(next.insurer).trim())
+  if (next.prevInsurer !== undefined && next.prevInsurer !== null) {
+    next.prevInsurer = canonicalInsurer(String(next.prevInsurer).trim())
+  }
+  if (next.tpInsurer !== undefined && next.tpInsurer !== null) {
+    next.tpInsurer = canonicalInsurer(String(next.tpInsurer).trim())
+  }
   if (!partial && !next.insurer) throw new Error('Insurer is required.')
 
   assertOptionalNumber(next.premium, 'Premium', { min: 1, max: 1000000000 })
