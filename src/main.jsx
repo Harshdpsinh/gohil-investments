@@ -14,6 +14,7 @@ import './styles/tokens.css'
 import './index.css'
 import './styles/animations.css'
 import './styles/portal.css'
+import './styles/uidai-portal.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
