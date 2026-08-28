@@ -38,20 +38,18 @@ export default function Sidebar({ mobile, onClose }) {
 
   return (
     <aside className="app-sidebar flex h-full w-72 flex-col">
-      {/* Brand */}
-      <div className="border-b border-white/10 px-5 py-5">
+      <div className="border-b border-[#eadfce] px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="brand-mark">
             <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-[15px] font-bold text-white">Gohil Investments</p>
-            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Insurance operations</p>
+            <p className="truncate text-[15px] font-bold text-[#2a2156]">Gohil Investments</p>
+            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8a829c]">Insurance operations</p>
           </div>
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         <p className="nav-section-label">Workspace</p>
         {NAV.map(({ to, icon, label }) => (
@@ -67,11 +65,10 @@ export default function Sidebar({ mobile, onClose }) {
         ))}
       </nav>
 
-      {/* Dark mode toggle */}
-      <div className="border-t border-slate-200/80 px-4 py-3 dark:border-slate-400/10">
+      <div className="border-t border-[#eadfce] px-4 py-3">
         <button
           onClick={toggle}
-          className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 shadow-sm hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-400/10 dark:bg-slate-800/70 dark:text-slate-300 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:border-blue-500/30 dark:hover:bg-blue-500/10 dark:hover:text-slate-100"
+          className="flex w-full items-center justify-between rounded-xl border border-[#eadfce] bg-[#fbf6ee] px-3 py-2 text-sm font-bold text-[#2a2156] shadow-sm"
         >
           <span className="flex items-center gap-2">
             <span className="nav-icon h-5 w-5"><AppIcon name={dark ? 'sun' : 'moon'} /></span>
@@ -83,18 +80,17 @@ export default function Sidebar({ mobile, onClose }) {
         </button>
       </div>
 
-      {/* User */}
-      <div className="border-t border-slate-200/80 px-4 py-4 dark:border-slate-400/10">
-        <div className="mb-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm dark:border-slate-400/10 dark:bg-slate-800/60 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-700 text-sm font-black text-white">
+      <div className="border-t border-[#eadfce] px-4 py-4">
+        <div className="mb-3 flex items-center gap-3 rounded-2xl border border-[#eadfce] bg-[#fbf6ee] p-3 shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#2a2156] text-sm font-black text-white">
             {user?.email?.[0]?.toUpperCase() || 'A'}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">{user?.email}</p>
+            <p className="truncate text-xs font-bold text-[#2a2156]">{user?.email}</p>
             <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
               isAdmin
-                ? 'border border-teal-400/30 bg-teal-500/10 text-teal-800 dark:text-teal-200'
-                : 'border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                ? 'border border-[#c4b5fd] bg-[#f3e8ff] text-[#3d2a8c]'
+                : 'border border-[#eadfce] bg-white text-[#5c5670]'
             }`}>
               {isAdmin ? 'Admin' : 'Staff'}
             </span>
