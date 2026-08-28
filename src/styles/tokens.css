@@ -1,25 +1,25 @@
-/* Option B — Operations Studio. Presentation tokens only. */
+/* Public-service portal tokens. Presentation only. */
 :root {
-  --gi-primary: #0f766e;
-  --gi-primary-dark: #115e59;
-  --gi-accent: #0f766e;
+  --gi-primary: #3d2a8c;
+  --gi-primary-dark: #2a2156;
+  --gi-accent: #5b3cc4;
   --gi-success: #059669;
   --gi-warning: #d97706;
   --gi-danger: #dc2626;
-  --gi-bg: #f8fafc;
+  --gi-bg: #f6f0e8;
   --gi-surface: #ffffff;
-  --gi-surface-2: #f1f5f9;
-  --gi-border: #e2e8f0;
-  --gi-text: #0f172a;
-  --gi-text-muted: #64748b;
-  --gi-radius: 10px;
-  --gi-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --gi-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --gi-surface-2: #fbf6ee;
+  --gi-border: #eadfce;
+  --gi-text: #2a2156;
+  --gi-text-muted: #5c5670;
+  --gi-radius: 18px;
+  --gi-shadow-sm: 0 1px 2px rgba(42, 33, 86, 0.05);
+  --gi-shadow: 0 8px 24px rgba(42, 33, 86, 0.06);
   --gi-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
-  --color-primary: #0f766e;
-  --color-primary-dark: #115e59;
-  --color-primary-light: #14b8a6;
-  --color-accent: #0f766e;
+  --color-primary: #3d2a8c;
+  --color-primary-dark: #2a2156;
+  --color-primary-light: #8b6cf5;
+  --color-accent: #5b3cc4;
 
   --color-success: #10b981;
   --color-success-light: #34d399;
@@ -27,42 +27,42 @@
   --color-warning-light: #fcd34d;
   --color-danger: #ef4444;
   --color-danger-light: #f87171;
-  --color-purple: #8b5cf6;
+  --color-purple: #5b3cc4;
   --color-orange: #f97316;
 
-  --surface-0: #f8fafc;
+  --surface-0: #f6f0e8;
   --surface-1: #ffffff;
-  --surface-2-token: #f8fafc;
-  --surface-3-token: #f1f5f9;
-  --surface-border: #e2e8f0;
+  --surface-2-token: #fbf6ee;
+  --surface-3-token: #efe6d8;
+  --surface-border: #eadfce;
   --surface-glass: rgba(255, 255, 255, 0.92);
 
-  --text-secondary: #334155;
-  --text-faint: #94a3b8;
+  --text-secondary: #3f3958;
+  --text-faint: #8a829c;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
   --radius-pill: 999px;
 
-  --shadow-primary: 0 8px 18px rgba(15, 118, 110, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --shadow-primary: 0 8px 18px rgba(42, 33, 86, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .dark {
-  --gi-bg: #0b1220;
-  --gi-surface: #111b2e;
-  --gi-surface-2: #18253b;
-  --gi-border: #2a3a54;
-  --gi-text: #f8fafc;
-  --gi-text-muted: #cbd5e1;
-  --surface-0: #0b1220;
-  --surface-1: #111b2e;
-  --surface-2-token: #18253b;
-  --surface-3-token: #334155;
-  --surface-border: #2a3a54;
-  --surface-glass: rgba(15, 23, 42, 0.78);
-  --text-secondary: #cbd5e1;
-  --text-faint: #64748b;
-  --shadow-primary: 0 8px 18px rgba(15, 118, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --gi-bg: #161226;
+  --gi-surface: #221b36;
+  --gi-surface-2: #2b2344;
+  --gi-border: #3d3458;
+  --gi-text: #f6f0e8;
+  --gi-text-muted: #c9c0d8;
+  --surface-0: #161226;
+  --surface-1: #221b36;
+  --surface-2-token: #2b2344;
+  --surface-3-token: #352c52;
+  --surface-border: #3d3458;
+  --surface-glass: rgba(22, 18, 38, 0.78);
+  --text-secondary: #c9c0d8;
+  --text-faint: #8a829c;
+  --shadow-primary: 0 8px 18px rgba(91, 60, 196, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }

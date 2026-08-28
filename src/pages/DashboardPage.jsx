@@ -14,6 +14,7 @@ import { subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
+import PortalHome from '../components/layout/PortalHome'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
@@ -146,10 +147,11 @@ export default function DashboardPage() {
   if (loading) return <div className="p-8 text-gray-400">Loading dashboard...</div>
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
-  const typeColors = ['#2563eb', '#06b6d4', '#f59e0b', '#10b981', '#8b5cf6', '#64748b']
+  const typeColors = ['#3d2a8c', '#5b3cc4', '#f59e0b', '#10b981', '#2563eb', '#64748b']
 
   return (
     <div className="fintech-page space-y-4 sm:space-y-5">
+      <PortalHome stats={stats} />
       <div className="fintech-header border-b border-slate-200 pb-4 dark:border-slate-800">
         <div>
           <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
@@ -202,7 +204,7 @@ export default function DashboardPage() {
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">New Policies (6 months)</p>
           <div style={{ height: 180 }}>
             <Bar
-              data={{ labels: stats.monthly.map(m => m.label), datasets: [{ label: 'Policies', data: stats.monthly.map(m => m.count), backgroundColor: '#3b82f6', borderRadius: 4 }] }}
+              data={{ labels: stats.monthly.map(m => m.label), datasets: [{ label: 'Policies', data: stats.monthly.map(m => m.count), backgroundColor: '#5b3cc4', borderRadius: 4 }] }}
               options={CHART_OPTS}
             />
           </div>
