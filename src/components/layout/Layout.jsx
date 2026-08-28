@@ -121,6 +121,17 @@ export default function Layout({ children }) {
         <header className="hidden h-16 shrink-0 items-center gap-4 border-b border-[#eadfce] bg-white px-6 lg:flex">
           <GlobalSearch />
         </header>
+        <nav className="portal-govnav" aria-label="Workspace">
+          <div className="flex min-w-0 flex-1 items-center overflow-x-auto">
+            <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Home</NavLink>
+            <NavLink to="/clients" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Clients</NavLink>
+            <NavLink to="/policies" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Policies</NavLink>
+            <NavLink to="/renewals" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Renewals</NavLink>
+            <NavLink to="/claims" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Claims</NavLink>
+            <NavLink to="/business" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Business</NavLink>
+            <NavLink to="/inbox" className={({ isActive }) => isActive ? 'portal-govnav-link is-active' : 'portal-govnav-link'}>Help</NavLink>
+          </div>
+        </nav>
 
         <main
           className="flex-1 overflow-y-auto"
