@@ -148,7 +148,7 @@ export default function BackupPage() {
           <div>
             <p className="font-semibold text-gray-900 dark:text-white">Restore Backup</p>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              Re-populates records from a backup file. Restore is merged safely, so matching records are updated.
+              Matching records are updated and missing ones are added. Inbox messages are not overwritten. Existing audit logs stay as they are.
             </p>
           </div>
 

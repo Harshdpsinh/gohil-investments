@@ -240,8 +240,8 @@ export function getDueDate(policy) {
   return toInputDate(policy.expiryDate)
 }
 
-export function daysUntilPolicyDue(policy) {
+export function daysUntilPolicyDue(policy, asOf = new Date()) {
   const due = parseAnyDate(getDueDate(policy))
   if (!due) return null
-  return differenceInDays(startOfDay(due), startOfDay(new Date()))
+  return differenceInDays(startOfDay(due), startOfDay(asOf))
 }

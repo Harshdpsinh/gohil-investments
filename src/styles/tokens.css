@@ -1,25 +1,25 @@
-/* UI MODERNIZATION - presentation tokens only, no app behavior changed. */
+/* Option B — Operations Studio. Presentation tokens only. */
 :root {
-  --gi-primary: #2563eb;
-  --gi-primary-dark: #1d4ed8;
-  --gi-accent: #059669;
+  --gi-primary: #0f766e;
+  --gi-primary-dark: #115e59;
+  --gi-accent: #0f766e;
   --gi-success: #059669;
-  --gi-warning: #f59e0b;
-  --gi-danger: #ef4444;
+  --gi-warning: #d97706;
+  --gi-danger: #dc2626;
   --gi-bg: #f8fafc;
   --gi-surface: #ffffff;
-  --gi-surface-2: #f1f5fd;
-  --gi-border: #e4ecfc;
+  --gi-surface-2: #f1f5f9;
+  --gi-border: #e2e8f0;
   --gi-text: #0f172a;
   --gi-text-muted: #64748b;
-  --gi-radius: 8px;
-  --gi-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --gi-shadow: 0 6px 20px rgba(15, 23, 42, 0.065);
-  --gi-transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-  --color-primary: #2563eb;
-  --color-primary-dark: #1e40af;
-  --color-primary-light: #3b82f6;
-  --color-accent: #059669;
+  --gi-radius: 10px;
+  --gi-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --gi-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --gi-transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --color-primary: #0f766e;
+  --color-primary-dark: #115e59;
+  --color-primary-light: #14b8a6;
+  --color-accent: #0f766e;
 
   --color-success: #10b981;
   --color-success-light: #34d399;
@@ -32,21 +32,21 @@
 
   --surface-0: #f8fafc;
   --surface-1: #ffffff;
-  --surface-2-token: #f5f8ff;
-  --surface-3-token: #edf2fb;
-  --surface-border: #e4ecfc;
-  --surface-glass: rgba(255, 255, 255, 0.86);
+  --surface-2-token: #f8fafc;
+  --surface-3-token: #f1f5f9;
+  --surface-border: #e2e8f0;
+  --surface-glass: rgba(255, 255, 255, 0.92);
 
   --text-secondary: #334155;
   --text-faint: #94a3b8;
 
   --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 8px;
-  --radius-xl: 8px;
+  --radius-md: 10px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
   --radius-pill: 999px;
 
-  --shadow-primary: 0 8px 18px rgba(37, 99, 235, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  --shadow-primary: 0 8px 18px rgba(15, 118, 110, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .dark {
@@ -64,5 +64,5 @@
   --surface-glass: rgba(15, 23, 42, 0.78);
   --text-secondary: #cbd5e1;
   --text-faint: #64748b;
-  --shadow-primary: 0 8px 18px rgba(37, 99, 235, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-primary: 0 8px 18px rgba(15, 118, 110, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }

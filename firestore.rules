@@ -121,6 +121,14 @@ service cloud.firestore {
     match /reports_saved_filters/{filterId} {
       allow read, create, update, delete: if isStaff();
     }
+    match /client_activities/{activityId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+    match /occasion_logs/{logId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();
       // Self-provisioning is deliberately NOT allowed. Previously any signed-in user

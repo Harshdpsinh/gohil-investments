@@ -15,6 +15,9 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/clients',    icon:'clients', label:'Clients'     },
     { to:'/policies',   icon:'policies', label:'Policies'    },
     { to:'/renewals',   icon:'renewals', label:'Renewals'    },
+    { to:'/pipeline',   icon:'activity', label:'Pipeline'    },
+    { to:'/installments', icon:'clock', label:'Installments' },
+    { to:'/cross-sell', icon:'leads', label:'Coverage gaps' },
     { to:'/claims',     icon:'claims', label:'Claims'      },
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
     { to:'/business',   icon:'work', label:'Business Done' },
@@ -36,14 +39,14 @@ export default function Sidebar({ mobile, onClose }) {
   return (
     <aside className="app-sidebar flex h-full w-72 flex-col">
       {/* Brand */}
-      <div className="border-b border-slate-200/80 px-5 py-5 dark:border-slate-400/10">
+      <div className="border-b border-white/10 px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="brand-mark">
             <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
           </div>
           <div className="min-w-0">
-            <p className="truncate text-[15px] font-bold text-slate-950 dark:text-slate-100">Gohil Investments</p>
-            <p className="truncate text-[10px] font-semibold uppercase text-slate-500">Insurance operations</p>
+            <p className="truncate text-[15px] font-bold text-white">Gohil Investments</p>
+            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Insurance operations</p>
           </div>
         </div>
       </div>
@@ -83,15 +86,15 @@ export default function Sidebar({ mobile, onClose }) {
       {/* User */}
       <div className="border-t border-slate-200/80 px-4 py-4 dark:border-slate-400/10">
         <div className="mb-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm dark:border-slate-400/10 dark:bg-slate-800/60 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-cyan-500 text-sm font-black text-white">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-700 text-sm font-black text-white">
             {user?.email?.[0]?.toUpperCase() || 'A'}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-200">{user?.email}</p>
             <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
               isAdmin
-                ? 'border border-blue-400/30 bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200'
-                : 'border border-emerald-400/30 bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200'
+                ? 'border border-teal-400/30 bg-teal-500/10 text-teal-800 dark:text-teal-200'
+                : 'border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
             }`}>
               {isAdmin ? 'Admin' : 'Staff'}
             </span>

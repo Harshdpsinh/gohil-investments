@@ -28,7 +28,7 @@ export function getAdminDb() {
  * no dependency, and the API key is project-scoped so a token minted for
  * another Firebase project is rejected too.
  *
- * Returns { uid } or null. The API key is public by design (it ships in the
+ * Returns { uid, email } or null. The API key is public by design (it ships in the
  * client bundle) — it identifies the project, it does not authorise anything.
  */
 export async function verifyIdToken(idToken) {
@@ -44,8 +44,45 @@ export async function verifyIdToken(idToken) {
   )
   if (!response.ok) return null
   const body = await response.json().catch(() => null)
-  const uid = body?.users?.[0]?.localId
-  return uid ? { uid } : null
+  const account = body?.users?.[0]
+  const uid = account?.localId
+  return uid ? { uid, email: account.email || '' } : null
+}
+
+const OWNER_ADMIN_EMAILS = new Set([
+  'harshdeepgohil@gmail.com',
+  'harshdpsinh@gmail.com',
+])
+
+/** Same bar as firestore.rules: owner email or a provisioned users/{uid} role. */
+export async function assertStaff(db, decoded) {
+  const email = String(decoded?.email || '').trim().toLowerCase()
+  if (email && OWNER_ADMIN_EMAILS.has(email)) {
+    return { uid: decoded.uid, email, role: 'admin' }
+  }
+  const profile = (await db.collection('users').doc(decoded.uid).get()).data()
+  const role = String(profile?.role || '').toLowerCase()
+  if (role !== 'admin' && role !== 'staff') return null
+  return { uid: decoded.uid, email: profile?.email || email, role }
+}
+
+/**
+ * The 24-hour window is opened only by the client's last inbound message.
+ * Our own replies do not extend it. Looked up server-side so the browser
+ * cannot claim the window is open.
+ */
+export async function inboundWindowOpen(db, waId, now = Date.now()) {
+  if (!waId) return false
+  const snap = await db.collection('whatsapp_messages')
+    .where('waId', '==', waId)
+    .limit(50)
+    .get()
+  let lastInbound = 0
+  snap.forEach(doc => {
+    const row = doc.data() || {}
+    if (row.direction === 'in') lastInbound = Math.max(lastInbound, Number(row.timestamp) || 0)
+  })
+  return lastInbound > 0 && (now - lastInbound) < (24 * 60 * 60 * 1000)
 }
 
 function ensureAdminApp() {

@@ -17,24 +17,40 @@ import BackupPage            from './pages/BackupPage'
 import ReportsPage           from './pages/ReportsPage'
 import BusinessDonePage      from './pages/BusinessDonePage'
 import WhatsAppInboxPage     from './pages/WhatsAppInboxPage'
-
-// Pipeline 3D is disabled. The page and src/three/ are still in the repo — to
-// switch it back on, restore the lazy import, the /pipeline route below and the
-// Sidebar entry. Nothing else depends on it.
-// const PipelineDashboard = lazy(() => import('./pages/PipelineDashboard'))
+import InstallmentsPage      from './pages/InstallmentsPage'
+import RenewalPipelinePage   from './pages/RenewalPipelinePage'
+import CrossSellPage         from './pages/CrossSellPage'
 
 function ProtectedRoute({ children }) {
-  const { user, loading } = useAuth()
+  const { user, role, loading, signOut } = useAuth()
   if (loading) return (
-    <div className="flex h-screen items-center justify-center bg-[#0a0f1e]">
-      <div className="w-80 rounded-2xl border border-slate-400/10 bg-slate-800/60 p-6 shadow-[0_4px_24px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl">
+    <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="w-80 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="skeleton-shimmer h-5 rounded-full" />
         <div className="skeleton-shimmer mt-4 h-20 rounded-xl" />
-        <p className="mt-4 text-center text-sm font-semibold text-slate-400">Loading...</p>
+        <p className="mt-4 text-center text-sm font-semibold text-slate-500">Loading...</p>
       </div>
     </div>
   )
-  return user ? children : <Navigate to="/login" replace />
+  if (!user) return <Navigate to="/login" replace />
+  if (!role) return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+      <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <h1 className="text-xl font-bold text-slate-900">Account not provisioned</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          This login is not on the staff list. Ask an admin to add you under Manage Staff, then sign in again.
+        </p>
+        <button
+          type="button"
+          className="btn-secondary mt-6"
+          onClick={() => signOut()}
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  )
+  return children
 }
 
 export default function App() {
@@ -52,6 +68,9 @@ export default function App() {
                 <Route path="/clients/:id"         element={<ClientProfilePage />} />
                 <Route path="/policies"            element={<PoliciesPage />} />
                 <Route path="/renewals"            element={<RenewalsPage />} />
+                <Route path="/pipeline"            element={<RenewalPipelinePage />} />
+                <Route path="/installments"        element={<InstallmentsPage />} />
+                <Route path="/cross-sell"          element={<CrossSellPage />} />
                 <Route path="/proposals"           element={<ProposalsPage />} />
                 <Route path="/business"            element={<BusinessDonePage />} />
                 <Route path="/inbox"               element={<WhatsAppInboxPage />} />

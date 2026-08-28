@@ -1,45 +1,58 @@
 // storage.rules
-// ─────────────────────────────────────────────────────────────
-// PASTE THIS into Firebase Console → Storage → Rules tab.
-// Allows signed-in users to read/write CRM files with strict size/type limits.
-// Client files: 10 MB. Policy PDFs and shared documents: 25 MB.
-// ─────────────────────────────────────────────────────────────
+// Signed-in is not enough: the Firebase API key is public, so anyone can mint
+// an auth account. Only provisioned staff (or the owner emails) may read/write.
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isOwnerAdminEmail() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'harshdeepgohil@gmail.com',
+          'harshdpsinh@gmail.com'
+        ];
+    }
+    function staffProfile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function isStaff() {
+      return isOwnerAdminEmail()
+        || (request.auth != null
+            && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+            && staffProfile().role in ['admin', 'staff']);
+    }
+
     match /clients/{clientId}/{allPaths=**} {
-      allow read:  if request.auth != null;
-      allow delete: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if isStaff();
+      allow delete: if isStaff();
+      allow write: if isStaff()
                    && request.resource.size < 10 * 1024 * 1024
                    && request.resource.contentType.matches('application/pdf|image/.*');
     }
 
     match /policies/{policyId}/{allPaths=**} {
-      allow read:  if request.auth != null;
-      allow delete: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if isStaff();
+      allow delete: if isStaff();
+      allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024
                    && request.resource.contentType == 'application/pdf';
     }
 
     match /documents/{ownerType}/{ownerId}/{allPaths=**} {
-      allow read:  if request.auth != null;
-      allow delete: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if isStaff();
+      allow delete: if isStaff();
+      allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024
                    && request.resource.contentType.matches('application/pdf|image/.*|text/csv|application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     }
 
     match /commission/{batchId}/{allPaths=**} {
-      allow read:  if request.auth != null;
-      allow delete: if request.auth != null;
-      allow write: if request.auth != null
+      allow read: if isStaff();
+      allow delete: if isStaff();
+      allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024
                    && request.resource.contentType.matches('application/pdf|image/.*|text/csv|application/vnd.ms-excel|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     }
 
-    // Block everything else
     match /{allPaths=**} {
       allow read, write: if false;
     }

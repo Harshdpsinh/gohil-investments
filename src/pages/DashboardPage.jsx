@@ -17,16 +17,15 @@ import AppIcon from '../components/ui/AppIcon'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
-const NOW = startOfDay(new Date())
 const isActivePolicy = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
 
-function isBirthdayThisWeek(dobStr) {
+function isBirthdayThisWeek(dobStr, today) {
   const dob = parseAnyDate(dobStr)
   if (!dob) return false
-  const bday = new Date(NOW.getFullYear(), dob.getMonth(), dob.getDate())
-  const diff = differenceInDays(bday, NOW)
+  const bday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate())
+  const diff = differenceInDays(bday, today)
   if (diff >= 0 && diff <= 7) return true
-  const nextDiff = differenceInDays(new Date(NOW.getFullYear() + 1, dob.getMonth(), dob.getDate()), NOW)
+  const nextDiff = differenceInDays(new Date(today.getFullYear() + 1, dob.getMonth(), dob.getDate()), today)
   return nextDiff >= 0 && nextDiff <= 7
 }
 
@@ -75,6 +74,8 @@ export default function DashboardPage() {
   const { policies, loading } = usePolicies()
   const navigate = useNavigate()
   const [claims, setClaims] = useState([])
+  const now = new Date()
+  const today = startOfDay(now)
 
   useEffect(() => subscribeClaims(setClaims, err => console.error('Dashboard claims subscription failed:', err)), [])
 
@@ -109,7 +110,7 @@ export default function DashboardPage() {
     active.forEach(p => { byType[p.policyType || 'Other'] = (byType[p.policyType || 'Other'] || 0) + 1 })
 
     const months = Array.from({ length: 6 }, (_, i) => {
-      const d = subMonths(NOW, 5 - i)
+      const d = subMonths(today, 5 - i)
       return { label: format(d, 'MMM yy'), count: 0 }
     })
     const monthIndex = Object.fromEntries(months.map((m, i) => [m.label, i]))
@@ -127,7 +128,7 @@ export default function DashboardPage() {
       expired: expired.length,
       clients: clients.length,
       totalPremium: active.reduce((sum, p) => sum + (parseFloat(p.premium) || 0), 0),
-      birthdays: clients.filter(c => isBirthdayThisWeek(c.dob)),
+      birthdays: clients.filter(c => isBirthdayThisWeek(c.dob, today)),
       openClaims: claims.filter(c => !['Settled', 'Rejected'].includes(c.status)),
       byType,
       monthly: months,
@@ -144,7 +145,7 @@ export default function DashboardPage() {
 
   if (loading) return <div className="p-8 text-gray-400">Loading dashboard...</div>
 
-  const greeting = NOW.getHours() < 12 ? 'Good morning' : NOW.getHours() < 17 ? 'Good afternoon' : 'Good evening'
+  const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
   const typeColors = ['#2563eb', '#06b6d4', '#f59e0b', '#10b981', '#8b5cf6', '#64748b']
 
   return (
@@ -153,12 +154,13 @@ export default function DashboardPage() {
         <div>
           <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
           <h1 className="fintech-title">{greeting}, Harshdip</h1>
-          <p className="fintech-subtitle">{fmtDate(NOW)} · Portfolio operations overview</p>
+          <p className="fintech-subtitle">{fmtDate(now)} · Portfolio operations overview</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
-          <button onClick={() => navigate('/policies')} className="btn-primary">Add Policy</button>
-          <button onClick={() => navigate('/renewals')} className="btn-secondary">Renewals</button>
+          <button onClick={() => navigate('/policies')} className="btn-primary">Add Policy from PDF</button>
+          <button onClick={() => navigate('/pipeline')} className="btn-secondary">Pipeline</button>
+          <button onClick={() => navigate('/installments')} className="btn-secondary">Installments</button>
         </div>
       </div>
 
@@ -179,9 +181,9 @@ export default function DashboardPage() {
           </button>
         )}
         {stats.clientsWithGaps > 0 && (
-          <button className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-left" onClick={() => navigate('/clients')}>
+          <button className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-left" onClick={() => navigate('/cross-sell')}>
             <p className="text-sm font-bold text-orange-700 dark:text-orange-300">{stats.clientsWithGaps} Clients with Coverage Gaps</p>
-            <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">Cross-sell opportunities waiting</p>
+            <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">Open the coverage-gap list to message them</p>
           </button>
         )}
       </div>
