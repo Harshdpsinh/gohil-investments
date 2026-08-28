@@ -1,11 +1,17 @@
 // src/components/commission/StatementImportModal.jsx
-// Upload a commission statement, verify every row against the policy book,
-// then save. Nothing is written until "Verify & Save Records" is pressed.
 import { useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
-import { legacyPostingKey, matchStatement, normaliseStatement, postingKey, summarise } from '../../utils/commissionImport'
+import {
+  commissionRateField,
+  legacyPostingKey,
+  matchStatement,
+  normaliseStatement,
+  postedAmounts,
+  postingKey,
+  summarise,
+} from '../../utils/commissionImport'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
@@ -33,37 +39,37 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const fileRef = useRef(null)
   const [month, setMonth] = useState('')
   const [year, setYear] = useState(String(thisYear))
-  const [mode, setMode] = useState('')            // 'single' | 'multi'
-  const [insurer, setInsurer] = useState('')      // single-carrier only
+  const [mode, setMode] = useState('')
+  const [insurer, setInsurer] = useState('')
   const [parsed, setParsed] = useState([])
-  const [edits, setEdits] = useState({})          // sourceRow -> field overrides
+  const [edits, setEdits] = useState({})
   const [skipped, setSkipped] = useState(() => new Set())
+  const [includedReview, setIncludedReview] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [fileName, setFileName] = useState('')
   const [format, setFormat] = useState('')
   const [noDetail, setNoDetail] = useState(false)
 
-  // Every known carrier plus whatever the book already uses, deduped. It used
-  // to list only insurers already on a policy, so a statement from a carrier
-  // whose first policy had not been entered yet could not be imported at all.
   const carriers = useMemo(() => insurerOptions(policies.map(p => p.insurer)), [policies])
-
-  // Gate: nothing may be uploaded until the statement is described.
   const ready = Boolean(month && year && mode && (mode === 'multi' || insurer))
 
-  // Edits apply before matching, so correcting a policy number re-matches live.
   const rows = useMemo(() => {
     const applied = parsed.map(row => ({ ...row, ...(edits[row.sourceRow] || {}) }))
     return matchStatement(applied, policies, mode === 'single' ? insurer : '')
   }, [parsed, edits, policies, insurer, mode])
 
   const stats = useMemo(() => summarise(rows), [rows])
-  const postable = rows.filter(r => r.policy && !skipped.has(r.sourceRow))
+  const postable = rows.filter(r => {
+    if (!r.policy || skipped.has(r.sourceRow)) return false
+    if (r.status === 'matched') return true
+    if (r.status === 'review') return includedReview.has(r.sourceRow)
+    return false
+  })
   const payoutMonth = month && year ? `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}` : ''
 
   const reset = () => {
-    setParsed([]); setEdits({}); setSkipped(new Set())
+    setParsed([]); setEdits({}); setSkipped(new Set()); setIncludedReview(new Set())
     setFileName(''); setFormat(''); setNoDetail(false)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -76,7 +82,6 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     try {
       let list, detected
       if (/\.pdf$/i.test(file.name)) {
-        // Loaded on demand: pdfjs is ~330KB and most statements are sheets.
         const { parsePdfStatement } = await import('../../utils/pdfStatement')
         const result = await parsePdfStatement(await file.arrayBuffer())
         list = result.rows
@@ -95,6 +100,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       setNoDetail(false)
       setFileName(file.name)
       setSkipped(new Set())
+      setIncludedReview(new Set())
       setEdits({})
     } catch (err) {
       toast.error(err.message || 'Could not read that file.')
@@ -107,12 +113,23 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const edit = (sourceRow, field, value) =>
     setEdits(prev => ({ ...prev, [sourceRow]: { ...(prev[sourceRow] || {}), [field]: value } }))
 
-  const toggle = sourceRow => setSkipped(prev => {
-    const next = new Set(prev)
-    if (next.has(sourceRow)) next.delete(sourceRow)
-    else next.add(sourceRow)
-    return next
-  })
+  const toggle = (sourceRow, status) => {
+    if (status === 'review') {
+      setIncludedReview(prev => {
+        const next = new Set(prev)
+        if (next.has(sourceRow)) next.delete(sourceRow)
+        else next.add(sourceRow)
+        return next
+      })
+      return
+    }
+    setSkipped(prev => {
+      const next = new Set(prev)
+      if (next.has(sourceRow)) next.delete(sourceRow)
+      else next.add(sourceRow)
+      return next
+    })
+  }
 
   const save = async () => {
     if (!postable.length) return
@@ -121,6 +138,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
 
     for (const row of postable) {
       try {
+        const amounts = postedAmounts(row)
+        const expected = expectedCommission(row.policy)
         await addCommissionTransaction({
           policyId: row.policy.id,
           policyNumber: row.policy.policyNumber,
@@ -130,22 +149,16 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           businessType: row.businessType || '',
           planName: row.planName || '',
           premium: row.premium || Number(row.policy.premium) || 0,
-          receivedCommission: row.commissionAmount,
-          netReceived: row.commissionAmount,
-          // These three were written as 0 on every row ever posted, which is
-          // why a short payment could not be seen. expectedCommission prices
-          // the policy at its own FY/RY rate; difference is what to chase.
-          expectedCommission: expectedCommission(row.policy),
-          difference: row.commissionAmount - expectedCommission(row.policy),
-          tds: row.tds || 0,
+          receivedCommission: amounts.receivedCommission,
+          netReceived: amounts.netReceived,
+          expectedCommission: expected,
+          difference: amounts.receivedCommission - expected,
+          tds: amounts.tds,
           gst: row.gst || 0,
           payoutMonth,
           payoutDate: row.payoutDate || '',
           status: 'posted',
           postingKey: `${postingKey(row)}_${payoutMonth}`,
-          // Both earlier id shapes: before the source row was added, and before
-          // the statement month was appended at all. Rows already in the ledger
-          // carry one of these, and must still count as already posted.
           legacyPostingKeys: [
             `${legacyPostingKey(row)}_${payoutMonth}`,
             legacyPostingKey(row),
@@ -155,7 +168,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           remarks: `Imported from ${fileName} row ${row.sourceRow}`,
         })
         if (row.commissionPct > 0 && row.commissionPct <= 100) {
-          await updatePolicy(row.policy.id, { fyCommission: row.commissionPct })
+          const field = commissionRateField(row.policy, row.businessType)
+          await updatePolicy(row.policy.id, { [field]: row.commissionPct })
         }
         posted += 1
       } catch (err) {
@@ -220,8 +234,6 @@ export default function StatementImportModal({ open, onClose, policies, user, on
             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">
               {mode === 'multi' ? 'Carrier (per row)' : 'Carrier *'}
             </span>
-            {/* Free-type, not a fixed select: a carrier missing from the list
-                must never block an import. Anything typed is kept verbatim. */}
             <input
               className="form-input mt-1"
               list="statement-carrier-options"
@@ -265,15 +277,9 @@ export default function StatementImportModal({ open, onClose, policies, user, on
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.pdf" className="hidden"
                    onChange={e => handleFile(e.target.files?.[0])} />
             <p className="font-semibold text-gray-700 dark:text-gray-200">
-              {busy
-                ? 'Reading…'
-                : ready
-                  ? 'Drop the statement here, or click to choose'
-                  : 'Select month, year and statement type first'}
+              {busy ? 'Reading…' : ready ? 'Drop the statement here, or click to choose' : 'Select month, year and statement type first'}
             </p>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              .csv, .xlsx and text .pdf accepted for any carrier
-            </p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">.csv, .xlsx and text .pdf accepted for any carrier</p>
           </div>
         ) : (
           <>
@@ -295,8 +301,11 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {rows.map(row => {
-                    const off = skipped.has(row.sourceRow)
+                    const reviewOn = row.status === 'review' && includedReview.has(row.sourceRow)
+                    const off = skipped.has(row.sourceRow) || (row.status === 'review' && !reviewOn)
                     const db = row.policy
+                    const rateField = db ? commissionRateField(db, row.businessType) : 'fyCommission'
+                    const rateOnFile = db ? Number(db[rateField] || 0) : 0
                     return (
                       <tr key={row.sourceRow} className={off ? 'opacity-40 align-top' : 'align-top'}>
                         <td className="table-cell text-gray-400">{row.sourceRow}</td>
@@ -305,49 +314,29 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                           <Field>Premium</Field><Field>Commission</Field>
                         </td>
                         <td className="table-cell w-[26%] min-w-[190px]">
-                          <Cell value={row.policyNumber} mono
-                                onChange={v => edit(row.sourceRow, 'policyNumber', v)} />
-                          <Cell value={row.clientName}
-                                onChange={v => edit(row.sourceRow, 'clientName', v)} />
-                          <Cell value={row.insurer || insurer}
-                                onChange={v => edit(row.sourceRow, 'insurer', v)} />
-                          <Cell value={row.premium} numeric
-                                onChange={v => edit(row.sourceRow, 'premium', Number(v) || 0)} />
-                          <Cell value={row.commissionAmount} numeric
-                                onChange={v => edit(row.sourceRow, 'commissionAmount', Number(v) || 0)} />
+                          <Cell value={row.policyNumber} mono onChange={v => edit(row.sourceRow, 'policyNumber', v)} />
+                          <Cell value={row.clientName} onChange={v => edit(row.sourceRow, 'clientName', v)} />
+                          <Cell value={row.insurer || insurer} onChange={v => edit(row.sourceRow, 'insurer', v)} />
+                          <Cell value={row.premium} numeric onChange={v => edit(row.sourceRow, 'premium', Number(v) || 0)} />
+                          <Cell value={row.commissionAmount} numeric onChange={v => edit(row.sourceRow, 'commissionAmount', Number(v) || 0)} />
                         </td>
                         <td className="table-cell w-[26%] min-w-[190px]">
                           <Val mono match={db && sameish(db.policyNumber, row.policyNumber)}>{db?.policyNumber || '—'}</Val>
                           <Val match={db && sameish(db.clientName, row.clientName)}>{db?.clientName || '—'}</Val>
                           <Val match={db && sameish(db.insurer, row.insurer || insurer)}>{db?.insurer || '—'}</Val>
-                          <Val match={db && Math.abs(Number(db.premium || 0) - row.premium) < 1}>
-                            {db ? fmtCurrency(db.premium) : '—'}
-                          </Val>
-                          <Val>{db ? `${db.fyCommission || 0}% on file` : '—'}</Val>
+                          <Val match={db && Math.abs(Number(db.premium || 0) - row.premium) < 1}>{db ? fmtCurrency(db.premium) : '—'}</Val>
+                          <Val>{db ? `${rateOnFile}% ${rateField === 'ryCommission' ? 'RY' : 'FY'} on file` : '—'}</Val>
                         </td>
                         <td className="table-cell">
-                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[row.status]}`}>
-                            {row.status}
-                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${STATUS_STYLE[row.status]}`}>{row.status}</span>
                           <div className="mt-0.5 text-[11px] text-gray-500">{row.reason}</div>
-                          {mode === 'multi' && row.insurer && (
-                            <div className="mt-1 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold dark:bg-slate-700">
-                              {row.insurer}
-                            </div>
-                          )}
-                          {row.businessType && (
-                            <div className="mt-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                              {row.businessType}
-                            </div>
-                          )}
-                          {row.commissionAmount < 0 && (
-                            <div className="mt-0.5 text-[11px] font-semibold text-red-600">Reversal / negative</div>
-                          )}
+                          {row.businessType && <div className="mt-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400">{row.businessType}</div>}
+                          {row.commissionAmount < 0 && <div className="mt-0.5 text-[11px] font-semibold text-red-600">Reversal / negative</div>}
                         </td>
                         <td className="table-cell">
                           {db ? (
-                            <button onClick={() => toggle(row.sourceRow)} className="font-semibold text-blue-600 dark:text-blue-400">
-                              {off ? 'Include' : 'Skip'}
+                            <button onClick={() => toggle(row.sourceRow, row.status)} className="font-semibold text-blue-600 dark:text-blue-400">
+                              {row.status === 'review' ? (reviewOn ? 'Skip' : 'Include') : (skipped.has(row.sourceRow) ? 'Include' : 'Skip')}
                             </button>
                           ) : <span className="text-gray-400">—</span>}
                         </td>
@@ -360,8 +349,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
 
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Edit any value on the left to correct a mis-parse — rows re-match as you type.
-              Rows with no matched policy are never saved. Everything posts against{' '}
-              <strong>{month} {year}</strong>, and re-uploading the same statement is safe.
+              Only green matched rows save automatically. Amber review rows need Include.
+              Everything posts against <strong>{month} {year}</strong>, and re-uploading the same statement is safe.
             </p>
           </>
         )}
@@ -370,21 +359,14 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   )
 }
 
-// The three stacked columns must share one row height or they drift apart.
 const ROW = 'flex h-8 items-center'
-
 function Field({ children }) {
   return <div className={`${ROW} text-[11px] font-bold uppercase tracking-wide text-gray-400`}>{children}</div>
 }
-
 function Val({ children, mono, match }) {
   const tone = match === undefined ? '' : match ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
   return <div className={`${ROW} truncate ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
 }
-
-// `block` on the input is load-bearing: .table-cell sets white-space:nowrap, and
-// an inline-block input inside it never line-breaks — all five then sit on one
-// line and spill across the "In your database" and "Status" columns.
 function Cell({ value, onChange, mono, numeric }) {
   return (
     <input
@@ -395,7 +377,6 @@ function Cell({ value, onChange, mono, numeric }) {
     />
   )
 }
-
 function Tile({ label, value, tone = '' }) {
   return (
     <div className="rounded-xl border border-slate-200 p-2 dark:border-slate-700">
