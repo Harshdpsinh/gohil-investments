@@ -67,6 +67,9 @@ describe('canonicalInsurer', () => {
     ['Digit', 'Go Digit General Insurance'],
     ['Aegon Life', 'Bandhan Life Insurance'],
     ['Magma HDI', 'Magma General Insurance'],
+    ['ICIC', 'ICICI Lombard General Insurance'],
+    ['ICICI', 'ICICI Lombard General Insurance'],
+    ['icici lombard', 'ICICI Lombard General Insurance'],
   ])('resolves %s to %s', (input, expected) => {
     expect(canonicalInsurer(input)).toBe(expected)
   })
@@ -84,8 +87,12 @@ describe('canonicalInsurer', () => {
     expect(canonicalInsurer(input)).toBe(expected)
   })
 
-  it('leaves an ambiguous truncation alone rather than guessing', () => {
-    expect(canonicalInsurer('ICIC')).toBe('ICIC')
+  it('reads a bare ICICI as Lombard, and keeps Prudential Life apart', () => {
+    expect(canonicalInsurer('ICIC')).toBe('ICICI Lombard General Insurance')
+    expect(canonicalInsurer('ICICI')).toBe('ICICI Lombard General Insurance')
+    expect(canonicalInsurer('ICICI Prudential')).toBe('ICICI Prudential Life Insurance')
+    expect(canonicalInsurer('ICICI Prudential Life Insurance')).toBe('ICICI Prudential Life Insurance')
+    expect(sameInsurer('ICICI', 'ICICI Prudential')).toBe(false)
   })
 
   it.each(['HDF', 'Tat', 'Nat'])('does not prefix-match the short fragment %s', value => {
@@ -162,8 +169,8 @@ describe('duplicateInsurers', () => {
 })
 
 describe('unrecognisedInsurers', () => {
-  it('flags a truncation too ambiguous to resolve', () => {
-    expect(unrecognisedInsurers(['ICIC', 'ICICI Lombard General Insurance'])).toEqual(['ICIC'])
+  it('does not flag ICIC once it is mapped to Lombard', () => {
+    expect(unrecognisedInsurers(['ICIC', 'ICICI', 'ICICI Lombard General Insurance'])).toEqual([])
   })
 
   it('says nothing about names it resolved', () => {
@@ -199,6 +206,15 @@ describe('insurerFieldPatch', () => {
     })
   })
 
+  it('rewrites a bare ICICI onto Lombard', () => {
+    expect(insurerFieldPatch({ insurer: 'ICIC' })).toEqual({
+      insurer: 'ICICI Lombard General Insurance',
+    })
+    expect(insurerFieldPatch({ insurer: 'ICICI' })).toEqual({
+      insurer: 'ICICI Lombard General Insurance',
+    })
+  })
+
   it('does not invent a patch when the name is already canonical or unknown', () => {
     expect(insurerFieldPatch({
       insurer: 'HDFC ERGO General Insurance',
@@ -209,5 +225,6 @@ describe('insurerFieldPatch', () => {
   it('leaves life and general arms of the same brand untouched as separate names', () => {
     expect(insurerFieldPatch({ insurer: 'HDFC Life Insurance' })).toEqual({})
     expect(insurerFieldPatch({ insurer: 'Aditya Birla Sun Life Insurance' })).toEqual({})
+    expect(insurerFieldPatch({ insurer: 'ICICI Prudential Life Insurance' })).toEqual({})
   })
 })

@@ -122,6 +122,10 @@ const ALIASES = {
   licindia: 'LIC of India',
   newindia: 'New India Assurance',
   unitedindia: 'United India Insurance',
+  // Owner confirmed: bare ICICI / ICIC in this book is Lombard (motor/health),
+  // not Prudential Life. Full "ICICI Prudential" still maps to life.
+  icic: 'ICICI Lombard General Insurance',
+  icici: 'ICICI Lombard General Insurance',
   iciciloambard: 'ICICI Lombard General Insurance',
   icicilombard: 'ICICI Lombard General Insurance',
   iciciprudential: 'ICICI Prudential Life Insurance',
