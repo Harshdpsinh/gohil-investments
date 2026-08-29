@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
-import { createCRMBackup, restoreCRMBackup } from '../firebase/firestore'
+import { createCRMBackup, restoreCRMBackup } from '../firebase/backup'
 
 function downloadJson(data) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -53,9 +53,15 @@ export default function BackupPage() {
         setBackupStep(`Reading ${name} (${done}/${total})`)
       })
       downloadJson(backup)
-      toast.success('Backup downloaded successfully.')
+      if (backup.skipped?.length) {
+        toast.success(
+          `Backup downloaded. Skipped: ${backup.skipped.map(item => item.name).join(', ')}`,
+          { duration: 8000 }
+        )
+      } else {
+        toast.success('Backup downloaded successfully.')
+      }
     } catch (err) {
-      // Surface the real reason — these messages name the collection that failed.
       toast.error(err.message || 'Could not create backup.', { duration: 8000 })
       console.error('Backup failed:', err)
     } finally {
