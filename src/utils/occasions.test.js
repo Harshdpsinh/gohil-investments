@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
-  daysUntilOccasion, isOccasionToday, listOccasions, birthdayGreeting, crossSellMessage,
+  daysUntilOccasion, isOccasionToday, listOccasions, birthdayGreeting, crossSellMessage, tenureYears,
 } from './occasions.js'
 
 const TODAY = new Date(2026, 6, 27, 12, 0, 0) // 27 Jul 2026
@@ -32,6 +32,14 @@ describe('listOccasions', () => {
       { id: '3', name: 'C', dob: '1990-12-01' },
     ], { withinDays: 7 })
     expect(rows.map(r => `${r.client.id}:${r.kind}`)).toEqual(['1:birthday', '2:anniversary'])
+  })
+
+  it('adds a tenure badge when the join date falls in the window', () => {
+    const rows = listOccasions([
+      { id: '4', name: 'D', createdAt: '2021-07-27' },
+    ], { withinDays: 7 })
+    expect(rows[0].kind).toBe('milestone')
+    expect(tenureYears({ createdAt: '2021-07-27' })).toBe(5)
   })
 })
 

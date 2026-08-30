@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { differenceInDays, format, startOfDay, subMonths } from 'date-fns'
+import { format, startOfDay, subMonths } from 'date-fns'
 import toast from 'react-hot-toast'
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement,
@@ -12,22 +12,13 @@ import { usePolicies } from '../hooks/usePolicies'
 import { fmtCurrency, fmtDate, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
+import { anniversaryGreeting, birthdayGreeting, listOccasions, milestoneGreeting } from '../utils/occasions'
 import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
 const isActivePolicy = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
-
-function isBirthdayThisWeek(dobStr, today) {
-  const dob = parseAnyDate(dobStr)
-  if (!dob) return false
-  const bday = new Date(today.getFullYear(), dob.getMonth(), dob.getDate())
-  const diff = differenceInDays(bday, today)
-  if (diff >= 0 && diff <= 7) return true
-  const nextDiff = differenceInDays(new Date(today.getFullYear() + 1, dob.getMonth(), dob.getDate()), today)
-  return nextDiff >= 0 && nextDiff <= 7
-}
 
 function StatCard({ icon, label, value, color = 'blue', onClick, badge }) {
   const colors = {
@@ -102,6 +93,24 @@ export default function DashboardPage() {
     }
   }, [clients])
 
+  const sendOccasion = useCallback((row) => {
+    if (!row.client?.mobile) {
+      toast.error('No mobile on this client')
+      return
+    }
+    const activeCount = policies.filter(p => p.clientId === row.client.id && isActivePolicy(p)).length
+    const message = row.kind === 'anniversary'
+      ? anniversaryGreeting(row.client)
+      : row.kind === 'milestone'
+        ? milestoneGreeting(row.client, row.years)
+        : birthdayGreeting(row.client, activeCount)
+    try {
+      openWhatsAppLink({ mobile: row.client.mobile, message })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+  }, [policies])
+
   const stats = useMemo(() => {
     const active = policies.filter(isActivePolicy)
     const expiring30 = active.filter(p => { const d = daysUntilPolicyDue(p); return d !== null && d >= 0 && d <= 30 })
@@ -128,13 +137,13 @@ export default function DashboardPage() {
       expired: expired.length,
       clients: clients.length,
       totalPremium: active.reduce((sum, p) => sum + (parseFloat(p.premium) || 0), 0),
-      birthdays: clients.filter(c => isBirthdayThisWeek(c.dob, today)),
+      occasions: listOccasions(clients, { asOf: today, withinDays: 7 }),
       openClaims: claims.filter(c => !['Settled', 'Rejected'].includes(c.status)),
       byType,
       monthly: months,
       clientsWithGaps: clientsWithGaps.length,
     }
-  }, [policies, clients, claims])
+  }, [policies, clients, claims, today])
 
   const urgent = useMemo(() =>
     policies
@@ -147,6 +156,7 @@ export default function DashboardPage() {
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
   const typeColors = ['#2563eb', '#06b6d4', '#f59e0b', '#10b981', '#8b5cf6', '#64748b']
+  const occasionLabel = row => row.kind === 'anniversary' ? 'Anniversary' : row.kind === 'milestone' ? `${row.years}y with us` : 'Birthday'
 
   return (
     <div className="fintech-page space-y-4 sm:space-y-5">
@@ -174,11 +184,20 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="stat-card"><div><p className="text-xl font-bold">{fmtCurrency(stats.totalPremium)}</p><p className="text-xs text-gray-500">Premium Under Management</p></div></div>
-        {stats.birthdays.length > 0 && (
-          <button className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-4 text-left" onClick={() => navigate('/clients')}>
-            <p className="text-sm font-bold text-pink-700 dark:text-pink-300">Birthdays This Week</p>
-            <p className="text-xs text-pink-600 dark:text-pink-400 mt-1">{stats.birthdays.slice(0, 3).map(c => c.name).join(', ')}</p>
-          </button>
+        {stats.occasions.length > 0 && (
+          <div className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-4 text-left sm:col-span-1">
+            <p className="text-sm font-bold text-pink-700 dark:text-pink-300">This week</p>
+            <div className="mt-2 space-y-1.5">
+              {stats.occasions.slice(0, 4).map(row => (
+                <div key={`${row.client.id}-${row.kind}`} className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-pink-700 dark:text-pink-300">
+                    {row.client.name} · {occasionLabel(row)}{row.days === 0 ? '' : ` · ${row.days}d`}
+                  </p>
+                  <button type="button" className="btn-whatsapp" onClick={() => sendOccasion(row)}>WA</button>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
         {stats.clientsWithGaps > 0 && (
           <button className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4 text-left" onClick={() => navigate('/cross-sell')}>

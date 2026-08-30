@@ -1,12 +1,12 @@
 // src/pages/ClientProfilePage.jsx
-// UI tabs only. Loaders, gap rules, WhatsApp text and document helpers unchanged.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getClient, getAllClaims } from '../firebase/firestore'
 import { usePolicies } from '../hooks/usePolicies'
 import { useClients } from '../hooks/useClients'
 import { fmtDate, fmtCurrency, daysUntil, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { computeCoverageGaps } from '../utils/policySchemas'
+import { familyCoverTotals, familyMembersOf, familyPoliciesOf, familyPremiumCalendar, familySummaryMessage } from '../utils/family360'
 import { getDocMeta } from '../firebase/firestore'
 import { openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
@@ -100,14 +100,11 @@ export default function ClientProfilePage() {
       year: p.policyPdfYear || p.policyYear || '',
       status: policyHistoryStatus(p),
     }))
+  const familyMembers = useMemo(() => familyMembersOf(client, clients), [client, clients])
   const familyKey = client?.familyId || client?.familyName || ''
-  const familyMembers = familyKey
-    ? clients.filter(c => (client.familyId && c.familyId === client.familyId) || (!client.familyId && c.familyName && c.familyName === client.familyName))
-    : []
-  const familyMemberIds = new Set(familyMembers.map(c => c.id))
-  const familyPolicies = familyKey
-    ? policies.filter(p => familyMemberIds.has(p.clientId))
-    : []
+  const familyPolicies = useMemo(() => familyPoliciesOf(familyMembers, policies), [familyMembers, policies])
+  const familyTotals = useMemo(() => familyCoverTotals(familyPolicies), [familyPolicies])
+  const familyCalendar = useMemo(() => familyPremiumCalendar(familyPolicies, familyMembers), [familyPolicies, familyMembers])
   const isActv = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
   const activePolicies = clientPolicies.filter(p => isActv(p))
 
@@ -131,6 +128,18 @@ export default function ClientProfilePage() {
       `Pradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`
     try {
       openWhatsAppLink({ mobile: client?.mobile, message: safeMsg })
+    } catch (err) {
+      toast.error(err.message || 'Could not open WhatsApp.')
+    }
+  }
+
+  const openFamilySummary = () => {
+    if (!client?.mobile) {
+      toast.error('No mobile number found for this client. Add it in Clients page.')
+      return
+    }
+    try {
+      openWhatsAppLink({ mobile: client.mobile, message: familySummaryMessage(client, familyMembers, familyPolicies) })
     } catch (err) {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
@@ -337,38 +346,49 @@ export default function ClientProfilePage() {
       )}
 
       {tab === 'family' && (
-        <Section title="Family Policies" icon="users" badge={familyPolicies.length}>
+        <Section title="Family 360" icon="users" badge={familyPolicies.length}>
           {!familyKey ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">No family group on this client. Add Family name on the Clients page if you want this tab filled.</p>
           ) : (
             <>
-              <div className="mb-3 flex flex-wrap gap-2 text-xs">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
                 {familyMembers.map(member => (
-                  <span key={member.id} className={`px-2 py-1 rounded-full font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() => navigate(`/clients/${member.id}`)}
+                    className={`px-2 py-1 rounded-full text-xs font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}
+                  >
                     {member.name}{member.familyRole ? ` - ${member.familyRole}` : ''}
-                  </span>
+                  </button>
                 ))}
+                <button type="button" className="btn-whatsapp ml-auto" onClick={openFamilySummary}>Family summary WA</button>
               </div>
-              {familyPolicies.length === 0 ? (
-                <p className="text-xs text-gray-400 dark:text-gray-500">No family policies found</p>
+              <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700"><p className="text-slate-500">Family premium</p><p className="font-bold">{fmtCurrency(familyTotals.premium)}</p></div>
+                <div className="rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700"><p className="text-slate-500">Health cover</p><p className="font-bold">{fmtCurrency(familyTotals.healthCover)}</p></div>
+                <div className="rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700"><p className="text-slate-500">Life cover</p><p className="font-bold">{fmtCurrency(familyTotals.lifeCover)}</p></div>
+                <div className="rounded-lg border border-slate-200 p-2 text-xs dark:border-slate-700"><p className="text-slate-500">Motor IDV</p><p className="font-bold">{fmtCurrency(familyTotals.motorIdv)}</p></div>
+              </div>
+              <p className="mb-2 text-xs font-bold text-slate-600">Premium calendar</p>
+              {familyCalendar.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">No upcoming family premiums on file</p>
               ) : (
                 <div className="space-y-2">
-                  {familyPolicies.map(p => {
-                    const owner = clients.find(c => c.id === p.clientId)
-                    const history = policyHistoryStatus(p)
-                    return (
-                      <div key={p.id} className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs">
-                        <div>
-                          <p className="font-semibold text-gray-800 dark:text-gray-200">{owner?.name || p.clientName || 'Family member'}</p>
-                          <p className="font-mono text-gray-500 dark:text-gray-400">{p.policyNumber} - {p.policyType || 'Policy'} - {p.insurer || 'Insurer'}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtDate(getPolicyDueDate(p))}</p>
-                          <span className={history.cls}>{history.label}</span>
-                        </div>
+                  {familyCalendar.map(row => (
+                    <div key={row.policy.id} className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs">
+                      <div>
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">{row.ownerName}</p>
+                        <p className="font-mono text-gray-500 dark:text-gray-400">{row.policy.policyNumber} - {row.policy.policyType || 'Policy'} - {row.policy.insurer || 'Insurer'}</p>
                       </div>
-                    )
-                  })}
+                      <div className="text-right">
+                        <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtDate(row.dueDate)}</p>
+                        <p className={row.days !== null && row.days <= 30 ? 'font-bold text-red-600' : 'text-gray-500'}>
+                          {row.days === null ? '' : row.days < 0 ? `${Math.abs(row.days)}d late` : `${row.days}d`} · {fmtCurrency(row.policy.premium)}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </>
