@@ -29,6 +29,15 @@ export function isOccasionWithinDays(dateValue, windowDays = 7, asOf = new Date(
   return days !== null && days >= 0 && days <= windowDays
 }
 
+export function tenureYears(client, asOf = new Date()) {
+  const start = parseAnyDate(client?.createdAt || client?.createdOn || client?.joinedAt)
+  if (!start) return 0
+  let years = asOf.getFullYear() - start.getFullYear()
+  const hadBirthday = asOf.getMonth() > start.getMonth() || (asOf.getMonth() === start.getMonth() && asOf.getDate() >= start.getDate())
+  if (!hadBirthday) years -= 1
+  return Math.max(0, years)
+}
+
 export function listOccasions(clients = [], { asOf = new Date(), withinDays = 7 } = {}) {
   const rows = []
   for (const client of clients) {
@@ -44,6 +53,12 @@ export function listOccasions(clients = [], { asOf = new Date(), withinDays = 7 
         days: anniversary,
         date: client.anniversary || client.weddingDate,
       })
+    }
+    const joined = client.createdAt || client.createdOn || client.joinedAt
+    const joinDays = daysUntilOccasion(joined, asOf)
+    const years = tenureYears(client, asOf)
+    if (joinDays !== null && joinDays >= 0 && joinDays <= withinDays && years >= 1) {
+      rows.push({ client, kind: 'milestone', days: joinDays, date: joined, years })
     }
   }
   return rows.sort((a, b) => a.days - b.days || a.client.name.localeCompare(b.client.name || ''))
@@ -71,6 +86,15 @@ export function anniversaryGreeting(client) {
     `Dear ${client?.name || 'Customer'},\n\n` +
     `Wishing you a happy anniversary.\n\n` +
     `Thank you for trusting Gohil Investments. We are here if you would like to review your cover.\n\n` +
+    `Gohil Investments\nBhavnagar, Gujarat`
+  )
+}
+
+export function milestoneGreeting(client, years) {
+  return (
+    `Dear ${client?.name || 'Customer'},\n\n` +
+    `Thank you for ${years} year${years === 1 ? '' : 's'} with Gohil Investments.\n\n` +
+    `We are grateful for your trust and are here whenever you want to review your cover.\n\n` +
     `Gohil Investments\nBhavnagar, Gujarat`
   )
 }

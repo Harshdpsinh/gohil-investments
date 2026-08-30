@@ -7,7 +7,7 @@
 // policy goes through exactly the same checks as a hand-typed one. This is the
 // same review-then-commit shape as the commission importer, and for the same
 // reason: machine extraction is a typing aid, not an authority.
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import {
@@ -24,7 +24,6 @@ const LABEL = {
   mobile: 'Mobile', email: 'Email', dob: 'Date of birth', pan: 'PAN', address: 'Address',
 }
 
-// How the client match is described, and what confirming it will do.
 const CLIENT_PLAN = {
   link:    { tone: 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30', title: 'Existing client — will be linked' },
   confirm: { tone: 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30',        title: 'Is this the same person?' },
@@ -32,7 +31,6 @@ const CLIENT_PLAN = {
   create:  { tone: 'border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30',            title: 'New client — will be created' },
 }
 
-// Red for nothing found, yellow for found-but-unsure — as specified.
 const STATE = {
   missing:   { row: 'bg-red-50 dark:bg-red-950/30',      chip: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200',       text: 'Not in PDF — type it in' },
   uncertain: { row: 'bg-amber-50 dark:bg-amber-950/30',  chip: 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100', text: 'Unclear — please check' },
@@ -42,95 +40,81 @@ const STATE = {
 }
 
 const MONEY_FIELDS = new Set(['premium', 'sumInsured'])
-
-// Newline for the diagnostic dump, named so the JSX below stays readable.
 const NL = '\n'
 
 export default function PdfExtractReview({ open, onClose, policies = [], clients = [], onUse }) {
   const fileRef = useRef(null)
+  const previewRef = useRef('')
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [fileName, setFileName] = useState('')
-  // The File itself, not just its name: it is uploaded and attached to the
-  // policy once saving produces an id, so the same document never has to be
-  // picked twice.
   const [file, setFile] = useState(null)
+  const [previewUrl, setPreviewUrl] = useState('')
   const [extracted, setExtracted] = useState(null)
   const [edits, setEdits] = useState({})
-  const [clientChoice, setClientChoice] = useState(undefined) // undefined = follow the match
+  const [clientChoice, setClientChoice] = useState(undefined)
   const [hash, setHash] = useState('')
-  // Set when the text layer is empty: the raw bytes are held so OCR can run on
-  // demand, rather than downloading 10MB before the user has asked for it.
   const [scanned, setScanned] = useState(null)
   const [ocrStatus, setOcrStatus] = useState('')
-  // The raw text the reader saw. Kept so a poor extraction can be diagnosed
-  // from inside the app — the usual cause is that the carrier simply does not
-  // print the label we look for, and that is invisible without this.
   const [seenLines, setSeenLines] = useState([])
 
   const duplicate = useMemo(() => findPdfDuplicate(hash, policies), [hash, policies])
-
-  // Capped: a long policy wording would otherwise dump hundreds of lines.
   const seenText = useMemo(() => seenLines.slice(0, 120).join(NL), [seenLines])
-
-  const fields = useMemo(
-    () => (extracted ? { ...extracted.fields, ...edits } : {}),
-    [extracted, edits]
-  )
-
-  // Re-matches as the user corrects a value, so fixing a mistyped policy
-  // number immediately flips "create" to "update".
-  const match = useMemo(
-    () => (extracted ? matchExtractedPolicy(fields, policies) : null),
-    [extracted, fields, policies]
-  )
-
+  const fields = useMemo(() => (extracted ? { ...extracted.fields, ...edits } : {}), [extracted, edits])
+  const match = useMemo(() => (extracted ? matchExtractedPolicy(fields, policies) : null), [extracted, fields, policies])
   const rows = useMemo(() => {
     if (!extracted) return []
     return buildFieldReview({ fields, status: extracted.status }, match?.policy || null)
   }, [extracted, fields, match])
-
-  const clientMatch = useMemo(
-    () => (extracted ? matchExtractedClient(fields, clients) : null),
-    [extracted, fields, clients]
-  )
-
-  // undefined means "whatever the matcher decided"; null means the user
-  // explicitly chose to create a new client instead.
+  const clientMatch = useMemo(() => (extracted ? matchExtractedClient(fields, clients) : null), [extracted, fields, clients])
   const chosenClient = clientChoice === undefined ? clientMatch?.client || null : clientChoice
-  const clientAction = clientChoice === undefined
-    ? clientMatch?.action
-    : (clientChoice ? 'link' : 'create')
+  const clientAction = clientChoice === undefined ? clientMatch?.action : (clientChoice ? 'link' : 'create')
+
+  const dropPreview = () => {
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current)
+      previewRef.current = ''
+    }
+    setPreviewUrl('')
+  }
+
+  const attachPreview = nextFile => {
+    dropPreview()
+    if (!nextFile) return
+    const url = URL.createObjectURL(nextFile)
+    previewRef.current = url
+    setPreviewUrl(url)
+  }
+
+  useEffect(() => () => {
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+  }, [])
 
   const reset = () => {
     setExtracted(null); setEdits({}); setFileName(''); setFile(null)
     setClientChoice(undefined); setHash(''); setScanned(null); setOcrStatus(''); setSeenLines([])
+    dropPreview()
     if (fileRef.current) fileRef.current.value = ''
   }
 
   const closeAll = () => { reset(); onClose() }
 
-  const handleFile = async file => {
-    if (!file) return
-    if (!/\.pdf$/i.test(file.name)) { toast.error('Please choose a PDF policy schedule.'); return }
+  const handleFile = async nextFile => {
+    if (!nextFile) return
+    if (!/\.pdf$/i.test(nextFile.name)) { toast.error('Please choose a PDF policy schedule.'); return }
     setBusy(true)
     try {
-      const bytes = await file.arrayBuffer()
-      // Fingerprint before anything else, so a file already on record is
-      // flagged even when its contents read badly.
+      const bytes = await nextFile.arrayBuffer()
       setHash(await fileFingerprint(bytes.slice(0)))
-
-      // pdfjs is ~330KB — loaded only when someone actually reads a PDF.
       const { extractLines } = await import('../../utils/pdfStatement')
       const pages = await extractLines(bytes.slice(0))
       setSeenLines(pages.flat().map(line => line.cells.map(c => c.text).join(' ')).filter(Boolean))
       const result = extractPolicyFields(pages)
+      attachPreview(nextFile)
       if (!result.found.length) {
-        // Almost certainly a scan. Hold the bytes and offer OCR rather than
-        // pulling a 10MB engine down before the user has asked for it.
         setScanned(bytes)
-        setFileName(file.name)
-        setFile(file)
+        setFileName(nextFile.name)
+        setFile(nextFile)
         setBusy(false)
         return
       }
@@ -138,8 +122,8 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       setExtracted(result)
       setEdits({})
       setClientChoice(undefined)
-      setFileName(file.name)
-      setFile(file)
+      setFileName(nextFile.name)
+      setFile(nextFile)
     } catch (err) {
       toast.error(err.message || 'Could not read that PDF.')
       reset()
@@ -164,8 +148,6 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
         toast.error('OCR could not find any policy details. This scan may be too faint — type it in by hand.')
         return
       }
-      // Every value comes back yellow. OCR confuses 8/B, 0/O and 1/7, and a
-      // misread premium shown as confidently correct would go onto the record.
       setExtracted(markAllUncertain(result))
       setScanned(null)
       toast.success('Read from the scan — please check every value.')
@@ -178,9 +160,6 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
   }
 
   const use = () => {
-    // Personal details go to the client record, policy details to the policy.
-    // Sending everything to the policy would write a mobile number onto the
-    // policy document, which normalisePolicyPayload does not filter out.
     const { client: clientFields, policy: policyFields } = splitExtractedFields(fields)
     onUse({
       mode: match.action === 'update' ? 'edit' : 'add',
@@ -202,6 +181,13 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
     blank: rows.filter(r => r.state === 'missing').length,
   }
 
+  const previewPane = previewUrl ? (
+    <div className="pdf-extract-preview">
+      <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">PDF preview</p>
+      <iframe title="Policy PDF preview" src={previewUrl} className="pdf-extract-frame" />
+    </div>
+  ) : null
+
   return (
     <Modal
       open={open}
@@ -215,8 +201,6 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
           {extracted && (
             <button
               className="btn-primary"
-              // 'choose' means the matcher could not tell people apart. Saving
-              // then would file the policy under a guess.
               disabled={busy || clientAction === 'choose'}
               onClick={use}
             >
@@ -232,7 +216,6 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
         </>
       }
     >
-      {/* Shown above everything: the file itself is already on record. */}
       {duplicate && (
         <div className="mb-4 rounded-xl border border-red-300 bg-red-50 p-3 text-sm dark:border-red-800 dark:bg-red-950/30">
           <p className="font-bold text-red-900 dark:text-red-200">You have already filed this exact PDF</p>
@@ -245,25 +228,28 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       )}
 
       {scanned ? (
-        <div className="rounded-2xl border-2 border-dashed border-amber-300 p-8 text-center dark:border-amber-700">
-          <p className="font-semibold text-gray-800 dark:text-gray-100">
-            {fileName} has no text in it — it is a scan or a photo
-          </p>
-          <p className="mx-auto mt-2 max-w-lg text-xs text-gray-600 dark:text-gray-300">
-            It can still be read by OCR, which runs on this device. Nothing is uploaded anywhere
-            and there is no charge, however many you read. The first run downloads about 10 MB,
-            and each page takes a few seconds.
-          </p>
-          <p className="mx-auto mt-2 max-w-lg text-xs font-semibold text-amber-700 dark:text-amber-300">
-            A scan is read far less reliably than a normal PDF — every value will be marked for
-            checking, and you should check it.
-          </p>
-          <button className="btn-primary mt-4" disabled={busy} onClick={runOcr}>
-            {busy ? (ocrStatus || 'Reading…') : 'Read it anyway with OCR'}
-          </button>
-          <button className="btn-secondary mt-2 block w-full sm:mt-4 sm:inline-block sm:w-auto" disabled={busy} onClick={reset}>
-            Choose another file
-          </button>
+        <div className="pdf-extract-split">
+          {previewPane}
+          <div className="rounded-2xl border-2 border-dashed border-amber-300 p-8 text-center dark:border-amber-700">
+            <p className="font-semibold text-gray-800 dark:text-gray-100">
+              {fileName} has no text in it — it is a scan or a photo
+            </p>
+            <p className="mx-auto mt-2 max-w-lg text-xs text-gray-600 dark:text-gray-300">
+              It can still be read by OCR, which runs on this device. Nothing is uploaded anywhere
+              and there is no charge, however many you read. The first run downloads about 10 MB,
+              and each page takes a few seconds.
+            </p>
+            <p className="mx-auto mt-2 max-w-lg text-xs font-semibold text-amber-700 dark:text-amber-300">
+              A scan is read far less reliably than a normal PDF — every value will be marked for
+              checking, and you should check it.
+            </p>
+            <button className="btn-primary mt-4" disabled={busy} onClick={runOcr}>
+              {busy ? (ocrStatus || 'Reading…') : 'Read it anyway with OCR'}
+            </button>
+            <button className="btn-secondary mt-2 block w-full sm:mt-4 sm:inline-block sm:w-auto" disabled={busy} onClick={reset}>
+              Choose another file
+            </button>
+          </div>
         </div>
       ) : !extracted ? (
         <div
@@ -286,7 +272,9 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="pdf-extract-split">
+          {previewPane}
+          <div className="space-y-4">
           <div className={`rounded-xl border p-3 text-sm ${
             match.action === 'update' ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/30'
               : match.action === 'review' ? 'border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30'
@@ -303,28 +291,23 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
             </p>
           </div>
 
-          {/* Which person this policy gets filed against. */}
           <div className={`rounded-xl border p-3 text-sm ${CLIENT_PLAN[clientAction]?.tone || ''}`}>
             <p className="font-bold text-gray-900 dark:text-gray-100">{CLIENT_PLAN[clientAction]?.title}</p>
             <p className="mt-0.5 text-gray-700 dark:text-gray-300">
               {clientChoice === undefined ? clientMatch.reason : 'You chose this yourself.'}
             </p>
-
             {chosenClient && (
               <p className="mt-2 font-semibold text-gray-900 dark:text-gray-100">
                 {chosenClient.name}
                 {chosenClient.mobile && <span className="font-normal text-gray-500"> · {chosenClient.mobile}</span>}
               </p>
             )}
-
             {clientAction === 'create' && (
               <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
                 A client will be created from the name, mobile, email, date of birth, PAN and
                 address read below. Anything blank can be filled in later.
               </p>
             )}
-
-            {/* Candidates, so a wrong guess can be corrected without leaving. */}
             {(clientMatch.candidates?.length > 0 || clientAction === 'confirm') && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {(clientMatch.candidates || [clientMatch.client]).filter(Boolean).map(candidate => (
@@ -424,6 +407,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
             could not be read confidently — fill those in above. Nothing is saved until you press
             the button below and then save the policy form.
           </p>
+          </div>
         </div>
       )}
     </Modal>
