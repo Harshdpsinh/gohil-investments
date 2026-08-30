@@ -55,9 +55,10 @@ export default function GlobalSearch({ compact = false }) {
         value={q}
         onChange={e => { setQ(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
-        placeholder="Search name, mobile, policy number"
-        className="form-input w-full pl-10"
+        placeholder="Search name, mobile, PAN, policy number"
+        className="form-input w-full pl-10 pr-16"
       />
+      <kbd className="command-hint pointer-events-none absolute inset-y-0 right-2 my-auto h-5 items-center">Ctrl K</kbd>
       {open && results.length > 0 && (
         <ul className="absolute z-50 mt-1 max-h-80 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
           {results.map(hit => (
@@ -77,6 +78,11 @@ export default function GlobalSearch({ compact = false }) {
             </li>
           ))}
         </ul>
+      )}
+      {open && q.trim().length >= 2 && results.length === 0 && (
+        <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm text-slate-500 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+          No record found
+        </div>
       )}
     </div>
   )

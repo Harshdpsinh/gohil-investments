@@ -1,7 +1,5 @@
 // src/pages/ClientProfilePage.jsx
-// ✅ FIXED: CP1 (Edit button navigates with state to open edit modal),
-//           CP2 (coverage gaps only from active policies),
-//           CP3 (graceful handling of doc fetch errors)
+// UI tabs only. Loaders, gap rules, WhatsApp text and document helpers unchanged.
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getClient, getAllClaims } from '../firebase/firestore'
@@ -65,6 +63,7 @@ export default function ClientProfilePage() {
   const [claims,  setClaims]  = useState([])
   const [docs,    setDocs]    = useState([])
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('overview')
 
   useEffect(() => {
     if (!id) return
@@ -112,7 +111,6 @@ export default function ClientProfilePage() {
   const isActv = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
   const activePolicies = clientPolicies.filter(p => isActv(p))
 
-  // ✅ FIX CP2: compute coverage gaps only from ACTIVE policies
   const gaps           = computeCoverageGaps(activePolicies)
   const totalPremium   = activePolicies.reduce((s, p) => s + (parseFloat(p.premium) || 0), 0)
   const totalCoverage  = activePolicies.reduce((s, p) => s + (parseFloat(p.sumInsured || p.sumAssured || p.idv) || 0), 0)
@@ -151,9 +149,16 @@ export default function ClientProfilePage() {
     </div>
   )
 
+  const tabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'policies', label: `Policies (${clientPolicies.length})` },
+    { id: 'family', label: `Family (${familyMembers.length})` },
+    { id: 'claims', label: `Claims (${claims.length})` },
+    { id: 'docs', label: `Documents (${docs.length + policyDocuments.length})` },
+  ]
+
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-5">
-      {/* Back + header */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <button onClick={() => navigate('/clients')}
@@ -176,7 +181,6 @@ export default function ClientProfilePage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={openWhatsApp} className="btn-whatsapp"><AppIcon name="message" size={17} /> WhatsApp</button>
-          {/* ✅ FIX CP1: navigate to /clients with state to open edit modal for this client */}
           <button
             onClick={() => navigate('/clients', { state: { editClientId: id } })}
             className="btn-secondary"
@@ -186,7 +190,6 @@ export default function ClientProfilePage() {
         </div>
       </div>
 
-      {/* Quick stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { icon: 'policies', label: 'Active Policies', val: activePolicies.length, valueClass: 'text-blue-700 dark:text-blue-300' },
@@ -204,10 +207,9 @@ export default function ClientProfilePage() {
         ))}
       </div>
 
-      {/* Coverage gaps — ✅ FIX CP2: only from active policies now */}
       {gaps.length > 0 && (
         <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-4">
-          <p className="text-sm font-bold text-orange-700 dark:text-orange-300 mb-2">🎯 Coverage Gaps — Cross-sell Opportunities</p>
+          <p className="text-sm font-bold text-orange-700 dark:text-orange-300 mb-2">Coverage Gaps — Cross-sell Opportunities</p>
           <div className="flex gap-2 flex-wrap">
             {gaps.map(g => (
               <span key={g.id} className={`text-xs px-3 py-1 rounded-full font-semibold ${g.color}`}>{g.label}</span>
@@ -216,35 +218,49 @@ export default function ClientProfilePage() {
         </div>
       )}
 
-      <ClientTimeline client={client} policies={clientPolicies} claims={claims} />
+      <div className="profile-tabs">
+        {tabs.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            className={tab === item.id ? 'profile-tab is-on' : 'profile-tab'}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Personal details */}
-        <Section title="Personal Details" icon="client">
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {[
-              ['PAN',         client.pan],
-              ['Aadhar',      client.aadhar],
-              ['Date of Birth', fmtDate(client.dob)],
-              ['Gender',      client.gender],
-              ['Occupation',  client.occupation],
-              ['Annual Income', client.income ? fmtCurrency(client.income) : null],
-              ['City',        client.city],
-              ['State',       client.state],
-              ['Family',      client.familyName || client.familyId],
-              ['Family Role', client.familyRole],
-              ['Address',     client.address],
-              ['Notes',       client.notes],
-            ].filter(([, v]) => v).map(([k, v]) => (
-              <div key={k} className={k === 'Address' || k === 'Notes' ? 'col-span-2' : ''}>
-                <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">{k}</p>
-                <p className="text-gray-800 dark:text-gray-200 font-medium text-sm">{v}</p>
-              </div>
-            ))}
-          </div>
-        </Section>
+      {tab === 'overview' && (
+        <>
+          <ClientTimeline client={client} policies={clientPolicies} claims={claims} />
+          <Section title="Personal Details" icon="client">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              {[
+                ['PAN',         client.pan],
+                ['Aadhar',      client.aadhar],
+                ['Date of Birth', fmtDate(client.dob)],
+                ['Gender',      client.gender],
+                ['Occupation',  client.occupation],
+                ['Annual Income', client.income ? fmtCurrency(client.income) : null],
+                ['City',        client.city],
+                ['State',       client.state],
+                ['Family',      client.familyName || client.familyId],
+                ['Family Role', client.familyRole],
+                ['Address',     client.address],
+                ['Notes',       client.notes],
+              ].filter(([, v]) => v).map(([k, v]) => (
+                <div key={k} className={k === 'Address' || k === 'Notes' ? 'col-span-2' : ''}>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 font-medium">{k}</p>
+                  <p className="text-gray-800 dark:text-gray-200 font-medium text-sm">{v}</p>
+                </div>
+              ))}
+            </div>
+          </Section>
+        </>
+      )}
 
-        {/* Documents */}
+      {tab === 'docs' && (
         <Section title="Documents" icon="folder" badge={docs.length + policyDocuments.length}>
           {docs.length === 0 && policyDocuments.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">No documents uploaded</p>
@@ -260,30 +276,8 @@ export default function ClientProfilePage() {
                     </div>
                   </div>
                   <div className="flex flex-shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await openDocumentPreview(d.url, d.name)
-                        } catch (err) {
-                          toast.error(err.message)
-                        }
-                      }}
-                      className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
-                      View
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await downloadDocumentFile(d.url, d.name)
-                        } catch (err) {
-                          toast.error(err.message)
-                        }
-                      }}
-                      className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600">
-                      Download
-                    </button>
+                    <button type="button" onClick={async () => { try { await openDocumentPreview(d.url, d.name) } catch (err) { toast.error(err.message) } }} className="text-xs text-blue-600 dark:text-blue-400 hover:underline">View</button>
+                    <button type="button" onClick={async () => { try { await downloadDocumentFile(d.url, d.name) } catch (err) { toast.error(err.message) } }} className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600">Download</button>
                   </div>
                 </div>
               ))}
@@ -293,134 +287,117 @@ export default function ClientProfilePage() {
                     <span className="flex-shrink-0 text-slate-500"><AppIcon name={d.type?.includes('pdf') ? 'file' : 'folder'} size={18} /></span>
                     <p className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{d.name}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await openDocumentPreview(d.storagePath || d.url, d.name)
-                      } catch (err) {
-                        toast.error(err.message)
-                      }
-                    }}
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-2">
-                    View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        await downloadDocumentFile(d.storagePath || d.url, d.name)
-                      } catch (err) {
-                        toast.error(err.message)
-                      }
-                    }}
-                    className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600 flex-shrink-0 ml-2">
-                    Download
-                  </button>
+                  <button type="button" onClick={async () => { try { await openDocumentPreview(d.storagePath || d.url, d.name) } catch (err) { toast.error(err.message) } }} className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0 ml-2">View</button>
+                  <button type="button" onClick={async () => { try { await downloadDocumentFile(d.storagePath || d.url, d.name) } catch (err) { toast.error(err.message) } }} className="text-xs text-gray-600 dark:text-gray-300 hover:text-blue-600 flex-shrink-0 ml-2">Download</button>
                 </div>
               ))}
             </div>
           )}
         </Section>
-      </div>
+      )}
 
-      {/* Policies */}
-      <Section title="Policy History" icon="history" badge={clientPolicies.length}>
-        {clientPolicies.length === 0 ? (
-          <p className="text-xs text-gray-400 dark:text-gray-500">No policies found</p>
-        ) : (
-          <div className="table-container">
-            <table className="min-w-full">
-              <thead><tr>
-                {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status'].map(h => (
-                  <th key={h} className="table-header">{h}</th>
-                ))}
-              </tr></thead>
-              <tbody className="bg-white dark:bg-gray-800">
-                {clientPolicies.map(p => {
-                  const dueDate = getPolicyDueDate(p)
-                  const coverage = p.sumInsured || p.sumAssured || p.idv || '—'
-                  const history = policyHistoryStatus(p)
-                  return (
-                    <tr key={p.id} className={`table-row ${history.label === 'Renewed' ? 'opacity-60' : ''}`}>
-                      <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
-                      <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
-                      <td className="table-cell text-xs">{p.insurer}</td>
-                      <td className="table-cell text-xs">{p.planName || '—'}</td>
-                      <td className="table-cell font-semibold">{fmtCurrency(p.premium)}</td>
-                      <td className="table-cell">{coverage !== '—' ? fmtCurrency(coverage) : '—'}</td>
-                      <td className="table-cell text-xs">{fmtDate(p.startDate)}</td>
-                      <td className="table-cell text-xs font-semibold text-blue-700 dark:text-blue-400">{fmtDate(dueDate)}</td>
-                      <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
-                      <td className="table-cell text-xs">{daysUntil(dueDate || p.expiryDate) !== null ? `${daysUntil(dueDate || p.expiryDate)}d` : '—'}</td>
-                      <td className="table-cell"><span className={history.cls}>{history.label}</span></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
-
-      {familyKey && (
-        <Section title="Family Policies" icon="users" badge={familyPolicies.length}>
-          <div className="mb-3 flex flex-wrap gap-2 text-xs">
-            {familyMembers.map(member => (
-              <span key={member.id} className={`px-2 py-1 rounded-full font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-                {member.name}{member.familyRole ? ` - ${member.familyRole}` : ''}
-              </span>
-            ))}
-          </div>
-          {familyPolicies.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500">No family policies found</p>
+      {tab === 'policies' && (
+        <Section title="Policy History" icon="history" badge={clientPolicies.length}>
+          {clientPolicies.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">No policies found</p>
           ) : (
-            <div className="space-y-2">
-              {familyPolicies.map(p => {
-                const owner = clients.find(c => c.id === p.clientId)
-                const history = policyHistoryStatus(p)
-                return (
-                  <div key={p.id} className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs">
-                    <div>
-                      <p className="font-semibold text-gray-800 dark:text-gray-200">{owner?.name || p.clientName || 'Family member'}</p>
-                      <p className="font-mono text-gray-500 dark:text-gray-400">{p.policyNumber} - {p.policyType || 'Policy'} - {p.insurer || 'Insurer'}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtDate(getPolicyDueDate(p))}</p>
-                      <span className={history.cls}>{history.label}</span>
-                    </div>
-                  </div>
-                )
-              })}
+            <div className="table-container">
+              <table className="min-w-full">
+                <thead><tr>
+                  {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status'].map(h => (
+                    <th key={h} className="table-header">{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody className="bg-white dark:bg-gray-800">
+                  {clientPolicies.map(p => {
+                    const dueDate = getPolicyDueDate(p)
+                    const coverage = p.sumInsured || p.sumAssured || p.idv || '—'
+                    const history = policyHistoryStatus(p)
+                    return (
+                      <tr key={p.id} className={`table-row ${history.label === 'Renewed' ? 'opacity-60' : ''}`}>
+                        <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
+                        <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
+                        <td className="table-cell text-xs">{p.insurer}</td>
+                        <td className="table-cell text-xs">{p.planName || '—'}</td>
+                        <td className="table-cell font-semibold">{fmtCurrency(p.premium)}</td>
+                        <td className="table-cell">{coverage !== '—' ? fmtCurrency(coverage) : '—'}</td>
+                        <td className="table-cell text-xs">{fmtDate(p.startDate)}</td>
+                        <td className="table-cell text-xs font-semibold text-blue-700 dark:text-blue-400">{fmtDate(dueDate)}</td>
+                        <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
+                        <td className="table-cell text-xs">{daysUntil(dueDate || p.expiryDate) !== null ? `${daysUntil(dueDate || p.expiryDate)}d` : '—'}</td>
+                        <td className="table-cell"><span className={history.cls}>{history.label}</span></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </Section>
       )}
 
-      {/* Claims */}
-      <Section title="Claims" icon="claims" badge={claims.length}>
-        {claims.length === 0 ? (
-          <p className="text-xs text-gray-400 dark:text-gray-500">No claims on record</p>
-        ) : (
-          <div className="space-y-2">
-            {claims.map(c => (
-              <div key={c.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{c.claimNumber || '—'} · {c.claimType}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{c.insurer} · {fmtDate(c.intimationDate)}</p>
-                </div>
-                <div className="text-right">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CLAIM_STATUS_COLORS[c.status] || 'badge-gray'}`}>{c.status}</span>
-                  {c.claimedAmount && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">₹{Number(c.claimedAmount).toLocaleString('en-IN')}</p>}
-                </div>
+      {tab === 'family' && (
+        <Section title="Family Policies" icon="users" badge={familyPolicies.length}>
+          {!familyKey ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">No family group on this client. Add Family name on the Clients page if you want this tab filled.</p>
+          ) : (
+            <>
+              <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                {familyMembers.map(member => (
+                  <span key={member.id} className={`px-2 py-1 rounded-full font-semibold ${member.id === id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                    {member.name}{member.familyRole ? ` - ${member.familyRole}` : ''}
+                  </span>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </Section>
+              {familyPolicies.length === 0 ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">No family policies found</p>
+              ) : (
+                <div className="space-y-2">
+                  {familyPolicies.map(p => {
+                    const owner = clients.find(c => c.id === p.clientId)
+                    const history = policyHistoryStatus(p)
+                    return (
+                      <div key={p.id} className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2 text-xs">
+                        <div>
+                          <p className="font-semibold text-gray-800 dark:text-gray-200">{owner?.name || p.clientName || 'Family member'}</p>
+                          <p className="font-mono text-gray-500 dark:text-gray-400">{p.policyNumber} - {p.policyType || 'Policy'} - {p.insurer || 'Insurer'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-blue-700 dark:text-blue-400">{fmtDate(getPolicyDueDate(p))}</p>
+                          <span className={history.cls}>{history.label}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+      )}
 
+      {tab === 'claims' && (
+        <Section title="Claims" icon="claims" badge={claims.length}>
+          {claims.length === 0 ? (
+            <p className="text-xs text-gray-400 dark:text-gray-500">No claims on record</p>
+          ) : (
+            <div className="space-y-2">
+              {claims.map(c => (
+                <div key={c.id} className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">{c.claimNumber || '—'} · {c.claimType}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{c.insurer} · {fmtDate(c.intimationDate)}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CLAIM_STATUS_COLORS[c.status] || 'badge-gray'}`}>{c.status}</span>
+                    {c.claimedAmount && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">₹{Number(c.claimedAmount).toLocaleString('en-IN')}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
     </div>
   )
 }
-
-

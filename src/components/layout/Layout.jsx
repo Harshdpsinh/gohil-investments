@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Sidebar from './Sidebar'
 import GlobalSearch from './GlobalSearch'
+import CommandPalette from './CommandPalette'
 import useAndroidBack from '../../hooks/useAndroidBack'
 import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
@@ -84,6 +85,7 @@ export default function Layout({ children }) {
   return (
     <div className="app-shell flex h-screen overflow-hidden text-slate-950 dark:text-slate-100">
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      <CommandPalette />
       {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:flex-shrink-0">
         <Sidebar />
