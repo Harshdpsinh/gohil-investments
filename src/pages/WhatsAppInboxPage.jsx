@@ -35,6 +35,7 @@ export default function WhatsAppInboxPage() {
   const [activeWaId, setActiveWaId] = useState('')
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [now, setNow] = useState(Date.now())
   const threadRef = useRef(null)
 
   useEffect(() => {
@@ -50,7 +51,12 @@ export default function WhatsAppInboxPage() {
     return unsub
   }, [])
 
-  const conversations = useMemo(() => buildConversations(messages), [messages])
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  const conversations = useMemo(() => buildConversations(messages, now), [messages, now])
   const active = conversations.find(c => c.waId === activeWaId) || null
 
   const activeClient = useMemo(
@@ -180,7 +186,7 @@ export default function WhatsAppInboxPage() {
                   </div>
                   <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{convo.preview || '—'}</p>
                   <div className="mt-1 flex items-center gap-1.5">
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                    <span className={`wa-window-live rounded px-1.5 py-0.5 text-[10px] font-bold ${
                       convo.window.open
                         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
                         : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
@@ -210,7 +216,7 @@ export default function WhatsAppInboxPage() {
                     </p>
                     <p className="text-xs text-gray-500">+{active.waId}</p>
                   </div>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                  <span className={`wa-window-live rounded-full px-2 py-0.5 text-[11px] font-bold ${
                     active.window.open
                       ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
                       : 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100'
@@ -219,8 +225,6 @@ export default function WhatsAppInboxPage() {
                   </span>
                 </div>
 
-                {/* What this person actually holds — the reason to answer from
-                    the CRM rather than a generic inbox. */}
                 {clientPolicies.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto border-b border-slate-200 p-2 dark:border-slate-700">
                     {clientPolicies.slice(0, 4).map(policy => {
