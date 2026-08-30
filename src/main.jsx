@@ -13,6 +13,7 @@ import { AuthProvider } from './hooks/useAuth'
 import './styles/tokens.css'
 import './index.css'
 import './styles/animations.css'
+import './styles/workspace-free.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -47,4 +48,3 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </React.StrictMode>
 )
-
