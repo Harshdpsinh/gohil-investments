@@ -61,3 +61,29 @@
 .wa-window-live {
   font-variant-numeric: tabular-nums;
 }
+
+.pdf-extract-split {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 960px) {
+  .pdf-extract-split {
+    grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
+    align-items: start;
+  }
+}
+
+.pdf-extract-preview {
+  position: sticky;
+  top: 0;
+}
+
+.pdf-extract-frame {
+  width: 100%;
+  min-height: 420px;
+  height: 46vh;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}

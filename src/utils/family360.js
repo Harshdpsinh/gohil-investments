@@ -23,13 +23,13 @@ export function familyPoliciesOf(members = [], policies = []) {
   return policies.filter(policy => ids.has(policy.clientId))
 }
 
-export function familyCoverTotals(policies = []) {
+export function familyCoverTotals(policies = [], members = []) {
   const active = policies.filter(isActive)
   const cover = policy => Number(policy.sumInsured || policy.sumAssured || policy.idv) || 0
   const premium = policy => Number(policy.premium) || 0
   const ofType = type => active.filter(policy => policy.policyType === type)
   return {
-    members: 0,
+    members: members.length || 0,
     policies: active.length,
     premium: active.reduce((sum, policy) => sum + premium(policy), 0),
     healthCover: ofType('Health').reduce((sum, policy) => sum + cover(policy), 0),
@@ -56,7 +56,7 @@ export function familyPremiumCalendar(policies = [], members = []) {
 }
 
 export function familySummaryMessage(client, members = [], policies = []) {
-  const totals = familyCoverTotals(policies)
+  const totals = familyCoverTotals(policies, members)
   const calendar = familyPremiumCalendar(policies, members).slice(0, 8)
   const names = members.map(row => row.name).filter(Boolean).join(', ') || client?.name || 'your family'
   const lines = calendar.map(row =>
@@ -68,8 +68,9 @@ export function familySummaryMessage(client, members = [], policies = []) {
     `Family portfolio summary for ${names}.`,
     `Active policies: ${totals.policies}`,
     `Annual premium: ${fmtCurrency(totals.premium)}`,
-    totals.healthCover ? `Total health cover: ${fmtCurrency(totals.healthCover)}` : '',
-    totals.lifeCover ? `Total life cover: ${fmtCurrency(totals.lifeCover)}` : '',
+    totals.healthCover ? `Total health cover: ${fmtCurrency(totals.healthCover)}` : null,
+    totals.lifeCover ? `Total life cover: ${fmtCurrency(totals.lifeCover)}` : null,
+    totals.motorIdv ? `Total motor IDV: ${fmtCurrency(totals.motorIdv)}` : null,
     '',
     'Upcoming premiums:',
     ...(lines.length ? lines : ['- None on file']),
@@ -77,5 +78,5 @@ export function familySummaryMessage(client, members = [], policies = []) {
     'Gohil Investments',
     'Harshdipsinh Gohil — 7698997894',
     'Bhavnagar, Gujarat',
-  ].filter(line => line !== undefined).join('\n')
+  ].filter(line => line !== null && line !== undefined).join('\n')
 }
