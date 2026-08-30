@@ -1,0 +1,63 @@
+/* Presentation only. No data or business-logic changes. */
+.command-palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: calc(12vh + env(safe-area-inset-top)) 1rem 1rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.command-palette {
+  width: min(640px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.28);
+}
+
+.command-hint {
+  display: none;
+  margin-left: 0.5rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 0.1rem 0.4rem;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+@media (min-width: 1024px) {
+  .command-hint { display: inline-flex; }
+}
+
+.profile-tabs {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.profile-tab {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.profile-tab.is-on {
+  color: #115e59;
+  background: rgba(15, 118, 110, 0.12);
+  border-color: rgba(15, 118, 110, 0.22);
+}
+
+.wa-window-live {
+  font-variant-numeric: tabular-nums;
+}
