@@ -21,6 +21,7 @@ export const DEFAULT_RENEWAL_REMINDER_INTERVALS = [
 ]
 
 const STOP_STATUSES = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
+const BROWSER_SWEEP_KEY = 'gi.renewalSweep.at'
 
 export function defaultRenewalReminderSettings() {
   return {
@@ -31,9 +32,6 @@ export function defaultRenewalReminderSettings() {
 }
 
 export function normaliseReminderSettings(settings) {
-  // getRenewalReminderSettings() returns null when the settings document has
-  // never been saved. A `= {}` parameter default does not cover null, so guard
-  // explicitly — otherwise reading .intervals throws on a fresh install.
   const source = settings || {}
   const base = defaultRenewalReminderSettings()
   const seen = new Set()
@@ -52,8 +50,6 @@ export function normaliseReminderSettings(settings) {
 
   return {
     enabled: source.enabled !== false,
-    // Trim before falling back, so a whitespace-only prompt does not send an
-    // empty line to clients.
     prompt: String(source.prompt || '').trim() || base.prompt,
     intervals,
   }
@@ -65,11 +61,6 @@ export function findPolicyClient(policy, clients = []) {
     || null
 }
 
-/**
- * The facts a reminder is built from. Also the source of the WhatsApp template's
- * body variables, so the message a client receives and the preview stored in the
- * log are always describing the same policy.
- */
 export function buildRenewalReminderDetail({ policy, client, daysBefore }) {
   return {
     clientName: client?.name || policy.clientName || 'Customer',
@@ -191,6 +182,14 @@ export function startRenewalReminderAutomation() {
   let running = false
   const run = async () => {
     if (stopped || running) return
+    if (typeof document !== 'undefined' && document.hidden) return
+    try {
+      const last = Number(window.localStorage?.getItem(BROWSER_SWEEP_KEY) || 0)
+      if (last && Date.now() - last < 50 * 60 * 1000) return
+      window.localStorage?.setItem(BROWSER_SWEEP_KEY, String(Date.now()))
+    } catch {
+      // Private mode — still rely on claimRenewalReminder to stop duplicates.
+    }
     running = true
     try {
       await runRenewalReminderSweep()
