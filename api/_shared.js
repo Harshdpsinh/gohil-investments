@@ -87,7 +87,7 @@ export async function inboundWindowOpen(db, waId, now = Date.now()) {
 
 function ensureAdminApp() {
   if (getApps().length) return
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT
   if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not configured.')
   const serviceAccount = JSON.parse(raw)
   if (serviceAccount.private_key) serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n')

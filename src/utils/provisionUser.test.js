@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateProvisionInput, provisionProfileFields } from './provisionUser.js'
+import { validateProvisionInput, provisionProfileFields, existingLoginPasswordError, shouldFallBackToClientProvision } from './provisionUser.js'
 
 describe('validateProvisionInput', () => {
   it('normalises a new staff account', () => {
@@ -54,5 +54,19 @@ describe('provisionProfileFields', () => {
       email: 'priya@gmail.com',
       role: 'staff',
     })
+  })
+})
+
+describe('client provision fallback', () => {
+  it('falls back when the server has no service account', () => {
+    expect(shouldFallBackToClientProvision(false, 500)).toBe(true)
+    expect(shouldFallBackToClientProvision(false, 404)).toBe(true)
+    expect(shouldFallBackToClientProvision(true, 200)).toBe(false)
+    expect(shouldFallBackToClientProvision(false, 403)).toBe(false)
+  })
+
+  it('tells the admin to type the existing password when attaching', () => {
+    expect(existingLoginPasswordError('auth/invalid-credential')).toMatch(/already has a login/)
+    expect(existingLoginPasswordError('auth/email-already-in-use')).toBe('')
   })
 })
