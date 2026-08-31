@@ -4,15 +4,13 @@ import {
   signInWithEmailAndPassword,
   signOut as fbSignOut,
   onAuthStateChanged,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  getAuth,
 } from 'firebase/auth'
-import { initializeApp, getApp, getApps } from 'firebase/app'
 import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
 import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
-import { existingLoginPasswordError, shouldFallBackToClientProvision } from '../utils/provisionUser'
+import { shouldFallBackToClientProvision } from '../utils/provisionUser'
+import { createOrLookupAuthUser } from '../utils/identityToolkitClient'
 
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
@@ -120,32 +118,20 @@ export function AuthProvider({ children }) {
       }
     }
 
-    const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
-      ? getApp('staffAccountCreation')
-      : initializeApp(firebaseConfig, 'staffAccountCreation')
-    const secondaryAuth = getAuth(secondaryApp)
+    const authUser = await createOrLookupAuthUser({
+      apiKey: firebaseConfig.apiKey,
+      email: cleanEmail,
+      password,
+    })
     try {
-      let cred
-      let attached = false
-      try {
-        cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
-      } catch (err) {
-        if (err.code !== 'auth/email-already-in-use') throw err
-        try {
-          cred = await signInWithEmailAndPassword(secondaryAuth, cleanEmail, password)
-        } catch (signErr) {
-          const hint = existingLoginPasswordError(signErr.code)
-          throw hint ? new Error(hint) : signErr
-        }
-        attached = true
-      }
-      await secondaryAuth.signOut()
-      await setUserRole(cred.user.uid, { email: cleanEmail, role: safeRole, name: cleanName })
-      return { uid: cred.user.uid, attached }
+      await setUserRole(authUser.uid, { email: cleanEmail, role: safeRole, name: cleanName })
     } catch (err) {
-      await secondaryAuth.signOut().catch(() => {})
+      if (err.code === 'permission-denied') {
+        throw new Error('Could not save that staff row. Refresh, stay signed in as admin, and try Create Account again.')
+      }
       throw err
     }
+    return { uid: authUser.uid, attached: !authUser.created }
   }
 
   const isAdmin = role === 'admin'

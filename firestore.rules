@@ -169,11 +169,9 @@ service cloud.firestore {
     }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();
-      allow create: if isAdmin() && validUserProfile();
-      allow update: if isAdmin()
-        && validUserProfile()
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['name', 'email', 'role', 'updatedAt']);
+      // Admin merge-writes name/email/role/updatedAt, and first save may also
+      // set createdAt. hasOnly on update was 403ing Create Account.
+      allow create, update: if isAdmin() && validUserProfile();
       allow delete: if false;
     }
     match /{document=**}          { allow read, write: if false; }
