@@ -131,6 +131,7 @@ export default function Layout({ children }) {
           }}
         >
           <div className="page-enter min-h-full" id="main-content" tabIndex="-1">
+            {/* CommissionBookBanner + ManualCommissionModal must exist in the same commit as this import. */}
             <CommissionBookBanner />
             {children}
           </div>
