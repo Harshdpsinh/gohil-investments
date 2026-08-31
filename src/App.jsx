@@ -38,7 +38,9 @@ function ProtectedRoute({ children }) {
       <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
         <h1 className="text-xl font-bold text-slate-900">Account not provisioned</h1>
         <p className="mt-2 text-sm text-slate-500">
-          This login is not on the staff list. Ask an admin to add you under Manage Staff, then sign in again.
+          Signed in as <span className="font-semibold text-slate-700">{user.email || 'unknown email'}</span>.
+          This login is not on the staff list. On a computer, sign in as admin, open Manage Staff,
+          enter this same email, and tap Create Account — that now attaches an existing login.
         </p>
         <button
           type="button"

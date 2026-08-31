@@ -49,8 +49,10 @@ export default function AdminUsersPage() {
     if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return }
     setSaving(true)
     try {
-      await createStaffAccount(cleanEmail, form.password, cleanName, form.role)
-      toast.success(`Account created for ${cleanName} (${form.role})`)
+      const result = await createStaffAccount(cleanEmail, form.password, cleanName, form.role)
+      toast.success(result?.attached
+        ? `Linked existing login for ${cleanName} (${form.role}). They can sign in again now.`
+        : `Account created for ${cleanName} (${form.role})`)
       setForm({ name: '', email: '', password: '', role: 'staff' })
       setShowForm(false)
       await load()
@@ -124,6 +126,7 @@ export default function AdminUsersPage() {
                 </select>
               </div>
             </div>
+            <p className="text-xs text-slate-500">If this email already has a Firebase login, Create Account attaches it instead of failing.</p>
             <div className="flex gap-3">
               <button type="submit" disabled={saving} className="btn-primary">
                 {saving ? 'Creating…' : 'Create Account'}
