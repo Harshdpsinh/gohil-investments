@@ -71,8 +71,16 @@ jobs:
             || { echo "::error::FIREBASE_SERVICE_ACCOUNT is not valid JSON."; exit 1; }
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
 
-      - name: Deploy Firestore and Storage rules
-        run: firebase deploy --only firestore:rules,storage --project gohil-investments --non-interactive
+      # Storage is a separate step on purpose. Bundling it with Firestore made
+      # every run fail: the CLI tries to enable firebasestorage.googleapis.com
+      # and the service account cannot enable APIs. Create Account was 403ing
+      # because these repo rules never reached production.
+      - name: Deploy Firestore rules
+        run: firebase deploy --only firestore:rules --project gohil-investments --non-interactive
+
+      - name: Deploy Storage rules
+        continue-on-error: true
+        run: firebase deploy --only storage --project gohil-investments --non-interactive
 
       - name: Remove credentials
         if: always()
