@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateProvisionInput, provisionProfileFields, existingLoginPasswordError, shouldFallBackToClientProvision } from './provisionUser.js'
+import { validateProvisionInput, provisionProfileFields, existingLoginPasswordError, shouldFallBackToClientProvision, parseStaffAttachInput, staffWriteError } from './provisionUser.js'
 
 describe('validateProvisionInput', () => {
   it('normalises a new staff account', () => {
@@ -68,5 +68,25 @@ describe('client provision fallback', () => {
   it('tells the admin to type the existing password when attaching', () => {
     expect(existingLoginPasswordError('auth/invalid-credential')).toMatch(/already has a login/)
     expect(existingLoginPasswordError('auth/email-already-in-use')).toBe('')
+  })
+})
+
+describe('parseStaffAttachInput', () => {
+  it('fills name from the email when blank', () => {
+    expect(parseStaffAttachInput({ email: 'Reader@Gmail.com', role: 'READER' })).toEqual({
+      email: 'reader@gmail.com',
+      name: 'reader',
+      role: 'reader',
+    })
+  })
+
+  it('rejects a guest role', () => {
+    expect(() => parseStaffAttachInput({ email: 'a@b.com', role: 'guest' })).toThrow(/admin, staff or reader/)
+  })
+})
+
+describe('staffWriteError', () => {
+  it('tells the admin which login can write the staff row', () => {
+    expect(staffWriteError('permission-denied')).toMatch(/harshdeepgohil@gmail.com/)
   })
 })

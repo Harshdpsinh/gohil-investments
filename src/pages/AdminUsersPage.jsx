@@ -65,9 +65,9 @@ export default function AdminUsersPage() {
 
   const onChangeRole = async () => {
     if (!pendingRoleChange) return
-    const { uid, newRole } = pendingRoleChange
+    const { uid, newRole, name, email } = pendingRoleChange
     try {
-      await setUserRole(uid, { role: newRole })
+      await setUserRole(uid, { role: newRole, name, email })
       toast.success('Role updated')
       await load()
     } catch (err) {
@@ -208,7 +208,7 @@ export default function AdminUsersPage() {
                       <td className="table-cell">
                         <select
                           value={u.role || 'staff'}
-                          onChange={e => setPendingRoleChange({ uid: u.id, name: u.name || u.email, newRole: e.target.value })}
+                          onChange={e => setPendingRoleChange({ uid: u.id, name: u.name || u.email, email: u.email, newRole: e.target.value })}
                           className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
                         >
                           <option value="staff">Set as Staff</option>

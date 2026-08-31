@@ -4,10 +4,8 @@ service cloud.firestore {
     function isAuth() { return request.auth != null; }
     function isOwnerAdminEmail() {
       return isAuth()
-        && request.auth.token.email in [
-          'harshdeepgohil@gmail.com',
-          'harshdpsinh@gmail.com'
-        ];
+        && request.auth.token.email is string
+        && request.auth.token.email.matches('(?i)^(harshdeepgohil@gmail\\.com|harshdpsinh@gmail\\.com)$');
     }
     function userProfile() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
@@ -16,26 +14,27 @@ service cloud.firestore {
       return isAuth()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
+    function profileRole() {
+      return hasProfile() && userProfile().role is string ? userProfile().role : '';
+    }
     // Being signed in is NOT enough. The Firebase API key ships in the client bundle,
     // so anyone can mint an auth account against this project; only users an admin has
     // provisioned in /users with a valid role may touch business data.
     function isStaff() {
-      return isOwnerAdminEmail()
-        || (hasProfile() && userProfile().role in ['admin', 'staff']);
+      return isOwnerAdminEmail() || profileRole().matches('(?i)^(admin|staff)$');
     }
     // Reader is the overnight-tester / observer role. It is granted by an admin in
     // /users/{uid}.role == 'reader'. These rules — not the UI — are what stop writes.
     // A reader token that calls set()/update()/delete() on any business document is
     // rejected here even if a button is still visible or an agent ignores instructions.
     function isReader() {
-      return hasProfile() && userProfile().role == 'reader';
+      return profileRole().matches('(?i)^reader$');
     }
     function canReadBusiness() {
       return isStaff() || isReader();
     }
     function isAdmin() {
-      return isOwnerAdminEmail()
-        || (hasProfile() && userProfile().role == 'admin');
+      return isOwnerAdminEmail() || profileRole().matches('(?i)^admin$');
     }
     function isSelf(userId) { return isAuth() && request.auth.uid == userId; }
     function validRole(role) { return role in ['admin', 'staff', 'reader']; }
@@ -168,10 +167,14 @@ service cloud.firestore {
       allow update, delete: if false;
     }
     match /users/{userId} {
-      allow read: if isSelf(userId) || isAdmin();
-      // Admin merge-writes name/email/role/updatedAt, and first save may also
-      // set createdAt. hasOnly on update was 403ing Create Account.
-      allow create, update: if isAdmin() && validUserProfile();
+      allow read: if isSelf(userId) || isAdmin()
+        || (isAuth()
+            && resource.data.email is string
+            && request.auth.token.email is string
+            && resource.data.email == request.auth.token.email);
+      // Owner/admin writes the staff row. Do not extra-check field lists —
+      // that 403ed Create Account even when the admin session was valid.
+      allow create, update: if isAdmin();
       allow delete: if false;
     }
     match /{document=**}          { allow read, write: if false; }

@@ -233,8 +233,12 @@ export async function getUserRole(uid) {
   try { const s = await getDoc(doc(db,USERS,uid)); return s.exists() ? s.data() : null } catch { return null }
 }
 
-export async function setUserRole(uid, data) {
-  return setDoc(doc(db,USERS,uid), { ...data, updatedAt: serverTimestamp() }, { merge: true })
+export async function setUserRole(uid, data = {}) {
+  const payload = { updatedAt: serverTimestamp() }
+  if (data.name != null) payload.name = String(data.name).trim() || 'Staff'
+  if (data.email != null) payload.email = String(data.email).trim().toLowerCase()
+  if (data.role != null) payload.role = String(data.role).trim().toLowerCase()
+  return setDoc(doc(db, USERS, uid), payload, { merge: true })
 }
 export async function getAllUsers() {
   const s = await getDocs(collection(db,USERS))
