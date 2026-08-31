@@ -49,6 +49,13 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['deleted', 'deletedAt']);
     }
+    function validAttemptLog() {
+      return request.resource.data.op is string
+        && request.resource.data.outcome is string
+        && request.resource.data.keys().hasOnly([
+          'op', 'path', 'outcome', 'message', 'email', 'source', 'at'
+        ]);
+    }
 
     match /clients/{clientId} {
       allow read: if canReadBusiness();
@@ -114,9 +121,6 @@ service cloud.firestore {
       allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
-    // Written only by the server (webhook and sender) using the admin SDK,
-    // which bypasses these rules. Staff read, and may mark a message read —
-    // nothing else from the browser. Readers may read only.
     match /whatsapp_messages/{messageId} {
       allow read: if canReadBusiness();
       allow update: if isStaff()
@@ -156,11 +160,15 @@ service cloud.firestore {
       allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
+    // Append-only probe log. Readers (and staff) may create a row when a write
+    // is attempted or denied. Nobody may edit or erase evidence.
+    match /agent_action_log/{logId} {
+      allow read: if canReadBusiness();
+      allow create: if canReadBusiness() && validAttemptLog();
+      allow update, delete: if false;
+    }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();
-      // Self-provisioning is deliberately NOT allowed. Previously any signed-in user
-      // could create their own 'staff' profile and unlock the entire CRM. Staff
-      // and reader accounts must be created by an admin through the Admin Users page.
       allow create: if isAdmin() && validUserProfile();
       allow update: if isAdmin()
         && validUserProfile()

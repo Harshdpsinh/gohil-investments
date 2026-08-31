@@ -8,17 +8,40 @@ import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
 import { NavLink } from 'react-router-dom'
 import CommissionBookBanner from '../commission/CommissionBookBanner'
+import WriteAttemptLog from './WriteAttemptLog'
 import { useAuth } from '../../hooks/useAuth'
+import { recordAgentAttempt } from '../../firebase/agentActionLog'
+import { isForbiddenClickLabel } from '../../utils/forbiddenActions'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   useAndroidBack({ sidebarOpen, closeSidebar })
-  const { isReader } = useAuth()
+  const { isReader, user } = useAuth()
 
   useEffect(() => {
     return startRenewalReminderAutomation()
   }, [])
+
+  useEffect(() => {
+    if (!isReader) return undefined
+    const onClick = event => {
+      const control = event.target?.closest?.('button, [role="button"], input[type="submit"]')
+      if (!control) return
+      const label = `${control.innerText || ''} ${control.getAttribute('aria-label') || ''}`.trim()
+      if (!isForbiddenClickLabel(label)) return
+      recordAgentAttempt({
+        op: 'click',
+        path: window.location.pathname,
+        outcome: 'clicked-write-control',
+        message: label.slice(0, 300),
+        email: user?.email || '',
+        source: 'layout-click',
+      }).catch(() => {})
+    }
+    document.addEventListener('click', onClick, true)
+    return () => document.removeEventListener('click', onClick, true)
+  }, [isReader, user])
 
   useEffect(() => {
     if (!sidebarOpen) return undefined
@@ -139,11 +162,11 @@ export default function Layout({ children }) {
                 <p className="mt-1 text-xs">
                   This account is role <span className="font-mono">reader</span>.
                   Firestore and Storage rules reject create, update, delete and uploads.
-                  The banner is not the lock — the deployed rules are.
+                  Clicks on Save / Merge / Settle are written to <span className="font-mono">agent_action_log</span>.
                 </p>
               </div>
             )}
-            {/* CommissionBookBanner + ManualCommissionModal must exist in the same commit as this import. */}
+            <WriteAttemptLog />
             <CommissionBookBanner />
             {children}
           </div>
