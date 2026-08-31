@@ -23,12 +23,22 @@ service cloud.firestore {
       return isOwnerAdminEmail()
         || (hasProfile() && userProfile().role in ['admin', 'staff']);
     }
+    // Reader is the overnight-tester / observer role. It is granted by an admin in
+    // /users/{uid}.role == 'reader'. These rules — not the UI — are what stop writes.
+    // A reader token that calls set()/update()/delete() on any business document is
+    // rejected here even if a button is still visible or an agent ignores instructions.
+    function isReader() {
+      return hasProfile() && userProfile().role == 'reader';
+    }
+    function canReadBusiness() {
+      return isStaff() || isReader();
+    }
     function isAdmin() {
       return isOwnerAdminEmail()
         || (hasProfile() && userProfile().role == 'admin');
     }
     function isSelf(userId) { return isAuth() && request.auth.uid == userId; }
-    function validRole(role) { return role in ['admin', 'staff']; }
+    function validRole(role) { return role in ['admin', 'staff', 'reader']; }
     function validUserProfile() {
       return request.resource.data.role is string
         && validRole(request.resource.data.role)
@@ -41,71 +51,85 @@ service cloud.firestore {
     }
 
     match /clients/{clientId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
       match /documents/{docId} {
-        allow read, create, update: if isStaff();
+        allow read: if canReadBusiness();
+        allow create, update: if isStaff();
         allow delete: if isAdmin();
       }
     }
     match /families/{familyId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /policies/{policyId} {
-      allow read, create: if isStaff();
+      allow read: if canReadBusiness();
+      allow create: if isStaff();
       allow update: if isStaff() && (!isSoftDeleteChange() || isAdmin());
       allow delete: if isAdmin();
     }
     match /proposals/{proposalId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /claims/{claimId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /leads/{leadId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /lead_followups/{followupId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /endorsements/{endorsementId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /documents/{documentId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /message_logs/{messageId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /renewal_reminder_settings/{docId} {
       allow read, create, update, delete: if isAdmin();
     }
     match /renewal_reminder_logs/{docId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     // Written only by the server (webhook and sender) using the admin SDK,
     // which bypasses these rules. Staff read, and may mark a message read —
-    // nothing else from the browser.
+    // nothing else from the browser. Readers may read only.
     match /whatsapp_messages/{messageId} {
-      allow read: if isStaff();
+      allow read: if canReadBusiness();
       allow update: if isStaff()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow create, delete: if false;
     }
     match /commission_master/{commissionMasterId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read: if canReadBusiness();
+      allow create, update, delete: if isAdmin();
     }
     match /commission_transactions/{commissionTransactionId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /audit_logs/{auditId} {
@@ -119,21 +143,24 @@ service cloud.firestore {
       allow read, create, update, delete: if isAdmin();
     }
     match /reports_saved_filters/{filterId} {
-      allow read, create, update, delete: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update, delete: if isStaff();
     }
     match /client_activities/{activityId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /occasion_logs/{logId} {
-      allow read, create, update: if isStaff();
+      allow read: if canReadBusiness();
+      allow create, update: if isStaff();
       allow delete: if isAdmin();
     }
     match /users/{userId} {
       allow read: if isSelf(userId) || isAdmin();
       // Self-provisioning is deliberately NOT allowed. Previously any signed-in user
       // could create their own 'staff' profile and unlock the entire CRM. Staff
-      // accounts must be created by an admin through the Admin Users page.
+      // and reader accounts must be created by an admin through the Admin Users page.
       allow create: if isAdmin() && validUserProfile();
       allow update: if isAdmin()
         && validUserProfile()
