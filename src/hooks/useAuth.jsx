@@ -11,21 +11,10 @@ import {
 import { initializeApp, getApp, getApps } from 'firebase/app'
 import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
+import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
 
 const AuthContext = createContext(null)
-const OWNER_ADMIN_EMAILS = [
-  'harshdeepgohil@gmail.com',
-  'harshdpsinh@gmail.com',
-  ...(import.meta.env.VITE_ADMIN_EMAILS || '').split(','),
-].map(email => String(email || '').trim().toLowerCase()).filter(Boolean)
-
-function normaliseRole(value, email = '') {
-  const cleanRole = String(value || '').trim().toLowerCase()
-  const cleanEmail = String(email || '').trim().toLowerCase()
-  if (OWNER_ADMIN_EMAILS.includes(cleanEmail)) return 'admin'
-  if (cleanRole === 'admin' || cleanRole === 'staff') return cleanRole
-  return ''
-}
+const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
 
 function withTimeout(promise, ms = 5000) {
   return Promise.race([
@@ -46,7 +35,7 @@ export function AuthProvider({ children }) {
         try {
           const profile = await withTimeout(getUserRole(u.uid), 5000)
           if (profile) {
-            setRole(normaliseRole(profile.role, u.email) || null)
+            setRole(normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null)
           } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
             const defaultRole = 'admin'
             try {
@@ -107,7 +96,7 @@ export function AuthProvider({ children }) {
     if (!cleanEmail) throw new Error('Email is required.')
     if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
 
-    const safeRole = normaliseRole(requestedRole) || 'staff'
+    const safeRole = normaliseRole(requestedRole, '', import.meta.env.VITE_ADMIN_EMAILS) || 'staff'
     const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
       ? getApp('staffAccountCreation')
       : initializeApp(firebaseConfig, 'staffAccountCreation')
@@ -133,9 +122,11 @@ export function AuthProvider({ children }) {
   }
 
   const isAdmin = role === 'admin'
+  const isReader = role === 'reader'
+  const canWrite = isWriteRole(role)
 
   return (
-    <AuthContext.Provider value={{ user, role, isAdmin, loading, signIn, signOut, resetPassword, createStaffAccount }}>
+    <AuthContext.Provider value={{ user, role, isAdmin, isReader, canWrite, loading, signIn, signOut, resetPassword, createStaffAccount }}>
       {children}
     </AuthContext.Provider>
   )

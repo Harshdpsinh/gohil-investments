@@ -1,6 +1,7 @@
 // storage.rules
 // Signed-in is not enough: the Firebase API key is public, so anyone can mint
-// an auth account. Only provisioned staff (or the owner emails) may read/write.
+// an auth account. Only provisioned staff (or the owner emails) may write.
+// Readers may download existing files and cannot upload or delete.
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
@@ -14,15 +15,23 @@ service firebase.storage {
     function staffProfile() {
       return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
+    function hasProfile() {
+      return request.auth != null
+          && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
     function isStaff() {
       return isOwnerAdminEmail()
-        || (request.auth != null
-            && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-            && staffProfile().role in ['admin', 'staff']);
+        || (hasProfile() && staffProfile().role in ['admin', 'staff']);
+    }
+    function isReader() {
+      return hasProfile() && staffProfile().role == 'reader';
+    }
+    function canRead() {
+      return isStaff() || isReader();
     }
 
     match /clients/{clientId}/{allPaths=**} {
-      allow read: if isStaff();
+      allow read: if canRead();
       allow delete: if isStaff();
       allow write: if isStaff()
                    && request.resource.size < 10 * 1024 * 1024
@@ -30,7 +39,7 @@ service firebase.storage {
     }
 
     match /policies/{policyId}/{allPaths=**} {
-      allow read: if isStaff();
+      allow read: if canRead();
       allow delete: if isStaff();
       allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024
@@ -38,7 +47,7 @@ service firebase.storage {
     }
 
     match /documents/{ownerType}/{ownerId}/{allPaths=**} {
-      allow read: if isStaff();
+      allow read: if canRead();
       allow delete: if isStaff();
       allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024
@@ -46,7 +55,7 @@ service firebase.storage {
     }
 
     match /commission/{batchId}/{allPaths=**} {
-      allow read: if isStaff();
+      allow read: if canRead();
       allow delete: if isStaff();
       allow write: if isStaff()
                    && request.resource.size < 25 * 1024 * 1024

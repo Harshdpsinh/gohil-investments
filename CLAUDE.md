@@ -72,6 +72,7 @@ Pure logic worth testing has been pulled out of the Firebase and React layers in
 - `src/utils/commissionReconcile.js` — policy book joined to the posted ledger
 - `src/utils/businessDone.js` — financial-year periods, fresh/renewal split, persistency
 - `src/utils/pdfProfiles.js` — the six insurer PDF layout parsers
+- `src/utils/roles.js` — admin / staff / reader, write vs read, owner-email override
 
 Keep those free of any `firebase` or `react` import — and keep `pdfProfiles.js` free of
 `pdfjs-dist` too; `pdfStatement.js` exists solely to own that dependency. That property
@@ -104,9 +105,12 @@ git checkout -b feat/short-description
 - Policies cascade: editing a client or policy triggers `cascadeUpdateClient` /
   `cascadeUpdatePolicyLinks` to keep denormalised copies (`clientName`, `clientMobile`)
   in sync. Deletes are soft (`deleted`/`deletedAt`) and admin-gated.
-- Roles are `admin` and `staff`, resolved in `src/hooks/useAuth.jsx`. Owner emails are
-  hardcoded to admin in both `useAuth.jsx` and `firestore.rules` — keep the two lists
-  in sync when changing them.
+- Roles are `admin`, `staff` and `reader`, resolved in `src/hooks/useAuth.jsx` from
+  `src/utils/roles.js`. Owner emails are hardcoded to admin in `roles.js`, `useAuth.jsx`,
+  `firestore.rules`, `storage.rules` and `api/_shared.js` — keep every list in sync.
+  `reader` can load live business data. Writes are denied in Firestore and Storage rules,
+  not by trusting the UI or an agent prompt. WhatsApp send (`api/whatsapp-send.js`) still
+  requires `admin` or `staff` via `assertStaff`.
 
 ## Automation
 
@@ -285,10 +289,13 @@ Meta when saving the webhook) and `WHATSAPP_APP_SECRET` (from the app's Basic Se
 
 - `api/renewal-reminders.js` fails closed: with no `CRON_SECRET` set it returns 503 rather
   than running unauthenticated. `CRON_SECRET` must be set in Vercel or reminders stop.
-- Firestore access requires a provisioned `users/{uid}` document with role `admin` or
-  `staff`. Being signed in is not sufficient — the Firebase API key is public in the
-  client bundle, so auth alone would let anyone self-register into the CRM. Staff accounts
-  can only be created by an admin; there is no self-provisioning path.
+- Firestore access requires a provisioned `users/{uid}` document with role `admin`, `staff`
+  or `reader`. Being signed in is not sufficient — the Firebase API key is public in the
+  client bundle, so auth alone would let anyone self-register into the CRM. Accounts can
+  only be created by an admin; there is no self-provisioning path.
+- `reader` is allowed to `read` business collections and Storage objects. Every `create`,
+  `update` and `delete` on those paths stays `isStaff()` / `isAdmin()`. That is the lock
+  for the overnight tester. The UI banner is a warning only.
 - Any staff-role user can still read and edit every client, policy, claim and lead. Only
   deletes are admin-gated. There is no per-user data partitioning.
 - Never commit credentials. `.gitignore` does not untrack files already added — use

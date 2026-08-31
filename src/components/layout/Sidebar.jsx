@@ -2,11 +2,12 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth }  from '../../hooks/useAuth'
 import { useTheme } from '../../context/ThemeContext'
+import { roleLabel } from '../../utils/roles'
 import AppIcon from '../ui/AppIcon'
 import toast        from 'react-hot-toast'
 
 export default function Sidebar({ mobile, onClose }) {
-  const { signOut, user, isAdmin } = useAuth()
+  const { signOut, user, isAdmin, isReader, role } = useAuth()
   const { dark, toggle }           = useTheme()
   const navigate = useNavigate()
 
@@ -22,9 +23,11 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
     { to:'/business',   icon:'work', label:'Business Done' },
     { to:'/inbox',      icon:'message', label:'WhatsApp Inbox' },
-    ...(isAdmin ? [
+    ...((isAdmin || isReader) ? [
       { to:'/commission',  icon:'commission', label:'Commission'  },
       { to:'/reports',     icon:'reports', label:'Reports'      },
+    ] : []),
+    ...(isAdmin ? [
       { to:'/admin-users', icon:'staff', label:'Manage Staff' },
       { to:'/backup',      icon:'backup', label:'Backup'       },
     ] : []),
@@ -38,7 +41,6 @@ export default function Sidebar({ mobile, onClose }) {
 
   return (
     <aside className="app-sidebar flex h-full w-72 flex-col">
-      {/* Brand */}
       <div className="border-b border-white/10 px-5 py-5">
         <div className="flex items-center gap-3">
           <div className="brand-mark">
@@ -51,7 +53,6 @@ export default function Sidebar({ mobile, onClose }) {
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         <p className="nav-section-label">Workspace</p>
         {NAV.map(({ to, icon, label }) => (
@@ -67,7 +68,6 @@ export default function Sidebar({ mobile, onClose }) {
         ))}
       </nav>
 
-      {/* Dark mode toggle */}
       <div className="border-t border-slate-200/80 px-4 py-3 dark:border-slate-400/10">
         <button
           onClick={toggle}
@@ -83,7 +83,6 @@ export default function Sidebar({ mobile, onClose }) {
         </button>
       </div>
 
-      {/* User */}
       <div className="border-t border-slate-200/80 px-4 py-4 dark:border-slate-400/10">
         <div className="mb-3 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-sm dark:border-slate-400/10 dark:bg-slate-800/60 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-700 text-sm font-black text-white">
@@ -94,9 +93,11 @@ export default function Sidebar({ mobile, onClose }) {
             <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
               isAdmin
                 ? 'border border-teal-400/30 bg-teal-500/10 text-teal-800 dark:text-teal-200'
-                : 'border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
+                : isReader
+                  ? 'border border-amber-400/40 bg-amber-500/10 text-amber-800 dark:text-amber-200'
+                  : 'border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200'
             }`}>
-              {isAdmin ? 'Admin' : 'Staff'}
+              {roleLabel(role)}
             </span>
           </div>
         </div>

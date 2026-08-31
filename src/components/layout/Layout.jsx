@@ -8,11 +8,13 @@ import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
 import { NavLink } from 'react-router-dom'
 import CommissionBookBanner from '../commission/CommissionBookBanner'
+import { useAuth } from '../../hooks/useAuth'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   useAndroidBack({ sidebarOpen, closeSidebar })
+  const { isReader } = useAuth()
 
   useEffect(() => {
     return startRenewalReminderAutomation()
@@ -131,6 +133,16 @@ export default function Layout({ children }) {
           }}
         >
           <div className="page-enter min-h-full" id="main-content" tabIndex="-1">
+            {isReader && (
+              <div className="m-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                <p className="font-bold">Read-only session</p>
+                <p className="mt-1 text-xs">
+                  This account is role <span className="font-mono">reader</span>.
+                  Firestore and Storage rules reject create, update, delete and uploads.
+                  The banner is not the lock — the deployed rules are.
+                </p>
+              </div>
+            )}
             {/* CommissionBookBanner + ManualCommissionModal must exist in the same commit as this import. */}
             <CommissionBookBanner />
             {children}
