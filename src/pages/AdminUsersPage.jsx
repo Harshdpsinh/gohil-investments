@@ -126,7 +126,7 @@ export default function AdminUsersPage() {
                 </select>
               </div>
             </div>
-            <p className="text-xs text-slate-500">If this email already has a Firebase login, Create Account attaches it instead of failing.</p>
+            <p className="text-xs text-slate-500">If this email already has a login, type that account’s password. Create Account will attach it.</p>
             <div className="flex gap-3">
               <button type="submit" disabled={saving} className="btn-primary">
                 {saving ? 'Creating…' : 'Create Account'}

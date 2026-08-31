@@ -6,7 +6,7 @@ import crypto from 'node:crypto'
 let cachedToken = { value: '', exp: 0 }
 
 function serviceAccount() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT
   if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not configured.')
   const parsed = JSON.parse(raw)
   if (parsed.private_key) parsed.private_key = parsed.private_key.replace(/\\n/g, '\n')

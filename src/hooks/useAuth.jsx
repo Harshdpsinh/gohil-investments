@@ -12,6 +12,7 @@ import { initializeApp, getApp, getApps } from 'firebase/app'
 import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
 import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
+import { existingLoginPasswordError, shouldFallBackToClientProvision } from '../utils/provisionUser'
 
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
@@ -99,20 +100,23 @@ export function AuthProvider({ children }) {
     const safeRole = normaliseRole(requestedRole, '', import.meta.env.VITE_ADMIN_EMAILS) || 'staff'
     const idToken = await auth.currentUser?.getIdToken()
     if (idToken) {
-      const response = await fetch('/api/provision-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ email: cleanEmail, password, name: cleanName, role: safeRole }),
-      })
-      const body = await response.json().catch(() => null)
-      if (response.ok && body?.ok) return body
-      if (response.status !== 404) {
-        const error = new Error(body?.error || 'Could not create or attach that login.')
-        error.code = body?.code
-        throw error
+      try {
+        const response = await fetch('/api/provision-user', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({ email: cleanEmail, password, name: cleanName, role: safeRole }),
+        })
+        const body = await response.json().catch(() => null)
+        if (response.ok && body?.ok) return body
+        if (!shouldFallBackToClientProvision(response.ok, response.status)) {
+          throw new Error(body?.error || 'Could not create or attach that login.')
+        }
+      } catch (err) {
+        if (!shouldFallBackToClientProvision(false, err.status || 500)) throw err
+        // Missing Vercel service account, network, or 404 — create from the browser instead.
       }
     }
 
@@ -121,15 +125,25 @@ export function AuthProvider({ children }) {
       : initializeApp(firebaseConfig, 'staffAccountCreation')
     const secondaryAuth = getAuth(secondaryApp)
     try {
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
+      let cred
+      let attached = false
+      try {
+        cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
+      } catch (err) {
+        if (err.code !== 'auth/email-already-in-use') throw err
+        try {
+          cred = await signInWithEmailAndPassword(secondaryAuth, cleanEmail, password)
+        } catch (signErr) {
+          const hint = existingLoginPasswordError(signErr.code)
+          throw hint ? new Error(hint) : signErr
+        }
+        attached = true
+      }
       await secondaryAuth.signOut()
       await setUserRole(cred.user.uid, { email: cleanEmail, role: safeRole, name: cleanName })
-      return { uid: cred.user.uid, attached: false }
+      return { uid: cred.user.uid, attached }
     } catch (err) {
       await secondaryAuth.signOut().catch(() => {})
-      if (err.code === 'auth/email-already-in-use') {
-        throw new Error('This email already has a login. After deploy, Create Account will attach it. Until then sign in as admin on a computer and wait for the update, or use a new email.')
-      }
       throw err
     }
   }

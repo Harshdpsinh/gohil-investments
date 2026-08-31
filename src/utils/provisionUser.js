@@ -29,3 +29,16 @@ export function validateProvisionInput({ name, email, password, role } = {}, { p
 export function provisionProfileFields({ name, email, role }) {
   return { name, email, role }
 }
+
+export function existingLoginPasswordError(code) {
+  if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/invalid-login-credentials') {
+    return 'This email already has a login. Enter that account’s password, or use a different email.'
+  }
+  return ''
+}
+
+export function shouldFallBackToClientProvision(ok, status) {
+  if (ok) return false
+  if (status === 401 || status === 403) return false
+  return true
+}
