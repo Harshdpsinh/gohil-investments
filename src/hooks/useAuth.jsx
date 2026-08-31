@@ -16,11 +16,19 @@ import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
 
-function withTimeout(promise, ms = 5000) {
-  return Promise.race([
-    promise,
-    new Promise(resolve => setTimeout(() => resolve(null), ms))
-  ])
+async function fetchUserProfile(uid) {
+  // Mobile networks regularly miss a 5s window. Treat a timeout as "try
+  // again", never as "this login has no staff row".
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const profile = await getUserRole(uid)
+      if (profile) return profile
+    } catch (err) {
+      console.error('Role fetch error:', err)
+    }
+    await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)))
+  }
+  return null
 }
 
 export function AuthProvider({ children }) {
@@ -32,30 +40,22 @@ export function AuthProvider({ children }) {
     const unsub = onAuthStateChanged(auth, async u => {
       setUser(u)
       if (u) {
-        try {
-          const profile = await withTimeout(getUserRole(u.uid), 5000)
-          if (profile) {
-            setRole(normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null)
-          } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
-            const defaultRole = 'admin'
-            try {
-              await withTimeout(
-                setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || 'Admin' }),
-                3000
-              )
-            } catch (err) {
-              console.error('Failed to create owner profile:', err)
-            }
-            setRole(defaultRole)
-          } else {
-            // Signed in but not provisioned. Do NOT write a staff profile —
-            // Firestore rules reject it, and a client-side 'staff' role would
-            // show the CRM shell against empty data.
-            setRole(null)
+        const profile = await fetchUserProfile(u.uid)
+        if (profile) {
+          setRole(normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null)
+        } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
+          const defaultRole = 'admin'
+          try {
+            await setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || 'Admin' })
+          } catch (err) {
+            console.error('Failed to create owner profile:', err)
           }
-        } catch (err) {
-          console.error('Role fetch error:', err)
-          setRole(OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase()) ? 'admin' : null)
+          setRole(defaultRole)
+        } else {
+          // Signed in but not provisioned. Do NOT write a staff profile —
+          // Firestore rules reject it, and a client-side 'staff' role would
+          // show the CRM shell against empty data.
+          setRole(null)
         }
       } else {
         setRole(null)
@@ -97,26 +97,39 @@ export function AuthProvider({ children }) {
     if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
 
     const safeRole = normaliseRole(requestedRole, '', import.meta.env.VITE_ADMIN_EMAILS) || 'staff'
+    const idToken = await auth.currentUser?.getIdToken()
+    if (idToken) {
+      const response = await fetch('/api/provision-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ email: cleanEmail, password, name: cleanName, role: safeRole }),
+      })
+      const body = await response.json().catch(() => null)
+      if (response.ok && body?.ok) return body
+      if (response.status !== 404) {
+        const error = new Error(body?.error || 'Could not create or attach that login.')
+        error.code = body?.code
+        throw error
+      }
+    }
+
     const secondaryApp = getApps().some(app => app.name === 'staffAccountCreation')
       ? getApp('staffAccountCreation')
       : initializeApp(firebaseConfig, 'staffAccountCreation')
     const secondaryAuth = getAuth(secondaryApp)
-    const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
     try {
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password)
       await secondaryAuth.signOut()
-
-      let retries = 3
-      while (retries--) {
-        try {
-          await setUserRole(cred.user.uid, { email: cleanEmail, role: safeRole, name: cleanName })
-          return cred
-        } catch (e) {
-          if (retries === 0) throw e
-          await new Promise(r => setTimeout(r, 800))
-        }
-      }
+      await setUserRole(cred.user.uid, { email: cleanEmail, role: safeRole, name: cleanName })
+      return { uid: cred.user.uid, attached: false }
     } catch (err) {
       await secondaryAuth.signOut().catch(() => {})
+      if (err.code === 'auth/email-already-in-use') {
+        throw new Error('This email already has a login. After deploy, Create Account will attach it. Until then sign in as admin on a computer and wait for the update, or use a new email.')
+      }
       throw err
     }
   }
