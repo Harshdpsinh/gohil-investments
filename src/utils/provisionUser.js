@@ -42,3 +42,23 @@ export function shouldFallBackToClientProvision(ok, status) {
   if (status === 401 || status === 403) return false
   return true
 }
+
+export function parseStaffAttachInput({ email, name, role } = {}) {
+  const cleanEmail = String(email || '').trim().toLowerCase()
+  const cleanName = String(name || '').trim() || (cleanEmail.split('@')[0] || 'Staff')
+  const cleanRole = String(role || 'staff').trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('Enter a valid email address.')
+  }
+  if (!VALID_ROLES.includes(cleanRole)) {
+    throw new Error('Role must be admin, staff or reader.')
+  }
+  return { email: cleanEmail, name: cleanName, role: cleanRole }
+}
+
+export function staffWriteError(code, message = '') {
+  if (code === 'permission-denied') {
+    return 'Could not save that staff row. Sign in as harshdeepgohil@gmail.com, refresh, and try Create Account again.'
+  }
+  return message || 'Could not save that staff row.'
+}

@@ -9,7 +9,7 @@ import {
 import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
 import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
-import { shouldFallBackToClientProvision } from '../utils/provisionUser'
+import { staffWriteError } from '../utils/provisionUser'
 import { createOrLookupAuthUser } from '../utils/identityToolkitClient'
 
 const AuthContext = createContext(null)
@@ -96,9 +96,20 @@ export function AuthProvider({ children }) {
     if (String(password || '').length < 8) throw new Error('Password must be at least 8 characters.')
 
     const safeRole = normaliseRole(requestedRole, '', import.meta.env.VITE_ADMIN_EMAILS) || 'staff'
-    const idToken = await auth.currentUser?.getIdToken()
-    if (idToken) {
-      try {
+
+    // Client-first: Vercel does not have FIREBASE_SERVICE_ACCOUNT_JSON, so the
+    // API 500s. REST create/lookup does not touch the admin session.
+    const authUser = await createOrLookupAuthUser({
+      apiKey: firebaseConfig.apiKey,
+      email: cleanEmail,
+      password,
+    })
+    try {
+      await setUserRole(authUser.uid, { email: cleanEmail, role: safeRole, name: cleanName })
+      return { uid: authUser.uid, attached: !authUser.created }
+    } catch (err) {
+      const idToken = await auth.currentUser?.getIdToken()
+      if (idToken && err.code === 'permission-denied') {
         const response = await fetch('/api/provision-user', {
           method: 'POST',
           headers: {
@@ -109,29 +120,9 @@ export function AuthProvider({ children }) {
         })
         const body = await response.json().catch(() => null)
         if (response.ok && body?.ok) return body
-        if (!shouldFallBackToClientProvision(response.ok, response.status)) {
-          throw new Error(body?.error || 'Could not create or attach that login.')
-        }
-      } catch (err) {
-        if (!shouldFallBackToClientProvision(false, err.status || 500)) throw err
-        // Missing Vercel service account, network, or 404 — create from the browser instead.
       }
+      throw new Error(staffWriteError(err.code, err.message))
     }
-
-    const authUser = await createOrLookupAuthUser({
-      apiKey: firebaseConfig.apiKey,
-      email: cleanEmail,
-      password,
-    })
-    try {
-      await setUserRole(authUser.uid, { email: cleanEmail, role: safeRole, name: cleanName })
-    } catch (err) {
-      if (err.code === 'permission-denied') {
-        throw new Error('Could not save that staff row. Refresh, stay signed in as admin, and try Create Account again.')
-      }
-      throw err
-    }
-    return { uid: authUser.uid, attached: !authUser.created }
   }
 
   const isAdmin = role === 'admin'

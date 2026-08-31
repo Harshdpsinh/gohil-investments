@@ -1,0 +1,35 @@
+# Attaches an existing Firebase Auth email to users/{uid} using the
+# FIREBASE_SERVICE_ACCOUNT secret. Bypasses the browser so Create Account
+# 403s cannot block a tester login.
+name: Attach staff profile
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: Staff email already in Firebase Auth
+        required: true
+      name:
+        description: Display name
+        required: true
+      role:
+        description: admin, staff, or reader
+        required: true
+        default: reader
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Attach staff row
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          STAFF_EMAIL: ${{ inputs.email }}
+          STAFF_NAME: ${{ inputs.name }}
+          STAFF_ROLE: ${{ inputs.role }}
+        run: node ops/attach-staff.mjs
