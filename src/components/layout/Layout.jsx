@@ -7,6 +7,7 @@ import useAndroidBack from '../../hooks/useAndroidBack'
 import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
 import { NavLink } from 'react-router-dom'
+import CommissionBookBanner from '../commission/CommissionBookBanner'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -34,10 +35,8 @@ export default function Layout({ children }) {
     const onWheel = event => {
       const scroller = findScroller(event.target)
       if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
-
       const horizontalIntent = Math.abs(event.deltaX) > Math.abs(event.deltaY)
       if (!event.shiftKey && !horizontalIntent) return
-
       scroller.scrollLeft += horizontalIntent ? event.deltaX : event.deltaY
       event.preventDefault()
     }
@@ -47,7 +46,6 @@ export default function Layout({ children }) {
       if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return
       if (event.button !== undefined && event.button !== 0) return
       if (event.target.closest('button, a, input, select, textarea, [role="button"]')) return
-
       activeScroller = scroller
       startX = event.clientX
       startScrollLeft = scroller.scrollLeft
@@ -86,15 +84,12 @@ export default function Layout({ children }) {
     <div className="app-shell flex h-screen overflow-hidden text-slate-950 dark:text-slate-100">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <CommandPalette />
-      {/* Desktop sidebar */}
       <div className="hidden lg:flex lg:flex-shrink-0">
         <Sidebar />
       </div>
 
-      {/* Mobile sidebar */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-40 flex lg:hidden">
-          {/* UI-only verification: this keeps the original backdrop close action mapped to setSidebarOpen(false). */}
           <div className="fixed inset-0 bg-slate-950/60" onClick={() => setSidebarOpen(false)} />
           <div
             className="mobile-drawer open relative z-50 flex w-72 flex-col shadow-2xl"
@@ -111,7 +106,6 @@ export default function Layout({ children }) {
         </div>
       )}
 
-      {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between gap-2 px-2 lg:hidden">
           <button
@@ -136,7 +130,11 @@ export default function Layout({ children }) {
             if (btn) btn.classList.toggle('visible', e.target.scrollTop > 300)
           }}
         >
-          <div className="page-enter min-h-full" id="main-content" tabIndex="-1">{children}</div>
+          <div className="page-enter min-h-full" id="main-content" tabIndex="-1">
+            {/* CommissionBookBanner + ManualCommissionModal must exist in the same commit as this import. */}
+            <CommissionBookBanner />
+            {children}
+          </div>
           <button
             id="back-to-top"
             className="back-to-top"

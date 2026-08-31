@@ -21,7 +21,6 @@ describe('KNOWN_INSURERS', () => {
 })
 
 describe('insurerKey', () => {
-  // The exact complaint: one company entered several ways.
   it.each([
     ['HDFC ERGO', 'HDFC ERGO General Insurance'],
     ['HDFC ERGO', 'HDFC ERGO Motor'],
@@ -35,8 +34,6 @@ describe('insurerKey', () => {
     expect(sameInsurer(a, b)).toBe(true)
   })
 
-  // The trap. These share a parent brand but are separate insurers, and merging
-  // them would put life and health business under one name.
   it.each([
     ['Aditya Birla Health Insurance', 'Aditya Birla Sun Life Insurance'],
     ['HDFC ERGO General Insurance', 'HDFC Life Insurance'],
@@ -78,9 +75,6 @@ describe('canonicalInsurer', () => {
     expect(canonicalInsurer('Aditya Birla Sun Life')).toBe('Aditya Birla Sun Life Insurance')
   })
 
-  // Losing what the user typed is worse than showing a spelling we did not pick.
-  // Statements truncate. "ICIC" appeared as its own ₹53.8K company on the
-  // dashboard, separate from ICICI Lombard.
   it.each([
     ['Star Heal', 'Star Health and Allied Insurance'],
     ['Niva Bup', 'Niva Bupa Health Insurance'],
@@ -89,22 +83,21 @@ describe('canonicalInsurer', () => {
     expect(canonicalInsurer(input)).toBe(expected)
   })
 
-  // A prefix that fits two real companies must NOT be guessed: ICIC prefixes
-  // both ICICI Lombard (general) and ICICI Prudential (life).
-  it('leaves an ambiguous truncation alone rather than guessing', () => {
-    expect(canonicalInsurer('ICIC')).toBe('ICIC')
+  it('merges bare ICIC / ICICI with ICICI Lombard', () => {
+    expect(canonicalInsurer('ICIC')).toBe('ICICI Lombard General Insurance')
+    expect(canonicalInsurer('ICICI')).toBe('ICICI Lombard General Insurance')
+    expect(sameInsurer('ICIC', 'ICICI Lombard General Insurance')).toBe(true)
   })
 
-  // Under four characters is never prefix-matched, or a fragment would swallow
-  // whole families of companies.
+  it('maps a bare ICICI life policy to Prudential, not Lombard', () => {
+    expect(canonicalInsurer('ICIC', { policyType: 'Life' })).toBe('ICICI Prudential Life Insurance')
+    expect(canonicalInsurer('ICICI Prudential Life Insurance')).toBe('ICICI Prudential Life Insurance')
+  })
+
   it.each(['HDF', 'Tat', 'Nat'])('does not prefix-match the short fragment %s', value => {
     expect(canonicalInsurer(value)).toBe(value)
   })
 
-  // Not a prefix guess: stripping "General"/"Insurance" reduces the full name
-  // to the key `sbi`, so a bare "SBI" is an exact hit. SBI Life keeps its
-  // `life` token and stays separate. Where it matters, the Commission page
-  // prefers the matched policy's own spelling over the statement's anyway.
   it('reads a bare SBI as the general insurer, and keeps SBI Life apart', () => {
     expect(canonicalInsurer('SBI')).toBe('SBI General Insurance')
     expect(canonicalInsurer('SBI Life')).toBe('SBI Life Insurance')
@@ -130,7 +123,6 @@ describe('insurerOptions', () => {
     expect(options.filter(name => insurerKey(name) === insurerKey('HDFC ERGO'))).toHaveLength(1)
   })
 
-  // Showing our spelling would not match the records already on file.
   it('prefers the spelling already used in the book', () => {
     expect(insurerOptions(['HDFC ERGO'])).toContain('HDFC ERGO')
     expect(insurerOptions(['HDFC ERGO'])).not.toContain('HDFC ERGO General Insurance')
@@ -166,6 +158,13 @@ describe('duplicateInsurers', () => {
     expect(star.variants).toEqual(['STAR HEALTH', 'Star Health', 'Star Health and Allied Insurance'])
   })
 
+  it('merges ICIC with ICICI Lombard as one company', () => {
+    const dupes = duplicateInsurers(['ICIC', 'ICICI Lombard General Insurance'])
+    expect(dupes).toHaveLength(1)
+    expect(dupes[0].canonical).toBe('ICICI Lombard General Insurance')
+    expect(dupes[0].variants).toEqual(['ICIC', 'ICICI Lombard General Insurance'])
+  })
+
   it('says nothing when every company is spelled one way', () => {
     expect(duplicateInsurers(['New India Assurance', 'LIC of India'])).toEqual([])
   })
@@ -176,9 +175,8 @@ describe('duplicateInsurers', () => {
 })
 
 describe('unrecognisedInsurers', () => {
-  it('flags a truncation too ambiguous to resolve', () => {
-    // The exact case from the dashboard: ICIC showed as its own ₹53.8K company.
-    expect(unrecognisedInsurers(['ICIC', 'ICICI Lombard General Insurance'])).toEqual(['ICIC'])
+  it('no longer flags ICIC — that spelling is Lombard', () => {
+    expect(unrecognisedInsurers(['ICIC', 'ICICI Lombard General Insurance'])).toEqual([])
   })
 
   it('says nothing about names it resolved', () => {

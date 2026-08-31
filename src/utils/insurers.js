@@ -1,20 +1,7 @@
 // src/utils/insurers.js
-// The single list of insurance companies. There used to be three — one in
-// constants.js, one in policySchemas.js and one inline in RenewalsPage — and
-// they had drifted, which is why a company would appear in one dropdown and be
-// missing from another. Every consumer now reads this file.
-//
+// The single list of insurance companies. Every consumer now reads this file.
 // Pure — no firebase, no react.
 
-/**
- * IRDAI-registered insurers a Bhavnagar broker realistically places business
- * with. Names are the trading names, not the full legal names, because that is
- * what appears on a policy schedule and on a commission statement.
- *
- * This list does not need to be exhaustive or kept current: every insurer field
- * in the app is free-type, and any name typed in is kept verbatim and offered
- * back as an option afterwards. Add to it only to save typing.
- */
 export const LIFE_INSURERS = [
   'LIC of India',
   'HDFC Life Insurance',
@@ -86,16 +73,8 @@ export const GENERAL_INSURERS = [
 
 export const KNOWN_INSURERS = [...LIFE_INSURERS, ...HEALTH_INSURERS, ...GENERAL_INSURERS].sort((a, b) => a.localeCompare(b))
 
-// Words that describe the line of business or the legal form, not the company.
-// Stripping them is what collapses "HDFC ERGO", "HDFC ERGO General Insurance"
-// and "HDFC ERGO Motor" onto one key.
-//
-// 'life' and 'health' are deliberately NOT stripped: they are the only thing
-// separating Aditya Birla Health Insurance from Aditya Birla Sun Life, which
-// are different companies and must never be merged.
 const NOISE = /\b(insurance|assurance|company|limited|ltd|pvt|private|corporation|corp|general|motor|vehicle|and|the|of|co)\b/g
 
-/** Comparison key for a company name. Case, punctuation and noise words removed. */
 export function insurerKey(name) {
   return String(name ?? '')
     .toLowerCase()
@@ -105,10 +84,6 @@ export function insurerKey(name) {
     .replace(/\s+/g, '')
 }
 
-/**
- * Variants that stripping alone cannot reach — abbreviations, former names and
- * the shorthand people actually type.
- */
 const ALIASES = {
   starhealth: 'Star Health and Allied Insurance',
   star: 'Star Health and Allied Insurance',
@@ -118,8 +93,6 @@ const ALIASES = {
   religare: 'Care Health Insurance',
   carehealth: 'Care Health Insurance',
   cigna: 'ManipalCigna Health Insurance',
-  // Bare "Aditya Birla" is ambiguous, but Sun Life is always written with
-  // "Sun Life" on a schedule, so an unqualified one is the health arm.
   adityabirla: 'Aditya Birla Health Insurance',
   abhi: 'Aditya Birla Health Insurance',
   edelweisstokiolife: 'Edelweiss Life Insurance',
@@ -135,6 +108,8 @@ const ALIASES = {
   licindia: 'LIC of India',
   newindia: 'New India Assurance',
   unitedindia: 'United India Insurance',
+  icic: 'ICICI Lombard General Insurance',
+  icici: 'ICICI Lombard General Insurance',
   iciciloambard: 'ICICI Lombard General Insurance',
   icicilombard: 'ICICI Lombard General Insurance',
   iciciprudential: 'ICICI Prudential Life Insurance',
@@ -154,19 +129,6 @@ const CANONICAL_BY_KEY = new Map([
   ...Object.entries(ALIASES).map(([key, name]) => [key, name]),
 ])
 
-/**
- * The canonical spelling of a company name, or the name as typed when it is one
- * we do not know. Unknown names are never discarded — a broker will always meet
- * a company this file has not heard of, and losing what they typed is worse
- * than showing a spelling we did not choose.
- */
-/**
- * Statements truncate names — "ICIC" for ICICI, "Star Heal" for Star Health.
- * A prefix is accepted only when it matches exactly ONE known company, so
- * "ICIC" (which prefixes both ICICI Lombard and ICICI Prudential) is left
- * alone rather than being filed under a coin toss. Four characters minimum,
- * or "SBI" would swallow half the market.
- */
 function prefixMatch(key) {
   if (key.length < 4) return ''
   const hits = [...new Set(
@@ -177,43 +139,34 @@ function prefixMatch(key) {
   return hits.length === 1 ? hits[0] : ''
 }
 
-export function canonicalInsurer(name) {
+export function canonicalInsurer(name, hint = {}) {
   const text = String(name ?? '').trim()
   if (!text) return ''
   const key = insurerKey(text)
+  if (key === 'icic' || key === 'icici') {
+    const type = String(hint.policyType || '').trim().toLowerCase()
+    if (type === 'life') return 'ICICI Prudential Life Insurance'
+    return 'ICICI Lombard General Insurance'
+  }
   return CANONICAL_BY_KEY.get(key) || prefixMatch(key) || text
 }
 
-/**
- * The key everything groups by. Resolving the alias FIRST is load-bearing:
- * "Star Health" strips to `starhealth` and "Star Health and Allied Insurance"
- * to `starhealthallied`, so raw keys alone would leave them as two companies.
- */
-export function groupKey(name) {
-  return insurerKey(canonicalInsurer(name))
+export function groupKey(name, hint = {}) {
+  return insurerKey(canonicalInsurer(name, hint))
 }
 
-/** Do two names refer to the same company? */
-export function sameInsurer(a, b) {
-  const x = groupKey(a)
-  const y = groupKey(b)
+export function sameInsurer(a, b, hintA = {}, hintB = {}) {
+  const x = groupKey(a, hintA)
+  const y = groupKey(b, hintB)
   return Boolean(x && y) && x === y
 }
 
-/**
- * The dropdown list: the known companies plus every spelling already in the
- * book, collapsed so "HDFC ERGO" and "HDFC ERGO General Insurance" appear once.
- * A name already in use wins over our spelling of it, so the option matches
- * what the existing records actually say.
- */
 export function insurerOptions(existing = []) {
   const byKey = new Map()
   for (const name of existing) {
     const text = String(name ?? '').trim()
     if (!text) continue
     const key = groupKey(text)
-    // Verbatim, not canonicalised: offering our spelling would make every new
-    // record disagree with the ones already on file — a fresh duplicate.
     if (key && !byKey.has(key)) byKey.set(key, text)
   }
   for (const name of KNOWN_INSURERS) {
@@ -223,34 +176,18 @@ export function insurerOptions(existing = []) {
   return [...byKey.values()].sort((a, b) => a.localeCompare(b))
 }
 
-/**
- * Names we could not tie to any known company — typos, truncations too short or
- * too ambiguous to resolve ("ICIC"), and genuinely new insurers.
- *
- * Rather than guessing at each one, this lists them so a wrong spelling can be
- * corrected at the source. A real company that simply is not in KNOWN_INSURERS
- * will show up here too, which is fine: it is a prompt to look, not an error.
- */
 export function unrecognisedInsurers(names = []) {
   const seen = new Map()
   for (const name of names) {
     const text = String(name ?? '').trim()
     if (!text) continue
     const key = insurerKey(text)
-    // Ask the lookup directly. Testing whether canonicalInsurer echoed the
-    // input back does not work: a name that is already canonical also echoes,
-    // so every correctly-spelled company was being reported as unknown.
     if (!key || CANONICAL_BY_KEY.has(key) || prefixMatch(key)) continue
     if (!seen.has(key)) seen.set(key, text)
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b))
 }
 
-/**
- * Distinct spellings in the book that mean the same company, so the owner can
- * see what would merge before anything is rewritten. Reporting only — nothing
- * here changes stored data.
- */
 export function duplicateInsurers(existing = []) {
   const byKey = new Map()
   for (const name of existing) {
