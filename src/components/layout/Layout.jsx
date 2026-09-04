@@ -131,7 +131,7 @@ export default function Layout({ children }) {
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="mobile-topbar sticky top-0 z-[100] flex h-14 flex-shrink-0 items-center justify-between gap-2 px-2 lg:hidden">
+        <header className="mobile-topbar sticky top-0 z-[100] flex flex-shrink-0 items-center justify-between gap-2 px-2 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
             className="flex h-12 w-12 items-center justify-center rounded-xl text-slate-700 hover:bg-teal-50 hover:text-teal-800 dark:text-slate-300"

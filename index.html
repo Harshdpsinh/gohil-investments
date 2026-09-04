@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Gohil Investments - Insurance Portfolio Management" />
     <meta name="theme-color" content="#0f766e" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -18,18 +18,24 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="gi-boot" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f8fafc;font-family:Inter,sans-serif;padding:env(safe-area-inset-top,36px) 1.5rem env(safe-area-inset-bottom)">
+        <p style="margin:0;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#0f766e">Gohil Investments</p>
+        <p style="margin:10px 0 0;font-size:15px;color:#64748b">Opening your book…</p>
+      </div>
+    </div>
     <script>
       (function () {
         setTimeout(function () {
+          if (window.__GI_READY__) return
           var root = document.getElementById('root')
-          if (!root || root.childElementCount) return
+          if (!root) return
           root.innerHTML = '<div style="font-family:Inter,sans-serif;padding:2.5rem 1.5rem;text-align:center;color:#0f172a">' +
             '<p style="font-size:18px;font-weight:800">Gohil Investments did not open</p>' +
             '<p style="margin-top:8px;font-size:14px;color:#64748b">The phone app is waiting on the latest page. Tap retry. Your data is safe.</p>' +
             '<button onclick="location.reload()" style="margin-top:20px;padding:12px 20px;border:0;border-radius:10px;background:#0f766e;color:#fff;font-weight:700">Retry</button>' +
             '</div>'
-        }, 12000)
+        }, 20000)
       })()
     </script>
     <script type="module" src="/src/main.jsx"></script>

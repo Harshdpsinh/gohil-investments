@@ -4,16 +4,17 @@ import ReactDOM       from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster }    from 'react-hot-toast'
 import { Capacitor }  from '@capacitor/core'
-import '@fontsource/ibm-plex-sans/latin-400.css'
-import '@fontsource/ibm-plex-sans/latin-500.css'
-import '@fontsource/ibm-plex-sans/latin-600.css'
-import '@fontsource/ibm-plex-sans/latin-700.css'
 import App            from './App'
 import { AuthProvider } from './hooks/useAuth'
 import './styles/tokens.css'
 import './index.css'
 import './styles/animations.css'
 import './styles/workspace-free.css'
+
+if (Capacitor.isNativePlatform()) {
+  document.documentElement.classList.add('gi-native')
+}
+window.__GI_READY__ = true
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -26,7 +27,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           // toast lands on top of the app header on Android.
           containerStyle={
             Capacitor.isNativePlatform()
-              ? { top: 'calc(env(safe-area-inset-top) + 3.75rem)' }
+              ? { top: 'calc(max(env(safe-area-inset-top, 0px), 36px) + 3.75rem)' }
               : undefined
           }
           toastOptions={{

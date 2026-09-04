@@ -23,6 +23,7 @@ import RenewalPipelinePage   from './pages/RenewalPipelinePage'
 import CrossSellPage         from './pages/CrossSellPage'
 import WishesPage            from './pages/WishesPage'
 import PremiumCalendarPage   from './pages/PremiumCalendarPage'
+import BootScreen            from './components/ui/BootScreen'
 
 class RouteErrorBoundary extends Component {
   constructor(props) {
@@ -51,23 +52,8 @@ class RouteErrorBoundary extends Component {
 }
 
 function ProtectedRoute({ children }) {
-  const { user, role, loading, signOut } = useAuth()
-  if (loading) return (
-    <div className="flex h-screen items-center justify-center bg-slate-50">
-      <div className="w-80 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="skeleton-shimmer h-5 rounded-full" />
-        <div className="skeleton-shimmer mt-4 h-20 rounded-xl" />
-        <p className="mt-4 text-center text-sm font-semibold text-slate-500">Loading...</p>
-        <button
-          type="button"
-          className="btn-secondary mt-4 w-full"
-          onClick={() => window.location.reload()}
-        >
-          Retry
-        </button>
-      </div>
-    </div>
-  )
+  const { user, role, roleResolved, loading, signOut } = useAuth()
+  if (loading || user === undefined || (user && !role && !roleResolved)) return <BootScreen />
   if (!user) return <Navigate to="/login" replace />
   if (!role) return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">

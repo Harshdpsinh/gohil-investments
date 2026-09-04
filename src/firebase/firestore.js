@@ -230,7 +230,8 @@ export async function restoreCRMBackup(backup, onProgress = () => {}) {
 
 // ── USER ROLES ────────────────────────────────────────────────
 export async function getUserRole(uid) {
-  try { const s = await getDoc(doc(db,USERS,uid)); return s.exists() ? s.data() : null } catch { return null }
+  const s = await getDoc(doc(db, USERS, uid))
+  return s.exists() ? s.data() : null
 }
 
 export async function setUserRole(uid, data = {}) {

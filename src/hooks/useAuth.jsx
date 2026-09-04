@@ -11,6 +11,7 @@ import { getUserRole, setUserRole } from '../firebase/firestore'
 import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
 import { staffWriteError } from '../utils/provisionUser'
 import { createOrLookupAuthUser } from '../utils/identityToolkitClient'
+import { clearAuthSession, readAuthSession, writeAuthSession } from '../utils/authSession'
 
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
@@ -30,8 +31,7 @@ async function fetchUserProfile(uid) {
   // again", never as "this login has no staff row".
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const profile = await withTimeout(getUserRole(uid), 8000, 'role-timeout')
-      if (profile) return profile
+      return await withTimeout(getUserRole(uid), 8000, 'role-timeout')
     } catch (err) {
       console.error('Role fetch error:', err)
     }
@@ -44,44 +44,56 @@ export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(undefined)
   const [role,    setRole]    = useState(null)
   const [loading, setLoading] = useState(true)
+  const [roleResolved, setRoleResolved] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    let authFired = false
     const unsub = onAuthStateChanged(auth, async u => {
-      authFired = true
       if (cancelled) return
       setUser(u)
-      if (u) {
-        const profile = await fetchUserProfile(u.uid)
-        if (cancelled) return
-        if (profile) {
-          setRole(normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null)
-        } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
-          const defaultRole = 'admin'
-          try {
-            await setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || 'Admin' })
-          } catch (err) {
-            console.error('Failed to create owner profile:', err)
-          }
-          if (!cancelled) setRole(defaultRole)
-        } else {
-          // Signed in but not provisioned. Do NOT write a staff profile —
-          // Firestore rules reject it, and a client-side 'staff' role would
-          // show the CRM shell against empty data.
-          setRole(null)
-        }
-      } else {
+      if (!u) {
+        clearAuthSession()
         setRole(null)
+        setRoleResolved(true)
+        setLoading(false)
+        return
+      }
+      const cached = readAuthSession(u.uid)
+      if (cached?.role) {
+        setRole(cached.role)
+        setRoleResolved(true)
+        setLoading(false)
+      }
+      const profile = await fetchUserProfile(u.uid)
+      if (cancelled) return
+      if (profile) {
+        const nextRole = normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null
+        setRole(nextRole)
+        if (nextRole) writeAuthSession({ uid: u.uid, email: u.email, role: nextRole })
+        setRoleResolved(true)
+      } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
+        const defaultRole = 'admin'
+        try {
+          await setUserRole(u.uid, { email: u.email, role: defaultRole, name: u.email?.split('@')[0] || 'Admin' })
+        } catch (err) {
+          console.error('Failed to create owner profile:', err)
+        }
+        if (!cancelled) {
+          setRole(defaultRole)
+          writeAuthSession({ uid: u.uid, email: u.email, role: defaultRole })
+          setRoleResolved(true)
+        }
+      } else if (!cached?.role) {
+        // Signed in but not provisioned. Do NOT write a staff profile —
+        // Firestore rules reject it, and a client-side 'staff' role would
+        // show the CRM shell against empty data.
+        setRole(null)
+        setRoleResolved(true)
       }
       if (!cancelled) setLoading(false)
     })
-    const cap = setTimeout(() => {
-      if (!cancelled && !authFired) setLoading(false)
-    }, 15000)
     return () => {
       cancelled = true
-      clearTimeout(cap)
       unsub()
     }
   }, [])
@@ -92,6 +104,8 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     setRole(null)
+    setRoleResolved(true)
+    clearAuthSession()
     return fbSignOut(auth)
   }
 
@@ -152,7 +166,7 @@ export function AuthProvider({ children }) {
   const canWrite = isWriteRole(role)
 
   return (
-    <AuthContext.Provider value={{ user, role, isAdmin, isReader, canWrite, loading, signIn, signOut, resetPassword, createStaffAccount }}>
+    <AuthContext.Provider value={{ user, role, roleResolved, isAdmin, isReader, canWrite, loading, signIn, signOut, resetPassword, createStaffAccount }}>
       {children}
     </AuthContext.Provider>
   )
