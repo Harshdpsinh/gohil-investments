@@ -10,8 +10,8 @@
   },
   "plugins": {
     "SplashScreen": {
-      "launchShowDuration": 1200,
-      "backgroundColor": "#0f172a",
+      "launchShowDuration": 4000,
+      "backgroundColor": "#f8fafc",
       "showSpinner": false
     },
     "Keyboard": {

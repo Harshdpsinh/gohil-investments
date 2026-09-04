@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest'
+// @vitest-environment jsdom
+import { afterEach, describe, it, expect } from 'vitest'
 import {
+  HOME_BOOK_KEY,
   bookSnapshot,
   calendarMonth,
   displayPremiums,
   fyMonthTiles,
   isAutoWaOnPdfEnabled,
+  readHomeBookCache,
+  writeHomeBookCache,
 } from './opsSnapshot'
 
 const asOf = new Date(2026, 8, 4) // 4 Sep 2026
@@ -85,5 +89,42 @@ describe('calendarMonth', () => {
     expect(cal.days[4].booked).toBe(8000)
     expect(cal.days[10].due).toBe(3000)
     expect(cal.totals.booked).toBe(8000)
+  })
+})
+
+describe('home book cache', () => {
+  afterEach(() => window.localStorage.removeItem(HOME_BOOK_KEY))
+
+  it('round-trips yearly / month rupees without needing the live book', () => {
+    writeHomeBookCache({
+      fy: { label: 'FY 2026-27' },
+      month: { label: 'Sep 2026' },
+      yearlyPremium: 15000,
+      yearlyCount: 2,
+      monthPremium: 5000,
+      monthCount: 1,
+      monthRenewalPremium: 5000,
+      monthRenewalCount: 1,
+      lastUpdated: new Date('2026-09-04T06:00:00.000Z'),
+    })
+    expect(readHomeBookCache()).toEqual({
+      fy: { label: 'FY 2026-27' },
+      month: { label: 'Sep 2026' },
+      yearlyPremium: 15000,
+      yearlyCount: 2,
+      monthPremium: 5000,
+      monthCount: 1,
+      monthRenewalPremium: 5000,
+      monthRenewalCount: 1,
+      lastUpdated: '2026-09-04T06:00:00.000Z',
+    })
+  })
+
+  it('returns null for missing, invalid, or incomplete cache', () => {
+    expect(readHomeBookCache()).toBeNull()
+    window.localStorage.setItem(HOME_BOOK_KEY, '{')
+    expect(readHomeBookCache()).toBeNull()
+    writeHomeBookCache({ yearlyPremium: 'nope' })
+    expect(readHomeBookCache()).toBeNull()
   })
 })
