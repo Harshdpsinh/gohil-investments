@@ -20,6 +20,8 @@ import WhatsAppInboxPage     from './pages/WhatsAppInboxPage'
 import InstallmentsPage      from './pages/InstallmentsPage'
 import RenewalPipelinePage   from './pages/RenewalPipelinePage'
 import CrossSellPage         from './pages/CrossSellPage'
+import WishesPage            from './pages/WishesPage'
+import PremiumCalendarPage   from './pages/PremiumCalendarPage'
 
 function ProtectedRoute({ children }) {
   const { user, role, loading, signOut } = useAuth()
@@ -79,6 +81,8 @@ export default function App() {
                 <Route path="/commission"          element={<CommissionPage />} />
                 <Route path="/claims"              element={<ClaimsPage />} />
                 <Route path="/reports"             element={<ReportsPage />} />
+                <Route path="/wishes"              element={<WishesPage />} />
+                <Route path="/calendar"            element={<PremiumCalendarPage />} />
                 <Route path="/admin-users"         element={<AdminUsersPage />} />
                 <Route path="/backup"              element={<BackupPage />} />
                 <Route path="*"                    element={<Navigate to="/dashboard" replace />} />

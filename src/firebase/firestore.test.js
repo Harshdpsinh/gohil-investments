@@ -135,6 +135,16 @@ describe('normalisePolicyPayload', () => {
       expect(() => normalisePolicyPayload({ ...validPolicy(), premium: 'lots' }))
         .toThrow(/Premium must be between/)
     })
+
+    it('keeps optional gross and OD only when they are valid numbers', () => {
+      const result = normalisePolicyPayload({ ...validPolicy(), grossPremium: 12500, odPremium: 8000 })
+      expect(result.grossPremium).toBe(12500)
+      expect(result.odPremium).toBe(8000)
+    })
+
+    it('allows blank optional gross so old rows do not need a backfill', () => {
+      expect(() => normalisePolicyPayload({ ...validPolicy(), grossPremium: '' })).not.toThrow()
+    })
   })
 
   describe('coverage term', () => {

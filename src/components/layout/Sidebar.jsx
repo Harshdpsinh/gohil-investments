@@ -22,6 +22,8 @@ export default function Sidebar({ mobile, onClose }) {
     { to:'/claims',     icon:'claims', label:'Claims'      },
     { to:'/proposals',  icon:'proposals', label:'Proposals'   },
     { to:'/business',   icon:'work', label:'Business Done' },
+    { to:'/wishes',     icon:'sparkles', label:'Wishes' },
+    { to:'/calendar',   icon:'clock', label:'Premium calendar' },
     { to:'/inbox',      icon:'message', label:'WhatsApp Inbox' },
     ...((isAdmin || isReader) ? [
       { to:'/commission',  icon:'commission', label:'Commission'  },

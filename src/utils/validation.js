@@ -97,9 +97,13 @@ export function normalisePolicyPayload(data, { partial = false } = {}) {
   assertOptionalNumber(next.sumInsured, 'Sum insured')
   assertOptionalNumber(next.sumAssured, 'Sum assured')
   assertOptionalNumber(next.idv, 'IDV')
+  assertOptionalNumber(next.grossPremium, 'Gross premium')
+  assertOptionalNumber(next.odPremium, 'OD premium')
+  assertOptionalNumber(next.discountPct, 'Discount %', { min: 0, max: 100 })
   assertOptionalDate(next.startDate, 'Start date')
   assertOptionalDate(next.expiryDate, 'Expiry date')
   assertOptionalDate(next.nextPremiumDue, 'Premium due date')
+  assertOptionalDate(next.loginDate, 'Login date')
 
   ;['planName', 'nominee', 'nomineeRelation', 'registrationNo', 'notes'].forEach(field => {
     if (next[field] !== undefined && next[field] !== null) next[field] = String(next[field]).trim()
