@@ -19,6 +19,19 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        setTimeout(function () {
+          var root = document.getElementById('root')
+          if (!root || root.childElementCount) return
+          root.innerHTML = '<div style="font-family:Inter,sans-serif;padding:2.5rem 1.5rem;text-align:center;color:#0f172a">' +
+            '<p style="font-size:18px;font-weight:800">Gohil Investments did not open</p>' +
+            '<p style="margin-top:8px;font-size:14px;color:#64748b">The phone app is waiting on the latest page. Tap retry. Your data is safe.</p>' +
+            '<button onclick="location.reload()" style="margin-top:20px;padding:12px 20px;border:0;border-radius:10px;background:#0f766e;color:#fff;font-weight:700">Retry</button>' +
+            '</div>'
+        }, 12000)
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

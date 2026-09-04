@@ -126,7 +126,15 @@ export default function DashboardPage() {
     }
   }, [clients])
 
-  const book = useMemo(() => bookSnapshot(policies, now), [policies])
+  const EMPTY_BOOK = { fy: { label: 'This FY' }, month: { label: 'This month' }, yearlyPremium: 0, yearlyCount: 0, monthPremium: 0, monthCount: 0, monthRenewalPremium: 0, monthRenewalCount: 0, lastUpdated: null }
+
+  const book = useMemo(() => {
+    try { return bookSnapshot(policies || [], now) }
+    catch (err) {
+      console.error('Home rupee snapshot failed:', err)
+      return EMPTY_BOOK
+    }
+  }, [policies])
 
   const stats = useMemo(() => {
     const active = policies.filter(isActivePolicy)
@@ -169,10 +177,26 @@ export default function DashboardPage() {
     [policies]
   )
 
-  if (loading) return <div className="p-8 text-gray-400">Loading dashboard...</div>
-
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
   const typeColors = ['#2563eb', '#06b6d4', '#f59e0b', '#10b981', '#8b5cf6', '#64748b']
+
+  if (loading) {
+    return (
+      <div className="fintech-page space-y-4 sm:space-y-5">
+        <div className="fintech-header border-b border-slate-200 pb-4 dark:border-slate-800">
+          <div>
+            <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
+            <h1 className="fintech-title">{greeting}, Harshdip</h1>
+            <p className="fintech-subtitle">Opening your book…</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => <div key={i} className="commission-skeleton h-24 rounded-xl" />)}
+        </div>
+        <button type="button" className="btn-secondary text-xs" onClick={() => window.location.reload()}>Retry</button>
+      </div>
+    )
+  }
 
   return (
     <div className="fintech-page space-y-4 sm:space-y-5">

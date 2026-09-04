@@ -77,11 +77,11 @@ export const daysUntil = (val) => {
 
 export const fmtCurrency = (val) => {
   const n = parseFloat(val || 0)
-  if (isNaN(n)) return '₹0'
+  if (isNaN(n) || n === 0) return '₹0'
   if (n >= 10000000) return `₹${(n / 10000000).toFixed(2)} Cr`
   if (n >= 100000)   return `₹${(n / 100000).toFixed(2)} L`
   if (n >= 1000)     return `₹${(n / 1000).toFixed(1)} K`
-  return `₹${n.toLocaleString('en-IN')}`
+  return `₹${Math.round(n)}`
 }
 
 export const renewalStatus = (val) => {

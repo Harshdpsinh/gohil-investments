@@ -11,6 +11,7 @@ import {
   summariseBusiness,
 } from './businessDone'
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const money = value => Number(value) || 0
 
 function lastUpdatedAt(policies = []) {
@@ -54,7 +55,7 @@ export function fyMonthTiles(policies = [], asOf = new Date()) {
     const row = byKey[key] || { count: 0, premium: 0, renewalPremium: 0, freshPremium: 0 }
     tiles.push({
       key,
-      label: date.toLocaleString('en-IN', { month: 'short' }),
+      label: MONTHS_SHORT[date.getMonth()],
       yearShort: String(date.getFullYear()).slice(-2),
       from: `${key}-01`,
       to: iso(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
