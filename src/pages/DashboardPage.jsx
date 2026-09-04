@@ -9,10 +9,11 @@ import {
 import { Bar, Doughnut } from 'react-chartjs-2'
 import { useClients } from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
-import { fmtCurrency, fmtDate, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
+import { fmtCurrency, fmtDate, fmtDateTime, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { openWhatsAppLink } from '../services/whatsappService'
+import { bookSnapshot, isAutoWaOnPdfEnabled, setAutoWaOnPdfEnabled } from '../utils/opsSnapshot'
 import AppIcon from '../components/ui/AppIcon'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
@@ -52,6 +53,21 @@ function StatCard({ icon, label, value, color = 'blue', onClick, badge }) {
   )
 }
 
+function RupeeCard({ label, amount, count, note, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="stat-card w-full cursor-pointer text-left">
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+        <p className="mt-1 truncate text-xl font-extrabold text-slate-950 dark:text-white">{fmtCurrency(amount)}</p>
+        <p className="mt-1 text-[11px] text-slate-500">
+          {count} polic{count === 1 ? 'y' : 'ies'}
+          {note ? ` · ${note}` : ''}
+        </p>
+      </div>
+    </button>
+  )
+}
+
 const CHART_OPTS = {
   responsive: true,
   maintainAspectRatio: false,
@@ -69,11 +85,19 @@ const DOUGHNUT_OPTS = {
   cutout: '65%',
 }
 
+const HOME_TILES = [
+  { to: '/renewals', icon: 'renewals', label: 'Renewals', hint: 'Due this month' },
+  { to: '/business', icon: 'work', label: 'Business', hint: 'Written this FY' },
+  { to: '/reports', icon: 'reports', label: 'Reports', hint: 'Company · product' },
+  { to: '/wishes', icon: 'sparkles', label: 'Wishes', hint: 'Birthdays · anniversaries' },
+]
+
 export default function DashboardPage() {
   const { clients } = useClients()
   const { policies, loading } = usePolicies()
   const navigate = useNavigate()
   const [claims, setClaims] = useState([])
+  const [autoWaPdf, setAutoWaPdf] = useState(() => isAutoWaOnPdfEnabled())
   const now = new Date()
   const today = startOfDay(now)
 
@@ -101,6 +125,8 @@ export default function DashboardPage() {
       toast.error(err.message || 'Could not open WhatsApp.')
     }
   }, [clients])
+
+  const book = useMemo(() => bookSnapshot(policies, now), [policies])
 
   const stats = useMemo(() => {
     const active = policies.filter(isActivePolicy)
@@ -154,7 +180,10 @@ export default function DashboardPage() {
         <div>
           <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
           <h1 className="fintech-title">{greeting}, Harshdip</h1>
-          <p className="fintech-subtitle">{fmtDate(now)} · Portfolio operations overview</p>
+          <p className="fintech-subtitle">
+            {fmtDate(now)} · Portfolio operations overview
+            {book.lastUpdated ? ` · Last updated ${fmtDateTime(book.lastUpdated)}` : ''}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
@@ -163,6 +192,53 @@ export default function DashboardPage() {
           <button onClick={() => navigate('/installments')} className="btn-secondary">Installments</button>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <RupeeCard
+          label={`Yearly · ${book.fy.label}`}
+          amount={book.yearlyPremium}
+          count={book.yearlyCount}
+          onClick={() => navigate('/business')}
+        />
+        <RupeeCard
+          label={`This month · ${book.month.label}`}
+          amount={book.monthPremium}
+          count={book.monthCount}
+          onClick={() => navigate('/business')}
+        />
+        <RupeeCard
+          label="This month renewal"
+          amount={book.monthRenewalPremium}
+          count={book.monthRenewalCount}
+          note="of month written"
+          onClick={() => navigate('/business')}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {HOME_TILES.map(tile => (
+          <button
+            key={tile.to}
+            type="button"
+            onClick={() => navigate(tile.to)}
+            className="flex min-h-[88px] flex-col items-start gap-2 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm dark:border-slate-700 dark:bg-slate-900"
+          >
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-50 text-teal-800 dark:bg-teal-950/50 dark:text-teal-200">
+              <AppIcon name={tile.icon} size={18} />
+            </span>
+            <span className="text-sm font-extrabold text-slate-950 dark:text-white">{tile.label}</span>
+            <span className="text-[11px] text-slate-500">{tile.hint}</span>
+          </button>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => navigate('/calendar')}
+        className="text-left text-xs font-semibold text-teal-800 hover:underline dark:text-teal-300"
+      >
+        Premium calendar — booked vs due this month
+      </button>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard icon="clients" label="Clients" value={stats.clients} onClick={() => navigate('/clients')} />
@@ -175,7 +251,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="stat-card"><div><p className="text-xl font-bold">{fmtCurrency(stats.totalPremium)}</p><p className="text-xs text-gray-500">Premium Under Management</p></div></div>
         {stats.birthdays.length > 0 && (
-          <button className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-4 text-left" onClick={() => navigate('/clients')}>
+          <button className="bg-pink-50 dark:bg-pink-900/20 border border-pink-200 dark:border-pink-800 rounded-xl p-4 text-left" onClick={() => navigate('/wishes')}>
             <p className="text-sm font-bold text-pink-700 dark:text-pink-300">Birthdays This Week</p>
             <p className="text-xs text-pink-600 dark:text-pink-400 mt-1">{stats.birthdays.slice(0, 3).map(c => c.name).join(', ')}</p>
           </button>
@@ -187,6 +263,22 @@ export default function DashboardPage() {
           </button>
         )}
       </div>
+
+      <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-900">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={autoWaPdf}
+          onChange={event => {
+            setAutoWaOnPdfEnabled(event.target.checked)
+            setAutoWaPdf(event.target.checked)
+          }}
+        />
+        <span>
+          <span className="font-bold text-slate-800 dark:text-slate-100">WhatsApp the PDF after upload</span>
+          <span className="mt-0.5 block text-xs text-slate-500">Off by default. When on, uploading a policy PDF also opens WhatsApp with the document link. Does not send by itself.</span>
+        </span>
+      </label>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">

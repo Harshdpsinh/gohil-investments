@@ -21,8 +21,10 @@ import {
   yearOnYear,
 } from '../utils/businessDone'
 import { duplicateInsurers } from '../utils/insurers'
+import { fyMonthTiles } from '../utils/opsSnapshot'
 import PageHeader from '../components/ui/PageHeader'
 import EmptyState from '../components/ui/EmptyState'
+import MonthTiles from '../components/crm/MonthTiles'
 import toast from 'react-hot-toast'
 
 const VIEWS = [
@@ -85,6 +87,10 @@ export default function BusinessDonePage() {
     [policies, range, view]
   )
   const periodPolicies = useMemo(() => policiesInPeriod(policies, range), [policies, range])
+  const fyTiles = useMemo(() => fyMonthTiles(policies), [policies])
+  const selectedMonthKey = custom.from && custom.to && custom.from.slice(0, 7) === custom.to.slice(0, 7)
+    ? custom.from.slice(0, 7)
+    : ''
   // Whole book, not just this period — a spelling that needs fixing is worth
   // knowing about whenever it was entered.
   const dupes = useMemo(() => duplicateInsurers(policies.map(p => p.insurer)), [policies])
@@ -181,6 +187,21 @@ export default function BusinessDonePage() {
             <button className="font-bold text-blue-600 dark:text-blue-400" onClick={() => setCustom({ from: '', to: '' })}>Clear</button>
           )}
         </div>
+      </div>
+
+      <div className="fintech-panel space-y-3 p-4 sm:p-5">
+        <div>
+          <p className="text-sm font-extrabold text-gray-950 dark:text-white">This FY by month</p>
+          <p className="text-xs text-gray-600 dark:text-gray-300">
+            Same start-date count as the numbers above. Tap a month to filter. Empty months stay ₹0.
+          </p>
+        </div>
+        <MonthTiles
+          tiles={fyTiles.tiles}
+          maxPremium={fyTiles.maxPremium}
+          selectedKey={selectedMonthKey}
+          onSelect={tile => { setCustom({ from: tile.from, to: tile.to }); setPreset('This FY') }}
+        />
       </div>
 
       {/* Headline numbers */}

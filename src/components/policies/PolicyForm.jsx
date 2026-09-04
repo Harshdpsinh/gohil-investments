@@ -210,6 +210,8 @@ function MotorSection({ form, set }) {
           <select value={form.ncbPct||'0'} onChange={e=>set('ncbPct',e.target.value)} className="form-select">
             {MOTOR_NCB_OPTIONS.map(n=><option key={n}>{n}</option>)}
           </select></div>
+        <div><label className="form-label">Discount % — optional</label>
+          <input type="number" step="0.01" value={form.discountPct||''} onChange={e=>set('discountPct',e.target.value)} className="form-input" placeholder="Leave blank if none" /></div>
       </div>
       {form.coverType !== 'Third Party' && (
         <div>
@@ -272,7 +274,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     // Fix #10: convert any Firestore Timestamps to yyyy-MM-dd strings for date inputs
     const fixDates = (obj) => {
       const fixed = { ...obj }
-      const dateFields = ['startDate','expiryDate','nextPremiumDue','maturityDate','tpExpiry','dateOfFirstEntry','dob']
+      const dateFields = ['startDate','expiryDate','nextPremiumDue','maturityDate','tpExpiry','dateOfFirstEntry','dob','loginDate']
       dateFields.forEach(f => { if (fixed[f]) fixed[f] = toInputDate(fixed[f]) || fixed[f] })
       return fixed
     }
@@ -536,6 +538,8 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           </div>
           {inp('planName','Plan Name')}
           {inp('premium','Annual Premium (₹)','number')}
+          {inp('grossPremium','Gross Premium (₹) — optional','number')}
+          {inp('odPremium','OD Premium (₹) — optional','number')}
           {/* sumAssured only for non-Health/Motor (they have their own) */}
           {!['Health','Life','Motor'].includes(form.policyType) && inp('sumAssured','Sum Insured/Assured (₹)','number')}
           <div>
@@ -567,6 +571,10 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           <div>
             <label className="form-label">Start Date</label>
             <DateInput value={form.startDate||''} onChange={setStartDateAndDue} className="form-input" />
+          </div>
+          <div>
+            <label className="form-label">Login Date — optional</label>
+            <DateInput value={form.loginDate||''} onChange={v=>set('loginDate',v)} className="form-input" />
           </div>
           <div>
             <label className="form-label">Policy End / Expiry Date *</label>
@@ -623,6 +631,11 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           existingPublicId={pdfMeta.publicId}
           existingResourceType={pdfMeta.resourceType}
           existingDeleteToken={pdfMeta.deleteToken}
+          clientMobile={form._clientMobile || form.clientMobile || ''}
+          clientName={form.clientName || ''}
+          policyNumber={form.policyNumber || ''}
+          insurer={form.insurer || ''}
+          premium={form.premium || ''}
           onUploaded={(u,n,meta)=>{setPdfUrl(u);setPdfName(n);setPdfMeta({
             documentYear: meta?.documentYear || policyDocumentYear(form),
             storagePath: meta?.storagePath || '',

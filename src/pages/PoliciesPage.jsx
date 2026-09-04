@@ -26,6 +26,7 @@ import toast from 'react-hot-toast'
 import ImportModal from '../components/policies/ImportModals'
 import PolicyForm from '../components/policies/PolicyForm'
 import PolicyPdfUpload from '../components/policies/PolicyPdfUpload'
+import PolicyShareBar from '../components/policies/PolicyShareBar'
 import PdfExtractReview from '../components/policies/PdfExtractReview'
 
 
@@ -638,20 +639,21 @@ export default function PoliciesPage() {
               <p className="gi-policy-card-number">{p.policyNumber || 'No policy number'}</p>
               <div className="gi-policy-card-meta">
                 <span>{p.insurer || 'No insurer'}</span>
-                <strong>{fmtCurrency(p.premium)}</strong>
                 <span>Due {fmtDate(dueDate)}</span>
                 {phone && <span>{phone}</span>}
               </div>
               {isDup && <span className="badge-orange">Possible duplicate</span>}
+              <PolicyShareBar policy={p} mobile={phone} onWhatsApp={() => openWhatsApp(p)} />
               <div className="gi-policy-card-actions">
                 <button type="button" onClick={() => { setSelected(p); setDupWarning(''); setModal('edit') }} className="btn-secondary">Edit</button>
-                <button type="button" onClick={() => openWhatsApp(p)} className="btn-whatsapp">WhatsApp</button>
                 <PolicyPdfUpload
                   compact policyId={p.id} policyType={p.policyType} documentYear={policyDocumentYear(p)}
                   existingUrl={p.policyPdfUrl} existingName={p.policyPdfName}
                   existingStoragePath={p.policyPdfStoragePath} existingStorageBucket={p.policyPdfStorageBucket}
                   existingStorageProvider={p.policyPdfStorageProvider} existingPublicId={p.policyPdfPublicId}
                   existingResourceType={p.policyPdfResourceType} existingDeleteToken={p.policyPdfDeleteToken}
+                  clientMobile={phone} clientName={p.clientName} policyNumber={p.policyNumber}
+                  insurer={p.insurer} premium={p.premium}
                 />
                 {isAdmin && <button type="button" onClick={() => { setSelected(p); setDelOpen(true) }} className="btn-danger">Delete</button>}
               </div>
@@ -733,6 +735,15 @@ export default function PoliciesPage() {
                     </td>
                     <td className="table-cell text-center">
                       <div className="relative inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs"
+                          disabled={!phone}
+                          onClick={() => {
+                            if (!phone) { toast.error('No mobile number on file for this client'); return }
+                            window.location.href = `tel:${String(phone).replace(/\D/g, '')}`
+                          }}
+                        >Call</button>
                         <button onClick={()=>openWhatsApp(p)} className="btn-whatsapp">📱 WA</button>
                         <button
                           type="button"
@@ -768,6 +779,11 @@ export default function PoliciesPage() {
                         existingPublicId={p.policyPdfPublicId}
                         existingResourceType={p.policyPdfResourceType}
                         existingDeleteToken={p.policyPdfDeleteToken}
+                        clientMobile={phone}
+                        clientName={p.clientName}
+                        policyNumber={p.policyNumber}
+                        insurer={p.insurer}
+                        premium={p.premium}
                       />
                     </td>
 

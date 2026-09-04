@@ -12,6 +12,7 @@ import { openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
 import ClientTimeline from '../components/clients/ClientTimeline'
+import PolicyShareBar from '../components/policies/PolicyShareBar'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -304,7 +305,7 @@ export default function ClientProfilePage() {
             <div className="table-container">
               <table className="min-w-full">
                 <thead><tr>
-                  {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status'].map(h => (
+                  {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status', 'Share'].map(h => (
                     <th key={h} className="table-header">{h}</th>
                   ))}
                 </tr></thead>
@@ -326,6 +327,29 @@ export default function ClientProfilePage() {
                         <td className="table-cell text-xs">{fmtDate(p.expiryDate)}</td>
                         <td className="table-cell text-xs">{daysUntil(dueDate || p.expiryDate) !== null ? `${daysUntil(dueDate || p.expiryDate)}d` : '—'}</td>
                         <td className="table-cell"><span className={history.cls}>{history.label}</span></td>
+                        <td className="table-cell">
+                          <PolicyShareBar
+                            policy={p}
+                            mobile={client?.mobile}
+                            onWhatsApp={() => {
+                              if (!client?.mobile) {
+                                toast.error('No mobile number found for this client. Add it in Clients page.')
+                                return
+                              }
+                              try {
+                                openWhatsAppLink({
+                                  mobile: client.mobile,
+                                  message:
+                                    `Dear ${client.name},\n\n` +
+                                    `Regarding your ${p.policyType || 'insurance'} policy ${p.policyNumber || ''}.\n\n` +
+                                    `Gohil Investments\nHarshdipsinh Gohil - 7698997894\nPradipsinh Gohil - 9426204547\nBhavnagar, Gujarat`,
+                                })
+                              } catch (err) {
+                                toast.error(err.message || 'Could not open WhatsApp.')
+                              }
+                            }}
+                          />
+                        </td>
                       </tr>
                     )
                   })}

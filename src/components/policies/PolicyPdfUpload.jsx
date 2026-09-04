@@ -6,6 +6,8 @@ import toast from 'react-hot-toast'
 import { savePolicyPdfUrl } from '../../firebase/firestore'
 import { isLifePolicyType } from '../../utils/policyImport'
 import { deletePolicyPdfAsset, downloadDocumentFile, openDocumentPreview, uploadPolicyPdf } from '../../firebase/storage'
+import { isAutoWaOnPdfEnabled, policyCopyMessage } from '../../utils/opsSnapshot'
+import { openWhatsAppLink } from '../../services/whatsappService'
 
 // ── Policy PDF Upload ─────────────────────────────────────────
 function PolicyPdfUpload({
@@ -22,11 +24,39 @@ function PolicyPdfUpload({
   existingDeleteToken = '',
   onUploaded = () => {},
   compact = false,
+  clientMobile = '',
+  clientName = '',
+  policyNumber = '',
+  insurer = '',
+  premium = '',
 }) {
   const fileRef = useRef()
   const [progress, setProgress]   = useState(null)
   const [uploading, setUploading] = useState(false)
   const canDeleteOldPdf = !isLifePolicyType(policyType)
+
+  const maybeOpenWhatsApp = url => {
+    if (!isAutoWaOnPdfEnabled()) return
+    const mobile = String(clientMobile || '').replace(/\D/g, '')
+    if (!mobile) {
+      toast.error('PDF saved. WhatsApp skipped — no mobile number on this client.')
+      return
+    }
+    try {
+      openWhatsAppLink({
+        mobile: clientMobile,
+        message: policyCopyMessage({
+          clientName,
+          policyType,
+          policyNumber,
+          insurer,
+          premium,
+        }, url),
+      })
+    } catch (err) {
+      toast.error(err.message || 'PDF saved, but WhatsApp did not open.')
+    }
+  }
 
   const onFileChange = async e => {
     const file = e.target.files[0]
@@ -57,6 +87,7 @@ function PolicyPdfUpload({
       await savePolicyPdfUrl(policyId, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, uploaded)
       toast.success(existingUrl && canDeleteOldPdf ? 'PDF replaced and old file deleted' : 'PDF uploaded')
       onUploaded(uploaded.url, uploaded.name, uploaded)
+      maybeOpenWhatsApp(uploaded.url)
     } catch(err) {
       const message = err?.code === 'storage/unauthorized'
         ? 'PDF upload blocked by Firebase Storage rules. Deploy storage.rules, then try again.'
@@ -133,6 +164,9 @@ function PolicyPdfUpload({
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFileChange} disabled={uploading} className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" />
         {uploading ? `Uploading ${progress || 0}%` : existingUrl ? 'Replace PDF' : 'Choose PDF'}
       </label>
+      <p className="text-[11px] text-indigo-700">
+        After upload, WhatsApp opens only if you turned that on from Home. It stays off unless you switch it on.
+      </p>
       {uploading && (
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-indigo-600"><span>Uploading...</span><span>{progress}%</span></div>

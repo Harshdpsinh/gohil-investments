@@ -6,14 +6,50 @@ import DateInput from '../components/ui/DateInput'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, parseAnyDate } from '../utils/dateUtils'
 import { subscribeClaims } from '../firebase/firestore'
+import AppIcon from '../components/ui/AppIcon'
 
 const reportTypes = [
+  'Company',
+  'Product',
   'Business',
   'Renewals',
   'Claims',
   'Clients',
   'Cross Sell',
 ]
+
+const REPORT_TILES = [
+  { name: 'Company', icon: 'insurer', hint: 'By insurer' },
+  { name: 'Product', icon: 'policies', hint: 'By policy type' },
+  { name: 'Business', icon: 'work', hint: 'Written policies' },
+  { name: 'Renewals', icon: 'renewals', hint: 'Due list' },
+  { name: 'Claims', icon: 'claims', hint: 'Claim board' },
+]
+
+function groupReportRows(policies, keyFn, type) {
+  const map = new Map()
+  policies.forEach(policy => {
+    const key = keyFn(policy) || 'Unknown'
+    const current = map.get(key) || {
+      type,
+      date: policy.startDate,
+      client: '',
+      policyNumber: '',
+      insurer: type === 'Company' ? key : '',
+      product: type === 'Product' ? key : '',
+      status: 'Active',
+      amount: 0,
+      detail: '0 policies',
+      count: 0,
+    }
+    current.amount += Number(policy.premium || 0)
+    current.count += 1
+    current.detail = `${current.count} polic${current.count === 1 ? 'y' : 'ies'}`
+    if (!current.date || String(policy.startDate || '') > String(current.date || '')) current.date = policy.startDate
+    map.set(key, current)
+  })
+  return [...map.values()].sort((a, b) => b.amount - a.amount)
+}
 
 function isBetween(dateValue, from, to) {
   const d = parseAnyDate(dateValue)
@@ -45,6 +81,8 @@ export default function ReportsPage() {
     const clientMap = Object.fromEntries(clients.map(c => [c.id, c]))
 
     const baseRows = {
+      Company: groupReportRows(activePolicies, p => p.insurer, 'Company'),
+      Product: groupReportRows(activePolicies, p => p.policyType, 'Product'),
       Business: activePolicies.map(p => ({
         type: 'Business',
         date: p.startDate,
@@ -135,13 +173,34 @@ export default function ReportsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dynamic Reports</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Business, renewal, claim, client, and cross-sell views.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Tap a tile to switch the table. Clients and cross-sell stay in the dropdown.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-secondary text-xs" onClick={() => exportToCSV(rows, columns, `${report.toLowerCase()}_report`)}>CSV</button>
           <button className="btn-secondary text-xs" onClick={() => exportToExcel(rows, columns, report, `${report.toLowerCase()}_report`)}>Excel</button>
           <button className="btn-secondary text-xs" onClick={() => exportToPDF(rows, columns, `${report} Report`, `${report.toLowerCase()}_report`)}>PDF</button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {REPORT_TILES.map(tile => (
+          <button
+            key={tile.name}
+            type="button"
+            onClick={() => { setReport(tile.name); setStatus('All') }}
+            className={`rounded-xl border p-4 text-left ${
+              report === tile.name
+                ? 'border-teal-600 bg-teal-50 dark:border-teal-400 dark:bg-teal-950/40'
+                : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
+            }`}
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <AppIcon name={tile.icon} size={16} />
+            </span>
+            <p className="mt-2 text-sm font-extrabold">{tile.name}</p>
+            <p className="text-[11px] text-slate-500">{tile.hint}</p>
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

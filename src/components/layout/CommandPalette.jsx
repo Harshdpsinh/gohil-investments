@@ -13,6 +13,8 @@ const PAGES = [
   { label: 'WhatsApp Inbox', to: '/inbox', hint: 'Messages' },
   { label: 'Commission', to: '/commission', hint: 'Ledger' },
   { label: 'Business Done', to: '/business', hint: 'Sold book' },
+  { label: 'Wishes', to: '/wishes', hint: 'Birthdays and anniversaries' },
+  { label: 'Premium calendar', to: '/calendar', hint: 'Booked vs due' },
   { label: 'Claims', to: '/claims', hint: 'Claims board' },
   { label: 'Coverage gaps', to: '/cross-sell', hint: 'Cross-sell' },
   { label: 'Proposals', to: '/proposals', hint: 'Quotes' },

@@ -72,6 +72,13 @@ describe('BusinessDonePage', () => {
     expect(screen.getByText('No business written in this period')).toBeTruthy()
   })
 
+  it('month tiles reuse the same start-date count and filter the period', () => {
+    render(<BusinessDonePage />)
+    fireEvent.click(screen.getByText("May '26"))
+    expect(within(tile('Total policies')).getByText('1')).toBeTruthy()
+    expect(within(tile('New business')).getByText('1')).toBeTruthy()
+  })
+
   it('exports the policy list so the owner can verify row by row', async () => {
     render(<BusinessDonePage />)
     fireEvent.click(screen.getByRole('button', { name: /Excel \(policy list\)/ }))
