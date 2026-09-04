@@ -26,6 +26,14 @@ const REPORT_TILES = [
   { name: 'Claims', icon: 'claims', hint: 'Claim board' },
 ]
 
+function statusBadge(status) {
+  const s = String(status || '').toLowerCase()
+  if (['overdue', 'rejected', 'expired', 'cancelled'].some(k => s.includes(k))) return 'badge-red'
+  if (['due', 'pending', 'review', 'progress', 'identified'].some(k => s.includes(k))) return 'badge-yellow'
+  if (['active', 'approved', 'settled', 'complete', 'converted'].some(k => s.includes(k))) return 'badge-green'
+  return 'badge-gray'
+}
+
 function groupReportRows(policies, keyFn, type) {
   const map = new Map()
   policies.forEach(policy => {
@@ -172,8 +180,8 @@ export default function ReportsPage() {
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dynamic Reports</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Tap a tile to switch the table. Clients and cross-sell stay in the dropdown.</p>
+          <h1 className="text-2xl font-bold text-slate-950 dark:text-white">Dynamic Reports</h1>
+          <p className="text-sm text-slate-500">Tap a tile to switch the table. Clients and cross-sell stay in the dropdown.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <button className="btn-secondary text-xs" onClick={() => exportToCSV(rows, columns, `${report.toLowerCase()}_report`)}>CSV</button>
@@ -188,13 +196,9 @@ export default function ReportsPage() {
             key={tile.name}
             type="button"
             onClick={() => { setReport(tile.name); setStatus('All') }}
-            className={`rounded-xl border p-4 text-left ${
-              report === tile.name
-                ? 'border-teal-600 bg-teal-50 dark:border-teal-400 dark:bg-teal-950/40'
-                : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
-            }`}
+            className={`gi-bento-tile min-h-0 ${report === tile.name ? 'is-active' : ''}`}
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-50 text-teal-800 dark:bg-teal-950/50 dark:text-teal-200">
               <AppIcon name={tile.icon} size={16} />
             </span>
             <p className="mt-2 text-sm font-extrabold">{tile.name}</p>
@@ -204,8 +208,8 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="stat-card"><div><p className="text-xl font-bold">{rows.length}</p><p className="text-xs text-gray-500">Rows</p></div></div>
-        <div className="stat-card"><div><p className="text-xl font-bold">{fmtCurrency(totalAmount)}</p><p className="text-xs text-gray-500">Amount</p></div></div>
+        <div className="stat-card"><div><p className="text-xl font-bold tabular-nums">{rows.length}</p><p className="text-xs text-gray-500">Rows</p></div></div>
+        <div className="stat-card"><div><p className="text-xl font-bold tabular-nums">{fmtCurrency(totalAmount)}</p><p className="text-xs text-gray-500">Amount</p></div></div>
         <div className="stat-card"><div><p className="text-xl font-bold">{report}</p><p className="text-xs text-gray-500">Report</p></div></div>
         <div className="stat-card"><div><p className="text-xl font-bold">{statuses.length - 1}</p><p className="text-xs text-gray-500">Statuses</p></div></div>
       </div>
@@ -218,18 +222,30 @@ export default function ReportsPage() {
         <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>{statuses.map(s => <option key={s}>{s}</option>)}</select>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-auto">
-        <table className="min-w-full text-sm">
-          <thead className="sticky top-0 bg-gray-50 dark:bg-gray-900 z-10 text-xs uppercase text-gray-500">
-            <tr>{columns.map(c => <th key={c.header} className="px-4 py-3 text-left whitespace-nowrap">{c.header}</th>)}</tr>
+      <div className="overflow-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+        <table className="gi-report-table min-w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-950">
+            <tr>{columns.map(c => <th key={c.header} className="whitespace-nowrap px-4 py-3 text-left">{c.header}</th>)}</tr>
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={`${row.type}-${idx}`} className="border-t border-gray-100 dark:border-gray-700">
-                {columns.map(c => <td key={c.header} className="px-4 py-3 whitespace-nowrap">{c.accessor(row)}</td>)}
+              <tr key={`${row.type}-${idx}`} className="border-t border-slate-100 dark:border-slate-800">
+                {columns.map(c => {
+                  const value = c.accessor(row)
+                  if (c.header === 'Status') {
+                    return <td key={c.header} className="whitespace-nowrap px-4 py-3"><span className={statusBadge(value)}>{value || '—'}</span></td>
+                  }
+                  if (c.header === 'Client' && value) {
+                    return <td key={c.header} className="max-w-[12rem] truncate whitespace-nowrap px-4 py-3" title={String(value)}>{value}</td>
+                  }
+                  if (c.header === 'Amount') {
+                    return <td key={c.header} className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{value}</td>
+                  }
+                  return <td key={c.header} className="whitespace-nowrap px-4 py-3">{value}</td>
+                })}
               </tr>
             ))}
-            {rows.length === 0 && <tr><td className="px-4 py-8 text-gray-400" colSpan={columns.length}>No report rows found.</td></tr>}
+            {rows.length === 0 && <tr><td className="px-4 py-8 text-slate-400" colSpan={columns.length}>No report rows found.</td></tr>}
           </tbody>
         </table>
       </div>

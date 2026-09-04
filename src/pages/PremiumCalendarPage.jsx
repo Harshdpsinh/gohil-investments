@@ -48,15 +48,15 @@ export default function PremiumCalendarPage() {
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
           <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
             <p className="font-bold text-slate-500">Booked</p>
-            <p className="font-extrabold">{fmtCurrency(cal.totals.booked)}</p>
+            <p className="font-extrabold tabular-nums">{fmtCurrency(cal.totals.booked)}</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
             <p className="font-bold text-slate-500">Due</p>
-            <p className="font-extrabold">{fmtCurrency(cal.totals.due)}</p>
+            <p className="font-extrabold tabular-nums">{fmtCurrency(cal.totals.due)}</p>
           </div>
           <div className="rounded-lg bg-slate-50 p-2 dark:bg-slate-800">
             <p className="font-bold text-slate-500">Policies</p>
-            <p className="font-extrabold">{cal.totals.bookedCount + cal.totals.dueCount}</p>
+            <p className="font-extrabold tabular-nums">{cal.totals.bookedCount + cal.totals.dueCount}</p>
           </div>
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400">
@@ -117,9 +117,9 @@ function DayGroup({ title, rows, empty, onOpen }) {
         <ul className="space-y-1">
           {rows.map(policy => (
             <li key={policy.id}>
-              <button type="button" className="w-full rounded-lg px-2 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800" onClick={onOpen}>
-                <span className="font-semibold">{policy.clientName}</span>
-                <span className="ml-2 text-xs text-slate-500">{policy.policyNumber} · {fmtCurrency(policy.premium)}</span>
+              <button type="button" className="w-full rounded-lg px-2 py-2 text-left text-sm transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-slate-800" onClick={onOpen}>
+                <span className="font-semibold" title={policy.clientName}>{policy.clientName}</span>
+                <span className="ml-2 text-xs tabular-nums text-slate-500">{policy.policyNumber} · {fmtCurrency(policy.premium)}</span>
               </button>
             </li>
           ))}

@@ -79,11 +79,11 @@ function WishList({ title, rows, onWish, empty }) {
       {rows.length === 0 ? (
         <p className="text-xs text-slate-400">{empty}</p>
       ) : rows.map(row => (
-        <div key={`${row.client.id}-${row.kind}`} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700">
+        <div key={`${row.client.id}-${row.kind}`} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 transition-colors duration-150 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{row.client.name}</p>
+            <p className="truncate text-sm font-semibold" title={row.client.name}>{row.client.name}</p>
             <p className="text-[11px] text-slate-500">
-              {row.kind === 'anniversary' ? 'Anniversary' : 'Birthday'}
+              <span className={row.days === 0 ? 'badge-green' : 'badge-yellow'}>{row.kind === 'anniversary' ? 'Anniversary' : 'Birthday'}</span>
               {' · '}
               {row.days === 0 ? 'Today' : `in ${row.days} day${row.days === 1 ? '' : 's'}`}
               {row.date ? ` · ${fmtDate(row.date)}` : ''}

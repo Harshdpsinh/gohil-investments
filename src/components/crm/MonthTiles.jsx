@@ -25,17 +25,14 @@ export default function MonthTiles({ tiles, maxPremium, selectedKey, onSelect })
           <button
             key={tile.key}
             type="button"
+            title={`${tile.label} '${tile.yearShort}: ${fmtCurrency(tile.premium)}`}
             onClick={() => onSelect?.(tile)}
-            className={`rounded-xl border px-3 py-3 text-left ${
-              selectedKey === tile.key
-                ? 'border-teal-600 bg-teal-50 dark:border-teal-400 dark:bg-teal-950/40'
-                : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
-            }`}
+            className={`gi-bento-tile min-h-0 gap-1 px-3 py-3 ${selectedKey === tile.key ? 'is-active' : ''}`}
           >
-            <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <p className="gi-kpi-label">
               {tile.label} '{tile.yearShort}
             </p>
-            <p className="mt-1 text-sm font-extrabold text-slate-950 dark:text-white">{fmtCurrency(tile.premium)}</p>
+            <p className="text-sm font-extrabold tabular-nums text-slate-950 dark:text-white">{fmtCurrency(tile.premium)}</p>
             <p className="text-[10px] text-slate-500">{tile.count} polic{tile.count === 1 ? 'y' : 'ies'}</p>
           </button>
         ))}
