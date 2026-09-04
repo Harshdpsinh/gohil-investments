@@ -1,24 +1,45 @@
-import { useCallback, useMemo, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { differenceInDays, format, startOfDay, subMonths } from 'date-fns'
 import toast from 'react-hot-toast'
-import {
-  Chart as ChartJS, CategoryScale, LinearScale, BarElement, ArcElement,
-  Tooltip, Legend,
-} from 'chart.js'
-import { Bar, Doughnut } from 'react-chartjs-2'
 import { useClients } from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { fmtCurrency, fmtDate, fmtDateTime, parseAnyDate, daysUntilPolicyDue } from '../utils/dateUtils'
 import { subscribeClaims } from '../firebase/firestore'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import { openWhatsAppLink } from '../services/whatsappService'
-import { bookSnapshot, isAutoWaOnPdfEnabled, setAutoWaOnPdfEnabled } from '../utils/opsSnapshot'
+import {
+  bookSnapshot,
+  isAutoWaOnPdfEnabled,
+  setAutoWaOnPdfEnabled,
+  readHomeBookCache,
+  writeHomeBookCache,
+} from '../utils/opsSnapshot'
 import AppIcon from '../components/ui/AppIcon'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
+const DashboardCharts = lazy(() => import('./DashboardCharts'))
 
 const isActivePolicy = p => !['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())
+
+const EMPTY_BOOK = {
+  fy: { label: 'This FY' },
+  month: { label: 'This month' },
+  yearlyPremium: 0,
+  yearlyCount: 0,
+  monthPremium: 0,
+  monthCount: 0,
+  monthRenewalPremium: 0,
+  monthRenewalCount: 0,
+  lastUpdated: null,
+}
+
+function chartsOpenByDefault() {
+  try {
+    return window.matchMedia('(min-width: 1024px)').matches
+  } catch {
+    return false
+  }
+}
 
 function isBirthdayThisWeek(dobStr, today) {
   const dob = parseAnyDate(dobStr)
@@ -67,23 +88,6 @@ function RupeeCard({ label, amount, count, note, onClick }) {
   )
 }
 
-const CHART_OPTS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { grid: { display: false }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
-    y: { grid: { color: 'rgba(148,163,184,0.1)' }, ticks: { font: { size: 11 }, color: '#94a3b8' } },
-  },
-}
-
-const DOUGHNUT_OPTS = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { position: 'right', labels: { font: { size: 11 }, boxWidth: 12, color: '#94a3b8' } } },
-  cutout: '65%',
-}
-
 const HOME_TILES = [
   { to: '/renewals', icon: 'renewals', label: 'Renewals', hint: 'Due this month' },
   { to: '/business', icon: 'work', label: 'Business', hint: 'Written this FY' },
@@ -97,6 +101,8 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const [claims, setClaims] = useState([])
   const [autoWaPdf, setAutoWaPdf] = useState(() => isAutoWaOnPdfEnabled())
+  const [cachedBook] = useState(() => readHomeBookCache())
+  const [chartsOpen, setChartsOpen] = useState(chartsOpenByDefault)
   const now = new Date()
   const today = startOfDay(now)
 
@@ -125,15 +131,20 @@ export default function DashboardPage() {
     }
   }, [clients])
 
-  const EMPTY_BOOK = { fy: { label: 'This FY' }, month: { label: 'This month' }, yearlyPremium: 0, yearlyCount: 0, monthPremium: 0, monthCount: 0, monthRenewalPremium: 0, monthRenewalCount: 0, lastUpdated: null }
-
-  const book = useMemo(() => {
+  const liveBook = useMemo(() => {
     try { return bookSnapshot(policies || [], now) }
     catch (err) {
       console.error('Home rupee snapshot failed:', err)
       return EMPTY_BOOK
     }
   }, [policies])
+
+  useEffect(() => {
+    if (loading) return
+    writeHomeBookCache(liveBook)
+  }, [loading, liveBook])
+
+  const book = loading && cachedBook ? cachedBook : liveBook
 
   const stats = useMemo(() => {
     const active = policies.filter(isActivePolicy)
@@ -177,9 +188,8 @@ export default function DashboardPage() {
   )
 
   const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
-  const typeColors = ['#0f766e', '#0ea5e9', '#d97706', '#059669', '#7c3aed', '#64748b']
 
-  if (loading) {
+  if (loading && !cachedBook) {
     return (
       <div className="fintech-page space-y-4 sm:space-y-5">
         <div className="fintech-header border-b border-slate-200 pb-4 dark:border-slate-800">
@@ -204,16 +214,19 @@ export default function DashboardPage() {
           <p className="fintech-kicker">Gohil Investments · Bhavnagar</p>
           <h1 className="fintech-title">{greeting}, Harshdip</h1>
           <p className="fintech-subtitle">
-            {fmtDate(now)} · Portfolio operations overview
-            {book.lastUpdated ? ` · Last updated ${fmtDateTime(book.lastUpdated)}` : ''}
+            {loading
+              ? 'Opening your book…'
+              : `${fmtDate(now)} · Portfolio operations overview${book.lastUpdated ? ` · Last updated ${fmtDateTime(book.lastUpdated)}` : ''}`}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
-          <button onClick={() => navigate('/policies')} className="btn-primary">Add Policy from PDF</button>
-          <button onClick={() => navigate('/pipeline')} className="btn-secondary">Pipeline</button>
-          <button onClick={() => navigate('/installments')} className="btn-secondary">Installments</button>
-        </div>
+        {!loading && (
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => navigate('/clients')} className="btn-secondary">Add Client</button>
+            <button onClick={() => navigate('/policies')} className="btn-primary">Add Policy from PDF</button>
+            <button onClick={() => navigate('/pipeline')} className="btn-secondary">Pipeline</button>
+            <button onClick={() => navigate('/installments')} className="btn-secondary">Installments</button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -255,100 +268,104 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={() => navigate('/calendar')}
-        className="text-left text-xs font-semibold text-teal-800 hover:underline dark:text-teal-300"
-      >
-        Premium calendar — booked vs due this month
-      </button>
+      {loading && (
+        <button type="button" className="btn-secondary text-xs" onClick={() => window.location.reload()}>Retry</button>
+      )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard icon="clients" label="Clients" value={stats.clients} onClick={() => navigate('/clients')} />
-        <StatCard icon="policies" label="Active Policies" value={stats.active} color="green" onClick={() => navigate('/policies')} />
-        <StatCard icon="renewals" label="Expiring (30d)" value={stats.expiring30} color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
-        <StatCard icon="warning" label="Overdue" value={stats.expired} color="red" onClick={() => navigate('/renewals')} badge={stats.expired} />
-        <StatCard icon="claims" label="Open Claims" value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="stat-card"><div><p className="text-xl font-bold tabular-nums">{fmtCurrency(stats.totalPremium)}</p><p className="text-xs text-gray-500">Premium Under Management</p></div></div>
-        {stats.birthdays.length > 0 && (
-          <button className="gi-bento-tile min-h-0" onClick={() => navigate('/wishes')}>
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">Birthdays this week</p>
-            <p className="text-xs text-slate-500" title={stats.birthdays.map(c => c.name).join(', ')}>{stats.birthdays.slice(0, 3).map(c => c.name).join(', ')}</p>
+      {!loading && (
+        <>
+          <button
+            type="button"
+            onClick={() => navigate('/calendar')}
+            className="text-left text-xs font-semibold text-teal-800 hover:underline dark:text-teal-300"
+          >
+            Premium calendar — booked vs due this month
           </button>
-        )}
-        {stats.clientsWithGaps > 0 && (
-          <button className="gi-bento-tile min-h-0" onClick={() => navigate('/cross-sell')}>
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{stats.clientsWithGaps} clients with coverage gaps</p>
-            <p className="text-xs text-slate-500">Open the coverage-gap list to message them</p>
-          </button>
-        )}
-      </div>
 
-      <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-900">
-        <input
-          type="checkbox"
-          className="mt-1"
-          checked={autoWaPdf}
-          onChange={event => {
-            setAutoWaOnPdfEnabled(event.target.checked)
-            setAutoWaPdf(event.target.checked)
-          }}
-        />
-        <span>
-          <span className="font-bold text-slate-800 dark:text-slate-100">WhatsApp the PDF after upload</span>
-          <span className="mt-0.5 block text-xs text-slate-500">Off by default. When on, uploading a policy PDF also opens WhatsApp with the document link. Does not send by itself.</span>
-        </span>
-      </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <StatCard icon="clients" label="Clients" value={stats.clients} onClick={() => navigate('/clients')} />
+            <StatCard icon="policies" label="Active Policies" value={stats.active} color="green" onClick={() => navigate('/policies')} />
+            <StatCard icon="renewals" label="Expiring (30d)" value={stats.expiring30} color="yellow" onClick={() => navigate('/renewals')} badge={stats.expiring30} />
+            <StatCard icon="warning" label="Overdue" value={stats.expired} color="red" onClick={() => navigate('/renewals')} badge={stats.expired} />
+            <StatCard icon="claims" label="Open Claims" value={stats.openClaims.length} color="orange" onClick={() => navigate('/claims')} badge={stats.openClaims.length} />
+          </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card">
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">Policies by Type</p>
-          <div style={{ height: 180 }}>
-            <Doughnut
-              data={{ labels: Object.keys(stats.byType), datasets: [{ data: Object.values(stats.byType), backgroundColor: typeColors, borderWidth: 2 }] }}
-              options={DOUGHNUT_OPTS}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="stat-card"><div><p className="text-xl font-bold tabular-nums">{fmtCurrency(stats.totalPremium)}</p><p className="text-xs text-gray-500">Premium Under Management</p></div></div>
+            {stats.birthdays.length > 0 && (
+              <button className="gi-bento-tile min-h-0" onClick={() => navigate('/wishes')}>
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">Birthdays this week</p>
+                <p className="text-xs text-slate-500" title={stats.birthdays.map(c => c.name).join(', ')}>{stats.birthdays.slice(0, 3).map(c => c.name).join(', ')}</p>
+              </button>
+            )}
+            {stats.clientsWithGaps > 0 && (
+              <button className="gi-bento-tile min-h-0" onClick={() => navigate('/cross-sell')}>
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{stats.clientsWithGaps} clients with coverage gaps</p>
+                <p className="text-xs text-slate-500">Open the coverage-gap list to message them</p>
+              </button>
+            )}
+          </div>
+
+          <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm dark:border-slate-700 dark:bg-slate-900">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={autoWaPdf}
+              onChange={event => {
+                setAutoWaOnPdfEnabled(event.target.checked)
+                setAutoWaPdf(event.target.checked)
+              }}
             />
-          </div>
-        </div>
-        <div className="card">
-          <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">New Policies (6 months)</p>
-          <div style={{ height: 180 }}>
-            <Bar
-              data={{ labels: stats.monthly.map(m => m.label), datasets: [{ label: 'Policies', data: stats.monthly.map(m => m.count), backgroundColor: '#0f766e', borderRadius: 4 }] }}
-              options={CHART_OPTS}
-            />
-          </div>
-        </div>
-      </div>
+            <span>
+              <span className="font-bold text-slate-800 dark:text-slate-100">WhatsApp the PDF after upload</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Off by default. When on, uploading a policy PDF also opens WhatsApp with the document link. Does not send by itself.</span>
+            </span>
+          </label>
 
-      {urgent.length > 0 && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-bold text-gray-800 dark:text-white">Expiring This Week ({urgent.length})</h2>
-            <button onClick={() => navigate('/renewals')} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">View all</button>
+          <div>
+            <button
+              type="button"
+              onClick={() => setChartsOpen(open => !open)}
+              className="mb-3 flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              aria-expanded={chartsOpen}
+            >
+              <span>Policy charts</span>
+              <AppIcon name="chevronDown" className={chartsOpen ? '' : '-rotate-90'} size={16} />
+            </button>
+            {chartsOpen && (
+              <Suspense fallback={<div className="commission-skeleton h-48 rounded-xl" />}>
+                <DashboardCharts byType={stats.byType} monthly={stats.monthly} />
+              </Suspense>
+            )}
           </div>
-          <div className="space-y-2">
-            {urgent.slice(0, 8).map(p => {
-              const d = daysUntilPolicyDue(p)
-              return (
-                <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100" title={p.clientName}>{p.clientName}</p>
-                    <p className="text-xs text-slate-500">{p.policyNumber} · {p.insurer}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 text-right">
-                    <span className={d === 0 ? 'badge-red' : 'badge-yellow'}>{d === 0 ? 'Today' : `${d}d`}</span>
-                    <p className="text-xs tabular-nums text-slate-500">{fmtCurrency(p.premium)}</p>
-                    <button onClick={() => openWA(p)} className="btn-whatsapp px-2 py-0.5 text-xs">WA</button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+
+          {urgent.length > 0 && (
+            <div className="card">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-base font-bold text-gray-800 dark:text-white">Expiring This Week ({urgent.length})</h2>
+                <button onClick={() => navigate('/renewals')} className="text-xs font-semibold text-teal-700 hover:underline dark:text-teal-300">View all</button>
+              </div>
+              <div className="space-y-2">
+                {urgent.slice(0, 8).map(p => {
+                  const d = daysUntilPolicyDue(p)
+                  return (
+                    <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/40">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100" title={p.clientName}>{p.clientName}</p>
+                        <p className="text-xs text-slate-500">{p.policyNumber} · {p.insurer}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 text-right">
+                        <span className={d === 0 ? 'badge-red' : 'badge-yellow'}>{d === 0 ? 'Today' : `${d}d`}</span>
+                        <p className="text-xs tabular-nums text-slate-500">{fmtCurrency(p.premium)}</p>
+                        <button onClick={() => openWA(p)} className="btn-whatsapp px-2 py-0.5 text-xs">WA</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

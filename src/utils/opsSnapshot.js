@@ -157,6 +157,53 @@ export function setAutoWaOnPdfEnabled(on) {
   }
 }
 
+export const HOME_BOOK_KEY = 'gi-home-book'
+
+/** Last Home rupee snapshot. Used so the phone can paint ₹ before policies load. */
+export function readHomeBookCache() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(HOME_BOOK_KEY) || '')
+    if (!parsed || typeof parsed !== 'object') return null
+    if (!Number.isFinite(Number(parsed.yearlyPremium))) return null
+    return {
+      fy: { label: parsed.fyLabel || 'This FY' },
+      month: { label: parsed.monthLabel || 'This month' },
+      yearlyPremium: Number(parsed.yearlyPremium) || 0,
+      yearlyCount: Number(parsed.yearlyCount) || 0,
+      monthPremium: Number(parsed.monthPremium) || 0,
+      monthCount: Number(parsed.monthCount) || 0,
+      monthRenewalPremium: Number(parsed.monthRenewalPremium) || 0,
+      monthRenewalCount: Number(parsed.monthRenewalCount) || 0,
+      lastUpdated: parsed.lastUpdated || null,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function writeHomeBookCache(snap) {
+  if (!snap || typeof snap !== 'object') return
+  if (!Number.isFinite(Number(snap.yearlyPremium))) return
+  try {
+    const lastUpdated = snap.lastUpdated instanceof Date
+      ? snap.lastUpdated.toISOString()
+      : (snap.lastUpdated || null)
+    window.localStorage.setItem(HOME_BOOK_KEY, JSON.stringify({
+      yearlyPremium: Number(snap.yearlyPremium) || 0,
+      yearlyCount: Number(snap.yearlyCount) || 0,
+      monthPremium: Number(snap.monthPremium) || 0,
+      monthCount: Number(snap.monthCount) || 0,
+      monthRenewalPremium: Number(snap.monthRenewalPremium) || 0,
+      monthRenewalCount: Number(snap.monthRenewalCount) || 0,
+      lastUpdated,
+      fyLabel: snap.fy?.label || 'This FY',
+      monthLabel: snap.month?.label || 'This month',
+    }))
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 export function policyCopyMessage(policy, url) {
   const link = url || policy?.policyPdfUrl || ''
   return (
