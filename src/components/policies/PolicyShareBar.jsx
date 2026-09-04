@@ -30,7 +30,7 @@ export default function PolicyShareBar({ policy, mobile, onWhatsApp }) {
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs tabular-nums">
         {shown.hasGross ? (
           <>
             <span><span className="font-semibold text-slate-500">Net</span> {fmtCurrency(shown.net)}</span>
