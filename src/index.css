@@ -364,7 +364,10 @@
 .page-enter .rounded-2xl,
 .page-enter .rounded-3xl { border-radius: 8px !important; }
 
-.page-enter { animation: fadeInUp 0.3s ease both; }
+/* No animation-fill-mode:both — a leftover transform (even translateY(0))
+   becomes the containing block for position:fixed and pins in-page overlays
+   to the document instead of the viewport. */
+.page-enter { animation: fadeInUp 0.3s ease; }
 
 .back-to-top {
   @apply pointer-events-none fixed bottom-6 right-6 z-50 flex h-10 w-10 items-center justify-center
@@ -1120,7 +1123,7 @@ textarea::placeholder {
   .gi-modal-overlay {
     align-items: flex-end !important;
     padding: 0 !important;
-    z-index: 150 !important;
+    z-index: 220 !important;
   }
 
   .gi-modal {
@@ -1189,9 +1192,14 @@ textarea::placeholder {
   }
   .gi-mobile-form-actions > button { flex: 1; }
   body[data-gi-modal-open="true"] .back-to-top,
-  body[data-gi-modal-open="true"] .gi-fab {
+  body[data-gi-modal-open="true"] .gi-fab,
+  body[data-gi-modal-open="true"] .mobile-tabbar {
     pointer-events: none !important;
     opacity: 0 !important;
+    visibility: hidden !important;
+  }
+  body[data-gi-modal-open="true"] #main-scroll {
+    overflow: hidden !important;
   }
   .gi-modal-footer { position: sticky; bottom: 0; padding: 0.75rem 1rem !important; }
   .gi-modal-footer > button { flex: 1; }

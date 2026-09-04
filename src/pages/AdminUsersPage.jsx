@@ -4,6 +4,8 @@ import { useAuth }    from '../hooks/useAuth'
 import { getAllUsers, setUserRole } from '../firebase/firestore'
 import { roleLabel } from '../utils/roles'
 import AppIcon from '../components/ui/AppIcon'
+import PortalOverlay from '../components/ui/PortalOverlay'
+import WriteAttemptLog from '../components/layout/WriteAttemptLog'
 import toast from 'react-hot-toast'
 
 function roleBadgeClass(role) {
@@ -155,9 +157,9 @@ export default function AdminUsersPage() {
       )}
 
       {pendingRoleChange && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <PortalOverlay onClose={() => setPendingRoleChange(null)}>
           <div className="absolute inset-0 bg-black/40" onClick={() => setPendingRoleChange(null)} />
-          <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div className="gi-modal gi-standalone-modal relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
             <h3 className="flex items-center gap-2 text-base font-bold text-gray-900 dark:text-white"><AppIcon name="warning" size={18} /> Confirm Role Change</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400">
               Change <strong>{pendingRoleChange.name}</strong>&apos;s role to{' '}
@@ -178,7 +180,7 @@ export default function AdminUsersPage() {
               <button onClick={() => setPendingRoleChange(null)} className="btn-secondary">Cancel</button>
             </div>
           </div>
-        </div>
+        </PortalOverlay>
       )}
 
       {loading
@@ -231,6 +233,8 @@ export default function AdminUsersPage() {
         <p>• Reader is for unattended testers. Hide the password after creating it; the role is what blocks writes, not the prompt the agent is given.</p>
         <p>• You can promote or demote any account using the dropdown above.</p>
       </div>
+
+      <WriteAttemptLog />
     </div>
   )
 }

@@ -11,6 +11,7 @@ import {
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import Modal        from '../components/ui/Modal'
+import PortalOverlay from '../components/ui/PortalOverlay'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar    from '../components/ui/SearchBar'
 import AppIcon      from '../components/ui/AppIcon'
@@ -129,9 +130,9 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <PortalOverlay onClose={onClose}>
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+      <div className="gi-modal gi-standalone-modal relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700">
@@ -233,7 +234,7 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
           </div>
         )}
       </div>
-    </div>
+    </PortalOverlay>
   )
 }
 

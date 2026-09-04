@@ -2,19 +2,20 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import AppIcon from './AppIcon'
+import { acquireModalLock, releaseModalLock } from '../../utils/modalLock'
 
 export default function Modal({ open, onClose, title, children, size = 'md', subtitle = '', footerContent = null }) {
   useEffect(() => {
     if (!open) return
     const onKey = e => { if (e.key === 'Escape') onClose() }
     const onNativeClose = () => onClose()
-    document.body.dataset.giModalOpen = 'true'
+    acquireModalLock()
     window.addEventListener('keydown', onKey)
     window.addEventListener('gi:close-modal', onNativeClose)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('gi:close-modal', onNativeClose)
-      delete document.body.dataset.giModalOpen
+      releaseModalLock()
     }
   }, [open, onClose])
 
@@ -33,9 +34,10 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
   // the containing block for position:fixed — which pushed every modal to the
   // middle of the *document* instead of the viewport, so you had to scroll to
   // reach it. Rendering outside that subtree makes it immune to any ancestor
-  // transform, now and in future.
+  // transform, now and in future. z-[200] sits above the mobile topbar (100)
+  // and tab bar so those never cover the sheet.
   return createPortal(
-    <div className="gi-modal-overlay fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4">
+    <div className="gi-modal-overlay fixed inset-0 z-[200] flex items-center justify-center overflow-hidden p-4">
       {/* UI-only verification: backdrop click still calls the original onClose prop. */}
       <div className="absolute inset-0 animate-fadeIn bg-slate-950/60" onClick={onClose} />
 

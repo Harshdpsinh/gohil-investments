@@ -3,6 +3,7 @@
 // type-specific sections, the insurer combobox and the quick-add-client overlay,
 // none of which is used anywhere else.
 import { useState } from 'react'
+import PortalOverlay from '../ui/PortalOverlay'
 import toast from 'react-hot-toast'
 import { addClient } from '../../firebase/firestore'
 import DateInput from '../ui/DateInput'
@@ -34,9 +35,9 @@ function QuickAddClientModal({ onCreated, onClose }) {
     finally { setSaving(false) }
   }
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <PortalOverlay onClose={onClose} zClass="z-[220]">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+      <div className="gi-modal gi-standalone-modal relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-bold text-gray-900">➕ Quick Add Client</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -55,8 +56,7 @@ function QuickAddClientModal({ onCreated, onClose }) {
           </div>
         </form>
       </div>
-
-    </div>
+    </PortalOverlay>
   )
 }
 // ── Type-specific form sections ───────────────────────────────

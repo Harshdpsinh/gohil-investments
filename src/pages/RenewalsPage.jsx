@@ -28,6 +28,7 @@ import SearchBar from '../components/ui/SearchBar'
 import DateInput from '../components/ui/DateInput'
 import AppIcon from '../components/ui/AppIcon'
 import Modal from '../components/ui/Modal'
+import PortalOverlay from '../components/ui/PortalOverlay'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
@@ -231,9 +232,9 @@ function RenewModal({ policy, onConfirm, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <PortalOverlay onClose={onClose}>
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div className="gi-modal gi-standalone-modal relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">🔄 Renew Policy</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
@@ -466,7 +467,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
           <button onClick={onClose} className="btn-secondary">Cancel</button>
         </div>
       </div>
-    </div>
+    </PortalOverlay>
   )
 }
 
@@ -513,9 +514,9 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <PortalOverlay onClose={saving ? undefined : onClose} closeOnEscape={!saving}>
       <div className="absolute inset-0 bg-black/50" onClick={saving ? undefined : onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
+      <div className="gi-modal gi-standalone-modal relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-gray-900 dark:text-white">Verify Premium Due</h3>
@@ -599,7 +600,7 @@ function PremiumPaidModal({ policy, onConfirm, onClose, saving }) {
           </button>
         </div>
       </div>
-    </div>
+    </PortalOverlay>
   )
 }
 

@@ -8,7 +8,6 @@ import AppIcon from '../ui/AppIcon'
 import { startRenewalReminderAutomation } from '../../services/renewalReminderService'
 import { NavLink } from 'react-router-dom'
 import CommissionBookBanner from '../commission/CommissionBookBanner'
-import WriteAttemptLog from './WriteAttemptLog'
 import { useAuth } from '../../hooks/useAuth'
 import { recordAgentAttempt } from '../../firebase/agentActionLog'
 import { isForbiddenClickLabel } from '../../utils/forbiddenActions'
@@ -166,7 +165,6 @@ export default function Layout({ children }) {
                 </p>
               </div>
             )}
-            <WriteAttemptLog />
             <CommissionBookBanner />
             {children}
           </div>
