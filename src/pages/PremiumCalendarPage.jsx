@@ -6,6 +6,7 @@ import { calendarMonth } from '../utils/opsSnapshot'
 import PageHeader from '../components/ui/PageHeader'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
 export default function PremiumCalendarPage() {
   const { policies, loading } = usePolicies()
@@ -20,7 +21,7 @@ export default function PremiumCalendarPage() {
   )
   const day = cal.days[picked] || { booked: 0, due: 0, bookedCount: 0, dueCount: 0, bookedRows: [], dueRows: [] }
   const startPad = new Date(cursor.year, cursor.month, 1).getDay()
-  const title = new Date(cursor.year, cursor.month, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+  const title = `${MONTHS[cursor.month]} ${cursor.year}`
 
   const shift = delta => {
     const next = new Date(cursor.year, cursor.month + delta, 1)

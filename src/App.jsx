@@ -1,4 +1,5 @@
 // UI MODERNIZATION - logic unchanged
+import { Component } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuth }           from './hooks/useAuth'
 import { ThemeProvider }     from './context/ThemeContext'
@@ -23,6 +24,32 @@ import CrossSellPage         from './pages/CrossSellPage'
 import WishesPage            from './pages/WishesPage'
 import PremiumCalendarPage   from './pages/PremiumCalendarPage'
 
+class RouteErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { failed: false }
+  }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(err) { console.error('Screen failed:', err) }
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center p-6">
+          <div className="max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center">
+            <p className="text-lg font-bold text-slate-900">This screen could not open</p>
+            <p className="mt-2 text-sm text-slate-500">Your data is unchanged. Retry, or go Home.</p>
+            <div className="mt-4 flex justify-center gap-2">
+              <button type="button" className="btn-secondary" onClick={() => this.setState({ failed: false })}>Retry</button>
+              <button type="button" className="btn-primary" onClick={() => window.location.assign('/dashboard')}>Home</button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function ProtectedRoute({ children }) {
   const { user, role, loading, signOut } = useAuth()
   if (loading) return (
@@ -31,6 +58,13 @@ function ProtectedRoute({ children }) {
         <div className="skeleton-shimmer h-5 rounded-full" />
         <div className="skeleton-shimmer mt-4 h-20 rounded-xl" />
         <p className="mt-4 text-center text-sm font-semibold text-slate-500">Loading...</p>
+        <button
+          type="button"
+          className="btn-secondary mt-4 w-full"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
       </div>
     </div>
   )
@@ -65,6 +99,7 @@ export default function App() {
         <Route path="/*" element={
           <ProtectedRoute>
             <Layout>
+              <RouteErrorBoundary>
               <Routes>
                 <Route path="/"                    element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard"           element={<DashboardPage />} />
@@ -87,6 +122,7 @@ export default function App() {
                 <Route path="/backup"              element={<BackupPage />} />
                 <Route path="*"                    element={<Navigate to="/dashboard" replace />} />
               </Routes>
+              </RouteErrorBoundary>
             </Layout>
           </ProtectedRoute>
         } />

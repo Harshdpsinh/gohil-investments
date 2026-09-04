@@ -10,6 +10,8 @@
 import { getDueDate, parseAnyDate } from './dateUtils'
 import { canonicalInsurer } from './insurers'
 
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
 // India runs April-March. Grouping production by calendar year would not match
 // any insurer's target sheet or the owner's own tax year.
 export const FY_START_MONTH = 3 // zero-based March+1 = April
@@ -33,11 +35,14 @@ export const PERIOD_PRESETS = ['This month', 'Last month', 'This quarter', 'This
 export function periodRange(preset, asOf = new Date()) {
   const year = asOf.getFullYear()
   const month = asOf.getMonth()
-  const monthRange = (y, m) => ({
-    from: iso(new Date(y, m, 1)),
-    to: iso(new Date(y, m + 1, 0)),
-    label: new Date(y, m, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
-  })
+  const monthRange = (y, m) => {
+    const start = new Date(y, m, 1)
+    return {
+      from: iso(start),
+      to: iso(new Date(y, m + 1, 0)),
+      label: `${MONTH_NAMES[start.getMonth()]} ${start.getFullYear()}`,
+    }
+  }
 
   switch (preset) {
     case 'This month': return monthRange(year, month)

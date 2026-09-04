@@ -16,7 +16,11 @@ export function usePolicies() {
       setError(err.message)
       setLoading(false)
     })
-    return unsub
+    const cap = setTimeout(() => setLoading(false), 15000)
+    return () => {
+      clearTimeout(cap)
+      unsub()
+    }
   }, [])
 
   return { policies, loading, error }

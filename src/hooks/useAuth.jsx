@@ -15,12 +15,22 @@ import { createOrLookupAuthUser } from '../utils/identityToolkitClient'
 const AuthContext = createContext(null)
 const OWNER_ADMIN_EMAILS = ownerAdminEmails(import.meta.env.VITE_ADMIN_EMAILS)
 
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label || 'timeout')), ms)
+    promise.then(
+      value => { clearTimeout(timer); resolve(value) },
+      err => { clearTimeout(timer); reject(err) },
+    )
+  })
+}
+
 async function fetchUserProfile(uid) {
   // Mobile networks regularly miss a 5s window. Treat a timeout as "try
   // again", never as "this login has no staff row".
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const profile = await getUserRole(uid)
+      const profile = await withTimeout(getUserRole(uid), 8000, 'role-timeout')
       if (profile) return profile
     } catch (err) {
       console.error('Role fetch error:', err)
@@ -36,10 +46,15 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
+    let authFired = false
     const unsub = onAuthStateChanged(auth, async u => {
+      authFired = true
+      if (cancelled) return
       setUser(u)
       if (u) {
         const profile = await fetchUserProfile(u.uid)
+        if (cancelled) return
         if (profile) {
           setRole(normaliseRole(profile.role, u.email, import.meta.env.VITE_ADMIN_EMAILS) || null)
         } else if (OWNER_ADMIN_EMAILS.includes(String(u.email || '').trim().toLowerCase())) {
@@ -49,7 +64,7 @@ export function AuthProvider({ children }) {
           } catch (err) {
             console.error('Failed to create owner profile:', err)
           }
-          setRole(defaultRole)
+          if (!cancelled) setRole(defaultRole)
         } else {
           // Signed in but not provisioned. Do NOT write a staff profile —
           // Firestore rules reject it, and a client-side 'staff' role would
@@ -59,9 +74,16 @@ export function AuthProvider({ children }) {
       } else {
         setRole(null)
       }
-      setLoading(false)
+      if (!cancelled) setLoading(false)
     })
-    return unsub
+    const cap = setTimeout(() => {
+      if (!cancelled && !authFired) setLoading(false)
+    }, 15000)
+    return () => {
+      cancelled = true
+      clearTimeout(cap)
+      unsub()
+    }
   }, [])
 
   async function signIn(email, password) {

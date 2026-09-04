@@ -46,7 +46,7 @@ describe('financialYearRange', () => {
 
 describe('periodRange', () => {
   it('bounds this month inclusively, including a 31st', () => {
-    expect(periodRange('This month', ASOF)).toMatchObject({ from: '2026-08-01', to: '2026-08-31' })
+    expect(periodRange('This month', ASOF)).toMatchObject({ from: '2026-08-01', to: '2026-08-31', label: 'August 2026' })
   })
 
   it('rolls back across a month boundary', () => {
