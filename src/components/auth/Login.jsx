@@ -2,18 +2,20 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth }     from '../../hooks/useAuth'
+import BootScreen      from '../ui/BootScreen'
 import toast           from 'react-hot-toast'
 
 let lastAttempt = 0
 
 export default function Login() {
-  const { signIn, resetPassword, user } = useAuth()
+  const { signIn, resetPassword, user, loading: authLoading } = useAuth()
   const navigate         = useNavigate()
   const [form,    setForm]    = useState({ email: '', password: '' })
   const [loading, setLoading] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
 
+  if (authLoading || user === undefined) return <BootScreen />
   if (user) return <Navigate to="/dashboard" replace />
 
   const onChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))

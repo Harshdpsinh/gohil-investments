@@ -1942,3 +1942,26 @@ a:focus-visible,
   outline: 2px solid #0f766e;
   outline-offset: 2px;
 }
+
+.app-sidebar .theme-switch {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
+}
+.app-sidebar .nav-signout {
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.28);
+}
+.app-sidebar .nav-signout:hover {
+  background: rgba(127, 29, 29, 0.42);
+}
+
+.gi-native .mobile-topbar {
+  padding-top: max(env(safe-area-inset-top, 0px), 36px);
+  height: calc(56px + max(env(safe-area-inset-top, 0px), 36px));
+}
+.gi-native .mobile-drawer.open {
+  padding-top: max(env(safe-area-inset-top, 0px), 36px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
