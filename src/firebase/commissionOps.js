@@ -74,3 +74,47 @@ export async function rewriteIciciInsurerNames(policies = [], transactions = [])
   }
   return { policies: plan.policyUpdates.length, transactions: plan.transactionUpdates.length }
 }
+
+/**
+ * Upsert a commission_master rate rule from a statement-driven proposal.
+ * Admin-only via firestore.rules. Stamps audit fields on the master doc
+ * (no separate commission_structure_updates collection — least rules churn).
+ */
+export async function upsertCommissionMaster(proposal, { existing } = {}) {
+  if (!proposal?.id || !proposal?.payload) {
+    throw new Error('Structure update proposal is required.')
+  }
+  const ref = doc(db, MASTER, proposal.id)
+  const snap = existing ? { exists: () => true, data: () => existing } : await getDoc(ref)
+  const before = snap.exists() ? snap.data() : null
+
+  // Re-derive previousPct from live master when available so concurrent edits don't lose history.
+  const previousPct = before && Number.isFinite(Number(before.commissionPct))
+    ? Number(before.commissionPct)
+    : proposal.previousPct
+
+  const { guards: _guards, ...safeProposal } = proposal.payload
+  const payload = {
+    ...safeProposal,
+    previousPct,
+    beforeSnapshot: before
+      ? {
+          commissionPct: before.commissionPct ?? null,
+          rewardPct: before.rewardPct ?? null,
+          active: before.active ?? null,
+          policyYear: before.policyYear ?? null,
+        }
+      : proposal.payload.beforeSnapshot,
+    updatedAt: serverTimestamp(),
+  }
+  // Never let FY payload rewrite an RY doc or vice versa — id already isolates,
+  // but refuse if an existing doc somehow has the opposite year key.
+  if (before?.policyYear && payload.policyYear && before.policyYear !== payload.policyYear) {
+    const err = new Error(`Refusing to clobber ${before.policyYear} master with ${payload.policyYear} rates.`)
+    err.code = 'commission/year-clobber'
+    throw err
+  }
+
+  await setDoc(ref, payload, { merge: true })
+  return { id: proposal.id, previousPct, newPct: payload.newPct, ref }
+}
