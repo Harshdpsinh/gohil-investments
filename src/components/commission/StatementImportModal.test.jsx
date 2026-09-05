@@ -6,11 +6,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import StatementImportModal from './StatementImportModal'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
+import { upsertCommissionMaster } from '../../firebase/commissionOps'
 import { parseImportFile } from '../../utils/exportUtils'
 
 vi.mock('../../firebase/firestore', () => ({
   addCommissionTransaction: vi.fn(async () => ({ id: 'txn' })),
   updatePolicy: vi.fn(async () => {}),
+}))
+vi.mock('../../firebase/commissionOps', () => ({
+  upsertCommissionMaster: vi.fn(async () => ({ id: 'master-1' })),
 }))
 vi.mock('../../utils/exportUtils', () => ({ parseImportFile: vi.fn() }))
 vi.mock('../../utils/pdfStatement', () => ({
@@ -228,5 +232,63 @@ describe('StatementImportModal review table', () => {
       receivedCommission: 127.12,
       payoutMonth: '2026-07',
     }))
+  })
+
+  it('shows Update structure only for a matched row with a statement rate', async () => {
+    await openWithStatement({}, [{
+      'Policy No.': '6305162700008293',
+      'Insured Name': 'Harendra Varmora',
+      Premium: 748,
+      'Total Comm': 95,
+      'Commission %': 12.71,
+    }])
+    expect(screen.getByRole('button', { name: 'Update structure only' })).toBeTruthy()
+  })
+
+  it('confirms then upserts commission_master from Update structure only', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await openWithStatement({}, [{
+      'Policy No.': '6305162700008293',
+      'Insured Name': 'Harendra Varmora',
+      Premium: 748,
+      'Total Comm': 95,
+      'Commission %': 14,
+    }])
+    fireEvent.click(screen.getByRole('button', { name: 'Update structure only' }))
+    await waitFor(() => expect(upsertCommissionMaster).toHaveBeenCalledTimes(1))
+    expect(confirmSpy).toHaveBeenCalled()
+    const proposal = upsertCommissionMaster.mock.calls[0][0]
+    expect(proposal.payload.policyYear).toBe('FY')
+    expect(proposal.payload.commissionPct).toBe(14)
+    expect(proposal.payload.structureUpdated).toBe(true)
+    expect(proposal.payload.sourceFileName).toBe('star-july.csv')
+    expect(updatePolicy).toHaveBeenCalledWith('p1', expect.objectContaining({
+      fyCommission: 14,
+      structureUpdated: true,
+      previousPct: 12.71,
+      newPct: 14,
+    }))
+    confirmSpy.mockRestore()
+  })
+
+  it('OK commission + structure posts ledger with structure audit fields', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await openWithStatement({}, [{
+      'Policy No.': '6305162700008293',
+      'Insured Name': 'Harendra Varmora',
+      Premium: 748,
+      'Total Comm': 95,
+      'Commission %': 13,
+    }])
+    fireEvent.click(screen.getByLabelText(/Also update commission structure/i))
+    fireEvent.click(screen.getByRole('button', { name: /OK · commission \+ structure/ }))
+    await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalled())
+    expect(upsertCommissionMaster).toHaveBeenCalled()
+    expect(addCommissionTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      structureUpdated: true,
+      newPct: 13,
+      sourceFileName: 'star-july.csv',
+    }))
+    confirmSpy.mockRestore()
   })
 })

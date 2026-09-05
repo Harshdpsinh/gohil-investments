@@ -16,7 +16,13 @@ import {
   summarise,
 } from '../../utils/commissionImport'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
+import { upsertCommissionMaster } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
+import {
+  canUpdateStructure,
+  policyStructureStamp,
+  proposeMasterUpsert,
+} from '../../utils/commissionStructure'
 import { fmtCurrency } from '../../utils/dateUtils'
 import { insurerOptions } from '../../utils/insurers'
 import { isStaleChunkError, reloadIfPageIsStale, reloadOnceForStaleChunk } from '../../utils/staleChunk'
@@ -207,6 +213,14 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     createdBy: user?.uid || '',
     createdByEmail: user?.email || '',
     remarks: `Imported from ${fileName} row ${row.sourceRow}`,
+    ...(row._structure ? {
+      structureUpdated: true,
+      previousPct: row._structure.previousPct,
+      newPct: row._structure.newPct,
+      sourceFileName: fileName || '',
+      structureUpdatedAt: row._structure.structureUpdatedAt || new Date().toISOString(),
+      structureUpdatedBy: user?.email || user?.uid || '',
+    } : {}),
   }
   }
 
@@ -216,7 +230,44 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     setReviewing(remaining[0]?.sourceRow ?? sourceRow)
   }
 
-  const okRow = async (row, policy) => {
+  const applyStructure = async (row, policy) => {
+    const proposal = proposeMasterUpsert(row, policy, { sourceFileName: fileName, user })
+    if (!proposal) {
+      throw new Error('Cannot update structure without a bound policy and a statement rate.')
+    }
+    // Strip test-only guards before write
+    const { guards, ...payload } = proposal.payload
+    await upsertCommissionMaster({ ...proposal, payload })
+    const stamp = policyStructureStamp({ ...proposal, payload }, { sourceFileName: fileName })
+    await updatePolicy(policy.id, stamp)
+    return { ...proposal, payload, stamp }
+  }
+
+  const updateStructureRow = async (row, policy) => {
+    if (!policy?.id) {
+      toast.error('Pick the matching policy, then update structure.')
+      return
+    }
+    if (!canUpdateStructure(row, policy)) {
+      toast.error('Structure update needs a matched or review-bound row with a rate.')
+      return
+    }
+    const proposal = proposeMasterUpsert(row, policy, { sourceFileName: fileName, user })
+    const year = proposal?.payload?.policyYear || 'FY'
+    const msg = `Update commission structure for ${proposal.payload.insurer || 'carrier'} · ${proposal.payload.product || 'plan'} · ${year}?\n\n${proposal.previousPct}% → ${proposal.newPct}%\nSource: ${fileName || 'statement'}`
+    if (!window.confirm(msg)) return
+    setBusy(true)
+    try {
+      await applyStructure(row, policy)
+      toast.success(`Structure updated (${year}: ${proposal.previousPct}% → ${proposal.newPct}%).`)
+    } catch (err) {
+      toast.error(err.message || 'Could not update commission structure.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const okRow = async (row, policy, { updateStructure = false } = {}) => {
     if (!policy?.id) {
       toast.error('Pick the matching policy, then press OK.')
       return
@@ -229,16 +280,35 @@ export default function StatementImportModal({ open, onClose, policies, user, on
         clientName: policy.clientName,
       },
     }))
+    const readyRow = { ...row, policy, policyNumber: policy.policyNumber, clientName: policy.clientName }
+    if (updateStructure && canUpdateStructure(readyRow, policy)) {
+      const proposal = proposeMasterUpsert(readyRow, policy, { sourceFileName: fileName, user })
+      const year = proposal?.payload?.policyYear || 'FY'
+      const msg = `Also update commission structure for ${proposal.payload.insurer || 'carrier'} · ${proposal.payload.product || 'plan'} · ${year}?\n\n${proposal.previousPct}% → ${proposal.newPct}%`
+      if (!window.confirm(msg)) return
+    }
     setBusy(true)
     try {
-      const readyRow = { ...row, policy, policyNumber: policy.policyNumber, clientName: policy.clientName }
-      await addCommissionTransaction(payloadFor(readyRow))
-      if (readyRow.commissionPct > 0 && readyRow.commissionPct <= 100) {
+      let structureMeta = null
+      if (updateStructure && canUpdateStructure(readyRow, policy)) {
+        const applied = await applyStructure(readyRow, policy)
+        structureMeta = {
+          previousPct: applied.previousPct,
+          newPct: applied.newPct,
+          structureUpdatedAt: applied.stamp.structureUpdatedAt,
+        }
+      } else if (readyRow.commissionPct > 0 && readyRow.commissionPct <= 100) {
         const field = commissionRateField(policy, readyRow.businessType)
         await updatePolicy(policy.id, { [field]: readyRow.commissionPct })
       }
+      const readyWithStructure = structureMeta
+        ? { ...readyRow, _structure: structureMeta }
+        : readyRow
+      await addCommissionTransaction(payloadFor(readyWithStructure))
       markPosted(row.sourceRow)
-      toast.success('Commission updated. You can check it on Commission Tracker.')
+      toast.success(structureMeta
+        ? 'Commission + structure updated. Check Commission Tracker.'
+        : 'Commission updated. You can check it on Commission Tracker.')
       onPosted?.()
     } catch (err) {
       if (err?.code === 'commission/duplicate-post') {
@@ -486,6 +556,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
               posted={reviewRow ? postedRows.has(reviewRow.sourceRow) : false}
               busy={busy}
               onOk={okRow}
+              onUpdateStructure={updateStructureRow}
             />
             </div>
 
@@ -538,8 +609,9 @@ function Tile({ label, value, tone = '' }) {
   )
 }
 
-function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk }) {
+function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, onUpdateStructure }) {
   const [pickedId, setPickedId] = useState('')
+  const [alsoStructure, setAlsoStructure] = useState(false)
   const candidates = useMemo(
     () => (row ? matchCandidates(row, policies) : []),
     [row, policies],
@@ -548,6 +620,7 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk }) 
   useEffect(() => {
     if (!row) return
     setPickedId(row.policy?.id || candidates[0]?.id || '')
+    setAlsoStructure(false)
   }, [row, candidates])
 
   const picked = candidates.find(p => p.id === pickedId)
@@ -612,14 +685,38 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk }) 
             <p className="text-xs text-slate-500">No policy in the book looks close. Type the full policy number on the left, then come back here.</p>
           )}
 
+          {picked && canUpdateStructure(row, picked) && (
+            <label className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={alsoStructure}
+                disabled={busy || posted}
+                onChange={e => setAlsoStructure(e.target.checked)}
+              />
+              <span>Also update commission structure (master rate for this insurer / plan / FY·RY)</span>
+            </label>
+          )}
+
           <button
             type="button"
             className="btn-primary w-full"
             disabled={busy || posted || !picked}
-            onClick={() => onOk(row, picked)}
+            onClick={() => onOk(row, picked, { updateStructure: alsoStructure })}
           >
-            {busy ? 'Saving…' : posted ? 'Already updated' : 'OK · update this commission'}
+            {busy ? 'Saving…' : posted ? 'Already updated' : alsoStructure ? 'OK · commission + structure' : 'OK · update this commission'}
           </button>
+
+          {picked && canUpdateStructure(row, picked) && (
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              disabled={busy}
+              onClick={() => onUpdateStructure?.(row, picked)}
+            >
+              Update structure only
+            </button>
+          )}
         </div>
       )}
     </aside>

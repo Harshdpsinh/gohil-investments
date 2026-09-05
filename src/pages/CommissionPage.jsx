@@ -1,12 +1,14 @@
 // src/pages/CommissionPage.jsx
 // ✅ FIXED: CM1 (debounce on CommCell save), CM2 (safe date parse in filter),
 //           CM3 (NaN% guard in type breakdown bars)
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { usePolicies }  from '../hooks/usePolicies'
 import { useClients }   from '../hooks/useClients'
 import { useAuth }       from '../hooks/useAuth'
-import { updatePolicy, getCommissionTransactionsPage } from '../firebase/firestore'
+import { updatePolicy } from '../firebase/firestore'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
+import { useCommissionLedger } from '../hooks/useCommissionLedger'
+import { STRUCTURE_HISTORY_COLS, withStructureExportFields } from '../utils/commissionStructure'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
 import {
   AGEING_BUCKETS, RECONCILE_STATUS, ageingSummary, insurerScorecard,
@@ -36,6 +38,20 @@ const COMM_COLS = [
   { header:'Total Comm ₹',  accessor: r => r.totalComm     },
   { header:'Start Date',    accessor: r => fmtDate(r.startDate) },
   { header:'Policy Year',   accessor: r => r.policyYear || 1 },
+  ...STRUCTURE_HISTORY_COLS,
+]
+
+const LEDGER_COLS = [
+  { header:'Policy No', accessor: r => r.policyNumber },
+  { header:'Client', accessor: r => r.clientName },
+  { header:'Insurer', accessor: r => r.insurer },
+  { header:'Plan', accessor: r => r.planName },
+  { header:'Business', accessor: r => r.businessType },
+  { header:'Premium ₹', accessor: r => r.premium },
+  { header:'Received ₹', accessor: r => r.receivedCommission },
+  { header:'Net ₹', accessor: r => r.netReceived },
+  { header:'Payout Month', accessor: r => r.payoutMonth },
+  ...STRUCTURE_HISTORY_COLS,
 ]
 
 const STATUS_LABEL = {
@@ -190,73 +206,26 @@ export default function CommissionPage() {
   const [typeFilter,  setTypeFilter]  = useState('All')
   const [yearFilter,  setYearFilter]  = useState('All')
   const [monthFilter, setMonthFilter] = useState('All')
-  const [transactions, setTransactions] = useState([])
-  const [transactionCursor, setTransactionCursor] = useState(null)
-  const [hasMoreTransactions, setHasMoreTransactions] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [actualView, setActualView] = useState('insurer')
   const [ledgerType, setLedgerType] = useState('All')   // Fresh / Renewal, as the statement said
   const [ledgerPlan, setLedgerPlan] = useState('All')   // plan / LOB, as the statement said
-  const [ledgerError, setLedgerError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [reviewRow, setReviewRow] = useState(null)
   const [reconView, setReconView] = useState('outstanding')
   const [reconStatus, setReconStatus] = useState('all')
-  const [loadingAll, setLoadingAll] = useState(false)
 
-  useEffect(() => {
-    if (!isAdmin) return
-    getCommissionTransactionsPage({ pageSize: 100 }).then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') }).catch(err => { const message = err.message || 'Could not load posted commission.'; setLedgerError(message); toast.error(message) })
-  }, [isAdmin])
-
-  const reloadTransactions = useCallback(() => {
-    getCommissionTransactionsPage({ pageSize: 100 })
-      .then(page => { setTransactions(page.rows); setTransactionCursor(page.cursor); setHasMoreTransactions(page.hasMore); setLedgerError('') })
-      .catch(err => toast.error(err.message || 'Could not refresh commission ledger.'))
-  }, [])
-
-  /**
-   * Reconciliation compares every policy against the WHOLE ledger. On a partial
-   * ledger a policy whose payout sits on an unloaded page reads as unpaid, so
-   * the panel below refuses to be trusted until this has run.
-   */
-  const loadEntireLedger = async () => {
-    if (loadingAll) return
-    setLoadingAll(true)
-    try {
-      let cursor = transactionCursor
-      let more = hasMoreTransactions
-      const collected = []
-      while (more) {
-        const page = await getCommissionTransactionsPage({ pageSize: 500, cursor })
-        collected.push(...page.rows)
-        cursor = page.cursor
-        more = page.hasMore
-      }
-      setTransactions(current => [...current, ...collected])
-      setTransactionCursor(cursor)
-      setHasMoreTransactions(false)
-      setLedgerError('')
-    } catch (err) {
-      const message = err.message || 'Could not load the full commission ledger.'
-      setLedgerError(message)
-      toast.error(message)
-    } finally {
-      setLoadingAll(false)
-    }
-  }
-
-  const loadMoreTransactions = async () => {
-    if (!hasMoreTransactions || loadingMore) return
-    setLoadingMore(true)
-    try {
-      const page = await getCommissionTransactionsPage({ pageSize: 100, cursor: transactionCursor })
-      setTransactions(current => [...current, ...page.rows])
-      setTransactionCursor(page.cursor)
-      setHasMoreTransactions(page.hasMore)
-    } catch (err) { const message = err.message || 'Could not load more commission history.'; setLedgerError(message); toast.error(message) }
-    finally { setLoadingMore(false) }
-  }
+  // NEW-004: full ledger via useCommissionLedger so unpaid/awaited flags are not
+  // wrong on a partial page of 100. Hook auto-pages until hasMore is false.
+  const {
+    transactions,
+    hasMoreTransactions,
+    ledgerError,
+    loadingAll,
+    loadingMore,
+    reloadTransactions,
+    loadEntireLedger,
+    loadMoreTransactions,
+  } = useCommissionLedger(isAdmin)
 
   const enriched = useMemo(() =>
     policies.map(p => ({
@@ -411,13 +380,17 @@ export default function CommissionPage() {
   const downloadSimple = async (rows, cols, sheet, name, format) => {
     if (!rows.length) return toast.error('Nothing to download in this view.')
     try {
-      if (format === 'excel') await exportToExcel(rows, cols, sheet, name)
-      else await exportToCSV(rows, cols, name)
+      const exportRows = rows.map(withStructureExportFields)
+      if (format === 'excel') await exportToExcel(exportRows, cols, sheet, name)
+      else await exportToCSV(exportRows, cols, name)
       toast.success('Download ready.')
     } catch (err) {
       toast.error(err.message || 'Could not build the file.')
     }
   }
+
+  const downloadLedger = format =>
+    downloadSimple(ledgerRows, LEDGER_COLS, 'Commission Ledger', 'commission-ledger', format)
 
   const downloadRecon = format =>
     downloadSimple(reconRows, RECON_COLS, 'Reconciliation', `commission-reconciliation-${reconStatus}`, format)
@@ -461,9 +434,9 @@ export default function CommissionPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           {isAdmin && <button onClick={()=>setImportOpen(true)} className="btn-primary text-xs">⬆ Import Statement</button>}
-          <button onClick={()=>exportToCSV(filtered,COMM_COLS,'commission')} className="btn-secondary text-xs">⬇ CSV</button>
-          <button onClick={()=>exportToExcel(filtered,COMM_COLS,'Commission','commission')} className="btn-secondary text-xs">⬇ Excel</button>
-          <button onClick={async()=>await exportToPDF(filtered,COMM_COLS,'Commission Report','commission')} className="btn-secondary text-xs">⬇ PDF</button>
+          <button onClick={()=>exportToCSV(filtered.map(withStructureExportFields),COMM_COLS,'commission')} className="btn-secondary text-xs">⬇ CSV</button>
+          <button onClick={()=>exportToExcel(filtered.map(withStructureExportFields),COMM_COLS,'Commission','commission')} className="btn-secondary text-xs">⬇ Excel</button>
+          <button onClick={async()=>await exportToPDF(filtered.map(withStructureExportFields),COMM_COLS,'Commission Report','commission')} className="btn-secondary text-xs">⬇ PDF</button>
         </div>
       </div>
 
@@ -704,7 +677,7 @@ export default function CommissionPage() {
       </div>
 
       <div className="fintech-panel p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only · {ledgerRows.length} of {transactions.length} entries</p></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise'],['business','Fresh vs Renewal'],['plan','Plan-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only · {ledgerRows.length} of {transactions.length} entries</p><div className="mt-2 flex gap-2"><button type="button" className="btn-secondary text-xs" onClick={() => downloadLedger('csv')}>⬇ Ledger CSV</button><button type="button" className="btn-secondary text-xs" onClick={() => downloadLedger('excel')}>⬇ Ledger Excel</button></div></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise'],['business','Fresh vs Renewal'],['plan','Plan-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
         {actualView === 'insurer' && insurerDupes.length > 0 && (
           <details className="mt-3 rounded-lg border border-slate-200 p-2.5 text-xs dark:border-slate-700">
             <summary className="cursor-pointer font-bold text-amber-700 dark:text-amber-300">

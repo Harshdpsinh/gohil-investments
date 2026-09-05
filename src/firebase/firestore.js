@@ -486,6 +486,13 @@ export async function addCommissionTransaction(data = {}) {
     createdBy: data.createdBy || '',
     createdByEmail: data.createdByEmail || '',
     remarks: data.remarks || '',
+    // Optional structure-update audit (additive; legacy rows omit these).
+    structureUpdated: Boolean(data.structureUpdated),
+    previousPct: data.previousPct === undefined || data.previousPct === '' ? null : Number(data.previousPct),
+    newPct: data.newPct === undefined || data.newPct === '' ? null : Number(data.newPct),
+    sourceFileName: data.sourceFileName || '',
+    structureUpdatedAt: data.structureUpdatedAt || '',
+    structureUpdatedBy: data.structureUpdatedBy || data.updatedByEmail || data.createdByEmail || '',
   })
   if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
 

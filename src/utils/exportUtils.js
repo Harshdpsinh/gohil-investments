@@ -549,3 +549,6 @@ export function parseMotorRow(r) {
 // ─────────────────────────────────────────────────────────────
 export const POLICY_IMPORT_HEADERS = HEALTH_IMPORT_HEADERS
 export const POLICY_IMPORT_SAMPLE  = HEALTH_IMPORT_SAMPLE
+
+// Structure-update history columns (commission exports)
+export { STRUCTURE_HISTORY_COLS, withStructureExportFields } from './commissionStructure'
