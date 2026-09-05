@@ -3,6 +3,7 @@
 // exportUtils.parseImportFile) onto existing policies. Pure — no Firebase, no
 // React — so the matching rules can be tested directly.
 import { fuzzyMatch } from './policyImport'
+import { parseAnyDate, toInputDate } from './dateUtils'
 
 // Insurers all name their columns differently. Lowercased, non-alphanumerics
 // stripped, so "Policy No." and "policy_no" collapse to the same key.
@@ -189,19 +190,6 @@ function namesAgree(a, b) {
   return ta.filter(t => tb.includes(t)).length >= 2
 }
 
-function datesAgree(a, b) {
-  const parse = s => {
-    const t = String(s || '').trim()
-    const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/)
-    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
-    const dmy = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/)
-    if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`
-    return ''
-  }
-  const x = parse(a), y = parse(b)
-  return Boolean(x && y && x === y)
-}
-
 function premiumsAgree(a, b) {
   const x = Number(a) || 0
   const y = Number(b) || 0
@@ -227,9 +215,11 @@ const withIdentity = (row, policy, status, reason) => {
  * Match one statement row against the policy book.
  * status: 'matched' needs an exact policy number AND a corroborating
  * name or insurer. Masked last-4 numbers (Star Health July) never
- * auto-post unless last-4, name, and premium or start date all agree
- * on a unique Star policy. Anything weaker goes to 'review'. Nothing
- * here writes a ledger row.
+ * auto-post unless last-4, name, AND premium all agree on a unique Star
+ * policy. Date agreement is not enough. Anything weaker goes to 'review'.
+ * A name hit without a number is never attached — that is a new policy
+ * under an existing client, not commission on their old number.
+ * Nothing here writes a ledger row.
  */
 export function matchRow(row, policies = []) {
   const masked = isMaskedPolicyNumber(row.policyNumber)
@@ -253,9 +243,8 @@ export function matchRow(row, policies = []) {
   }
 
   // Star Health July: ************2955. Last-4 alone is never enough to
-  // issue a commission — only a unique last-4 plus name plus premium or
-  // start date becomes 'matched'. Collisions stay in review with no policy
-  // attached, so Verify & Save cannot post them.
+  // issue a commission — only a unique last-4 plus name plus premium
+  // becomes 'matched'. Collisions stay in review with no policy attached.
   if (masked) {
     const tail = last4(row.policyNumber)
     const hits = tail
@@ -276,20 +265,24 @@ export function matchRow(row, policies = []) {
     if (hits.length === 1) return matchLast4(row, hits[0])
   }
 
-  // No policy number hit — fall back to name, but never auto-post on a name alone.
+  // Name without a number is an existing client, not their old policy.
+  // Never attach a policy here — the review panel offers "add as new".
   const near = row.clientName
     ? fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.8)
         .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer))
     : []
-  if (near.length === 1) return { ...row, policy: near[0], status: 'review', reason: 'Matched on name only' }
-  if (near.length > 1) return { ...row, policy: null, status: 'review', reason: `${near.length} possible clients` }
+  if (near.length === 1) {
+    return { ...row, policy: null, status: 'review', reason: 'Existing client — new policy?' }
+  }
+  if (near.length > 1) {
+    return { ...row, policy: null, status: 'review', reason: `${near.length} clients share this name — new policy?` }
+  }
   return { ...row, policy: null, status: 'unmatched', reason: 'No matching policy found' }
 }
 
 /**
- * Policies a human should see when a row is in review. Last-4 hits first,
- * then close names. Never used to auto-post — the import sheet OK button
- * is what attaches one of these and writes the ledger row.
+ * Policies that could be THE SAME policy (number/last-4 hit). Name-only
+ * hits are not commission targets — those belong on matchClientCandidates.
  */
 export function matchCandidates(row, policies = []) {
   if (!row) return []
@@ -314,35 +307,153 @@ export function matchCandidates(row, policies = []) {
   } else if (num) {
     add(policies.filter(p => key(p.policyNumber) === num))
   }
-  if (row.clientName) {
-    add(
-      fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.7)
-        .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer)),
-    )
+  return out.slice(0, 8)
+}
+
+/**
+ * Existing people this statement row might belong to, for "add as a new
+ * policy under this client". Never used to post commission on an old number.
+ */
+export function matchClientCandidates(row, policies = [], clients = []) {
+  if (!row?.clientName) return []
+  const seen = new Set()
+  const out = []
+  const take = (id, entry) => {
+    if (!id || seen.has(id)) return
+    seen.add(id)
+    out.push(entry)
+  }
+  const near = fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.7)
+    .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer))
+  for (const policy of near) {
+    take(policy.clientId || `policy:${policy.id}`, {
+      clientId: policy.clientId || '',
+      clientName: policy.clientName,
+      samplePolicyNumber: policy.policyNumber,
+      insurer: policy.insurer,
+      premium: policy.premium,
+    })
+  }
+  if (clients.length) {
+    const hits = fuzzyMatch(row.clientName, clients.map(c => ({ ...c, name: c.name })), 0.7)
+    for (const client of hits) {
+      take(client.id, {
+        clientId: client.id,
+        clientName: client.name,
+        samplePolicyNumber: '',
+        insurer: '',
+        premium: 0,
+      })
+    }
   }
   return out.slice(0, 8)
+}
+
+export function candidateMismatches(row, policy) {
+  if (!row || !policy) return ['no policy']
+  const issues = []
+  if (isMaskedPolicyNumber(row.policyNumber)) {
+    const want = last4(row.policyNumber)
+    const got = last4(policy.policyNumber)
+    if (want && got && want !== got) issues.push(`last-4 ${got} ≠ ${want}`)
+  } else if (key(row.policyNumber) && key(policy.policyNumber)
+    && key(row.policyNumber) !== key(policy.policyNumber)) {
+    issues.push('policy number differs')
+  }
+  if (row.clientName && policy.clientName && !namesAgree(row.clientName, policy.clientName)) {
+    issues.push('name differs')
+  }
+  if (row.insurer && policy.insurer && !sameInsurer(row.insurer, policy.insurer)) {
+    issues.push('insurer differs')
+  }
+  if (row.premium && policy.premium && !premiumsAgree(row.premium, policy.premium)) {
+    issues.push('premium differs')
+  }
+  return issues
+}
+
+/** True when OK may post this statement row against this book policy. */
+export function canPostAgainstPolicy(row, policy) {
+  const issues = candidateMismatches(row, policy)
+  if (!issues.length) return true
+  if (!isMaskedPolicyNumber(row.policyNumber) && key(row.policyNumber) === key(policy.policyNumber)) {
+    return !issues.some(i => i === 'name differs' || i === 'insurer differs' || i === 'policy number differs')
+  }
+  return false
+}
+
+export function assertTypedPolicyNumber(typed, statementNumber) {
+  const clean = String(typed || '').replace(/\s/g, '')
+  if (!clean) throw new Error('Type the full policy number from the policy copy.')
+  if (isMaskedPolicyNumber(clean)) {
+    throw new Error('Star prints last-4 only. Type the full policy number from the policy copy.')
+  }
+  const digits = clean.replace(/\D/g, '')
+  if (digits.length < 8) throw new Error('That does not look like a full policy number.')
+  if (isMaskedPolicyNumber(statementNumber)) {
+    const want = last4(statementNumber)
+    if (want && last4(clean) !== want) {
+      throw new Error(`Last-4 must be ${want} to match this statement row.`)
+    }
+  }
+  return clean
+}
+
+function defaultExpiryIso(start) {
+  const d = parseAnyDate(start)
+  if (!d) return ''
+  const next = new Date(d)
+  next.setFullYear(next.getFullYear() + 1)
+  return toInputDate(next)
+}
+
+/** Policy payload for "add as new" from a statement row. Does not write. */
+export function newPolicyDraft(row, {
+  clientId, clientName, insurer, startDate, expiryDate, policyNumber,
+} = {}) {
+  const start = toInputDate(startDate || row.startDate)
+  const expiry = toInputDate(expiryDate) || defaultExpiryIso(start)
+  const pct = row.commissionPct > 0 && row.commissionPct <= 100
+    ? row.commissionPct
+    : (row.premium ? Number(((Number(row.commissionAmount) / Number(row.premium)) * 100).toFixed(2)) : 0)
+  const renewal = row.businessType === 'Renewal'
+  return {
+    policyNumber,
+    clientId,
+    clientName: clientName || row.clientName || '',
+    insurer: insurer || row.insurer || '',
+    policyType: 'Health',
+    planName: row.planName || '',
+    premium: Number(row.premium) || 0,
+    startDate: start,
+    expiryDate: expiry,
+    status: 'Active',
+    frequency: 'Yearly',
+    fyCommission: renewal ? 0 : pct,
+    ryCommission: renewal ? pct : 0,
+    notes: `Added from commission statement${row.sourceRow ? ` row ${row.sourceRow}` : ''}`,
+  }
 }
 
 function matchLast4(row, policy) {
   const nameOk = namesAgree(row.clientName, policy.clientName)
   const premiumOk = premiumsAgree(row.premium, policy.premium)
-  const dateOk = datesAgree(row.startDate, policy.startDate)
-  if (nameOk && (premiumOk || dateOk)) {
+  if (nameOk && premiumOk) {
     return {
       ...row,
       policy,
       status: 'matched',
-      reason: 'Last-4, name and premium/date agree (masked Star number)',
+      reason: 'Last-4, name and premium agree (masked Star number)',
     }
   }
   if (nameOk) {
-    return { ...row, policy, status: 'review', reason: 'Last-4 and name agree; confirm premium/date' }
+    return { ...row, policy, status: 'review', reason: 'Last-4 and name agree; premium differs — confirm or add as new' }
   }
   return {
     ...row,
-    policy,
+    policy: null,
     status: 'review',
-    reason: 'Last-4 matches a Star policy; name differs',
+    reason: 'Last-4 hits a different name — add as new policy',
   }
 }
 

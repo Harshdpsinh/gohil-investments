@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement, matchCandidates,
+  matchClientCandidates, candidateMismatches, canPostAgainstPolicy, assertTypedPolicyNumber,
+  newPolicyDraft,
   postingKey, legacyPostingKey, summarise, toPayoutMonth, normaliseBusinessType,
   isMaskedPolicyNumber, last4,
 } from './commissionImport'
@@ -266,22 +268,25 @@ describe('matchRow', () => {
     expect(r.reason).toMatch(/insurer differs/)
   })
 
-  it('never auto-matches on name alone', () => {
+  it('never attaches a policy on name alone — that is a new policy', () => {
     const r = matchRow(row({ policyNumber: '' }), policies)
     expect(r.status).toBe('review')
-    expect(r.policy.id).toBe('p1')
+    expect(r.policy).toBeNull()
+    expect(r.reason).toMatch(/new policy/)
   })
 
   it('flags an ambiguous name rather than guessing', () => {
     const r = matchRow(row({ policyNumber: '', insurer: '' }), policies)
     expect(r.status).toBe('review')
     expect(r.policy).toBeNull()
-    expect(r.reason).toMatch(/possible clients/)
+    expect(r.reason).toMatch(/new policy/)
   })
 
-  it('lists both possible clients so a human can OK one', () => {
-    const hits = matchCandidates(row({ policyNumber: '', insurer: '' }), policies)
-    expect(hits.map(p => p.id).sort()).toEqual(['p1', 'p3'])
+  it('lists existing clients for add-as-new, not as commission targets', () => {
+    const blank = row({ policyNumber: '', insurer: '' })
+    expect(matchCandidates(blank, policies)).toEqual([])
+    expect(matchClientCandidates(blank, policies).map(c => c.clientName).sort())
+      .toEqual(['Meera Patel', 'Meera Patel'])
   })
 
   it('reports unmatched when nothing lines up', () => {
@@ -361,23 +366,25 @@ describe('Star Health masked last-4 matching', () => {
     expect(r.policy.id).toBe('s1')
   })
 
-  it('matches when last-4, name and start date agree even if premium is off', () => {
+  it('stays in review when last-4 and name agree but premium is off, even if the date matches', () => {
     const r = matchRow(star({ premium: 999 }), book)
-    expect(r.status).toBe('matched')
+    expect(r.status).toBe('review')
     expect(r.policy.id).toBe('s1')
+    expect(r.reason).toMatch(/premium differs/)
   })
 
   it('stays in review when last-4 and name agree but premium and date do not', () => {
     const r = matchRow(star({ premium: 999, startDate: '01/01/2020' }), book)
     expect(r.status).toBe('review')
     expect(r.policy.id).toBe('s1')
-    expect(r.reason).toMatch(/confirm premium/)
+    expect(r.reason).toMatch(/premium differs/)
   })
 
-  it('stays in review when last-4 hits but the name is someone else', () => {
+  it('does not attach a last-4 hit when the name is someone else', () => {
     const r = matchRow(star({ clientName: 'Totally Different Person' }), book)
     expect(r.status).toBe('review')
-    expect(r.reason).toMatch(/name differs/)
+    expect(r.policy).toBeNull()
+    expect(r.reason).toMatch(/different name/)
   })
 
   it('does not issue against the HDFC policy that happens to share last-4', () => {
@@ -438,6 +445,61 @@ describe('Star Health masked last-4 matching', () => {
     const july = { policyNumber: '************2955', payoutMonth: '2026-07', commissionAmount: 127.12, sourceRow: 1 }
     const june = { policyNumber: '63051627000082', payoutMonth: '2026-06', commissionAmount: 112.5, sourceRow: 1 }
     expect(postingKey(july)).not.toBe(postingKey(june))
+  })
+
+  it('does not offer a same-name different-number policy as a commission target', () => {
+    const old = [{
+      id: 'old', policyNumber: '2845112600005923', clientId: 'c-ash',
+      clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 11800,
+    }]
+    const r = matchRow(star(), old)
+    expect(r.status).toBe('review')
+    expect(r.policy).toBeNull()
+    expect(r.reason).toMatch(/new policy/)
+    expect(matchCandidates(star(), old)).toEqual([])
+    expect(canPostAgainstPolicy(star(), old[0])).toBe(false)
+    expect(candidateMismatches(star(), old[0]).some(i => i.startsWith('last-4'))).toBe(true)
+    expect(matchClientCandidates(star(), old).map(c => c.clientId)).toEqual(['c-ash'])
+  })
+})
+
+describe('typed policy number and new-policy draft', () => {
+  const row = {
+    policyNumber: '************2955', clientName: 'ASHVINBHAI JITENDRABHAI BHATT',
+    insurer: 'Star Health', premium: 750, commissionAmount: 127.12, commissionPct: 16.95,
+    startDate: '30/07/2026', businessType: 'Fresh', planName: 'Star Comprehensive',
+    sourceRow: 2,
+  }
+
+  it('rejects a masked or short number', () => {
+    expect(() => assertTypedPolicyNumber('************2955', row.policyNumber)).toThrow(/full policy number/)
+    expect(() => assertTypedPolicyNumber('2955', row.policyNumber)).toThrow(/full policy number/)
+  })
+
+  it('rejects a full number whose last-4 is not the statement last-4', () => {
+    expect(() => assertTypedPolicyNumber('2845112600005923', row.policyNumber)).toThrow(/Last-4 must be 2955/)
+  })
+
+  it('accepts a full number ending in the statement last-4', () => {
+    expect(assertTypedPolicyNumber('P/2026/0002955', row.policyNumber)).toBe('P/2026/0002955')
+  })
+
+  it('builds a Health policy under the existing client with a one-year expiry', () => {
+    const draft = newPolicyDraft(row, {
+      clientId: 'c-ash', clientName: 'Ashvinbhai Jitendrabhai Bhatt',
+      policyNumber: 'P/2026/0002955',
+    })
+    expect(draft).toMatchObject({
+      policyNumber: 'P/2026/0002955',
+      clientId: 'c-ash',
+      insurer: 'Star Health',
+      policyType: 'Health',
+      premium: 750,
+      startDate: '2026-07-30',
+      expiryDate: '2027-07-30',
+      fyCommission: 16.95,
+      ryCommission: 0,
+    })
   })
 })
 
