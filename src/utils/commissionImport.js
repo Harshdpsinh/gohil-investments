@@ -17,7 +17,11 @@ const ALIASES = {
   businessType: ['freshrenewal', 'businesstype', 'newrenewal', 'policystatus', 'renewedpolicy', 'fresh', 'renewal'],
   premium: ['premiumforcommission', 'gwpbeforetax', 'grosspremium', 'premium', 'netpremium', 'premiumamount', 'gwp', 'gwpfull', 'amount'],
   commissionPct: ['commissionpct', 'commissionperct', 'payoutpct', 'commissionpercent', 'commissionpercentage', 'commperct', 'commrate', 'brokeragepct', 'rate'],
-  commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'expense', 'payout', 'netpayable', 'netpayment', 'commission'],
+  commissionAmount: ['totalcomm', 'commissionstructure', 'totalcommission', 'commissionamount', 'commissionamt', 'commamount', 'commissionodamt', 'brokerageamount', 'brokerage', 'expense', 'payout', 'commission'],
+  // Net Payment / Net Payable is bank-landed cash, not the gross commission.
+  // Keeping it off the commissionAmount aliases stops Niva Bupa from posting
+  // Net Payment as the credited amount.
+  netPayable: ['netpayable', 'netpayment', 'netreceived', 'amountcredited'],
   // Insurers deduct 5% TDS under s.194D. Capturing it turns the ledger into
   // something that can be checked against Form 26AS at year end instead of
   // being reconciled by hand.
@@ -105,6 +109,7 @@ export function normaliseStatement(rows = []) {
         premium: toNumber(row[cols.premium]),
         commissionPct: toNumber(row[cols.commissionPct]),
         commissionAmount: toNumber(row[cols.commissionAmount]),
+        netPayable: toNumber(row[cols.netPayable]),
         tds: toNumber(row[cols.tds]),
         gst: toNumber(row[cols.gst]),
         payoutDate,
@@ -113,6 +118,25 @@ export function normaliseStatement(rows = []) {
     })
     // All-zero policy numbers are Niva Bupa's balance adjustments, not policies.
     .filter(r => (r.policyNumber || r.clientName) && !/^0+$/.test(r.policyNumber))
+}
+
+export function postedAmounts(row = {}) {
+  const tds = Number(row.tds) || 0
+  const grossCol = Number(row.commissionAmount) || 0
+  const netCol = Number(row.netPayable) || 0
+  const receivedCommission = grossCol || netCol
+  let netReceived
+  if (netCol) netReceived = netCol
+  else if (tds) netReceived = Math.round((receivedCommission - tds) * 100) / 100
+  else netReceived = receivedCommission
+  return { receivedCommission, netReceived, tds }
+}
+
+/** Which policy rate field a statement row should write — renewals must not overwrite fyCommission. */
+export function commissionRateField(policy = {}, businessType = '') {
+  if (businessType === 'Renewal') return 'ryCommission'
+  if (businessType === 'Fresh') return 'fyCommission'
+  return (Number(policy.policyYear) || 1) > 1 ? 'ryCommission' : 'fyCommission'
 }
 
 const sameInsurer = (a, b) => {
@@ -126,7 +150,7 @@ const isClosedTerm = policy => {
   return status === 'Cancelled' || status === 'Renewed-Out' || Boolean(policy?.is_renewed)
 }
 
-function pickCurrentTerm(matches = []) {
+export function pickCurrentTerm(matches = []) {
   if (!matches.length) return null
   if (matches.length === 1) return matches[0]
   const live = matches.filter(policy => !isClosedTerm(policy))

@@ -153,7 +153,7 @@ describe('reconcilePolicies', () => {
     const [row] = run([policy()], [txn({ tds: 75 }), txn({ netReceived: -200, payoutMonth: '2026-07' })])
     expect(row.tds).toBe(75)
     expect(row.reversals).toBe(-200)
-    expect(row.received).toBe(1300)
+    expect(row.received).toBe(1375)
   })
 })
 

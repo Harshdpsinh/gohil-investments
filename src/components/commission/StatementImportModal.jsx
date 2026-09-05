@@ -5,7 +5,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
-import { legacyPostingKey, matchCandidates, matchStatement, normaliseStatement, postingKey, summarise } from '../../utils/commissionImport'
+import {
+  commissionRateField,
+  legacyPostingKey,
+  matchCandidates,
+  matchStatement,
+  normaliseStatement,
+  postedAmounts,
+  postingKey,
+  summarise,
+} from '../../utils/commissionImport'
 import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
@@ -39,6 +48,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const [parsed, setParsed] = useState([])
   const [edits, setEdits] = useState({})          // sourceRow -> field overrides
   const [skipped, setSkipped] = useState(() => new Set())
+  const [includedReview, setIncludedReview] = useState(() => new Set())
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [fileName, setFileName] = useState('')
@@ -79,7 +89,12 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   }, [parsed, edits, policies, insurer, mode])
 
   const stats = useMemo(() => summarise(rows), [rows])
-  const postable = rows.filter(r => r.policy && !skipped.has(r.sourceRow) && !postedRows.has(r.sourceRow))
+  const postable = rows.filter(r => {
+    if (!r.policy || skipped.has(r.sourceRow) || postedRows.has(r.sourceRow)) return false
+    if (r.status === 'matched') return true
+    if (r.status === 'review') return includedReview.has(r.sourceRow)
+    return false
+  })
   const payoutMonth = month && year ? `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}` : ''
   const reviewRow = rows.find(r => r.sourceRow === reviewing) || null
 
@@ -92,7 +107,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   }, [rows, reviewing, postedRows])
 
   const reset = () => {
-    setParsed([]); setEdits({}); setSkipped(new Set())
+    setParsed([]); setEdits({}); setSkipped(new Set()); setIncludedReview(new Set())
     setFileName(''); setFormat(''); setNoDetail(false)
     setReviewing(null); setPostedRows(new Set())
     if (fileRef.current) fileRef.current.value = ''
@@ -125,7 +140,10 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       setNoDetail(false)
       setFileName(file.name)
       setSkipped(new Set())
+      setIncludedReview(new Set())
       setEdits({})
+      setPostedRows(new Set())
+      setReviewing(null)
     } catch (err) {
       if (reloadOnceForStaleChunk(err)) return
       toast.error(
@@ -142,14 +160,28 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const edit = (sourceRow, field, value) =>
     setEdits(prev => ({ ...prev, [sourceRow]: { ...(prev[sourceRow] || {}), [field]: value } }))
 
-  const toggle = sourceRow => setSkipped(prev => {
-    const next = new Set(prev)
-    if (next.has(sourceRow)) next.delete(sourceRow)
-    else next.add(sourceRow)
-    return next
-  })
+  const toggle = (sourceRow, status) => {
+    if (status === 'review') {
+      setIncludedReview(prev => {
+        const next = new Set(prev)
+        if (next.has(sourceRow)) next.delete(sourceRow)
+        else next.add(sourceRow)
+        return next
+      })
+      return
+    }
+    setSkipped(prev => {
+      const next = new Set(prev)
+      if (next.has(sourceRow)) next.delete(sourceRow)
+      else next.add(sourceRow)
+      return next
+    })
+  }
 
-  const payloadFor = row => ({
+  const payloadFor = row => {
+    const amounts = postedAmounts(row)
+    const expected = expectedCommission(row.policy)
+    return {
     policyId: row.policy.id,
     policyNumber: row.policy.policyNumber,
     clientId: row.policy.clientId || '',
@@ -158,11 +190,11 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     businessType: row.businessType || '',
     planName: row.planName || '',
     premium: row.premium || Number(row.policy.premium) || 0,
-    receivedCommission: row.commissionAmount,
-    netReceived: row.commissionAmount,
-    expectedCommission: expectedCommission(row.policy),
-    difference: row.commissionAmount - expectedCommission(row.policy),
-    tds: row.tds || 0,
+    receivedCommission: amounts.receivedCommission,
+    netReceived: amounts.netReceived,
+    expectedCommission: expected,
+    difference: amounts.receivedCommission - expected,
+    tds: amounts.tds,
     gst: row.gst || 0,
     payoutMonth,
     payoutDate: row.payoutDate || '',
@@ -175,7 +207,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     createdBy: user?.uid || '',
     createdByEmail: user?.email || '',
     remarks: `Imported from ${fileName} row ${row.sourceRow}`,
-  })
+  }
+  }
 
   const markPosted = sourceRow => {
     setPostedRows(prev => new Set(prev).add(sourceRow))
@@ -201,7 +234,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       const readyRow = { ...row, policy, policyNumber: policy.policyNumber, clientName: policy.clientName }
       await addCommissionTransaction(payloadFor(readyRow))
       if (readyRow.commissionPct > 0 && readyRow.commissionPct <= 100) {
-        await updatePolicy(policy.id, { fyCommission: readyRow.commissionPct })
+        const field = commissionRateField(policy, readyRow.businessType)
+        await updatePolicy(policy.id, { [field]: readyRow.commissionPct })
       }
       markPosted(row.sourceRow)
       toast.success('Commission updated. You can check it on Commission Tracker.')
@@ -227,7 +261,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       try {
         await addCommissionTransaction(payloadFor(row))
         if (row.commissionPct > 0 && row.commissionPct <= 100) {
-          await updatePolicy(row.policy.id, { fyCommission: row.commissionPct })
+          const field = commissionRateField(row.policy, row.businessType)
+          await updatePolicy(row.policy.id, { [field]: row.commissionPct })
         }
         posted += 1
       } catch (err) {
@@ -368,10 +403,13 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {rows.map(row => {
-                    const off = skipped.has(row.sourceRow)
+                    const reviewOn = row.status === 'review' && includedReview.has(row.sourceRow)
+                    const off = skipped.has(row.sourceRow) || (row.status === 'review' && !reviewOn && !postedRows.has(row.sourceRow))
                     const db = row.policy
                     const saved = postedRows.has(row.sourceRow)
                     const active = reviewing === row.sourceRow
+                    const rateField = db ? commissionRateField(db, row.businessType) : 'fyCommission'
+                    const rateOnFile = db ? Number(db[rateField] || 0) : 0
                     return (
                       <tr
                         key={row.sourceRow}
@@ -402,7 +440,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                           <Val match={db && Math.abs(Number(db.premium || 0) - row.premium) < 1}>
                             {db ? fmtCurrency(db.premium) : '—'}
                           </Val>
-                          <Val>{db ? `${db.fyCommission || 0}% on file` : '—'}</Val>
+                          <Val>{db ? `${rateOnFile}% ${rateField === 'ryCommission' ? 'RY' : 'FY'} on file` : '—'}</Val>
                         </td>
                         <td className="table-cell">
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${saved ? STATUS_STYLE.matched : STATUS_STYLE[row.status]}`}>
@@ -428,8 +466,10 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                             Review
                           </button>
                           {db && !saved && (
-                            <button type="button" onClick={e => { e.stopPropagation(); toggle(row.sourceRow) }} className="mt-1 block font-semibold text-blue-600 dark:text-blue-400">
-                              {off ? 'Include' : 'Skip'}
+                            <button type="button" onClick={e => { e.stopPropagation(); toggle(row.sourceRow, row.status) }} className="mt-1 block font-semibold text-blue-600 dark:text-blue-400">
+                              {row.status === 'review'
+                                ? (reviewOn ? 'Skip' : 'Include')
+                                : (skipped.has(row.sourceRow) ? 'Include' : 'Skip')}
                             </button>
                           )}
                         </td>
@@ -452,7 +492,8 @@ export default function StatementImportModal({ open, onClose, policies, user, on
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Open a row, pick the matching policy if it needs review, then press OK — that
               commission is written immediately so you can check it on Commission Tracker.
-              Remaining matched rows still wait for Verify & Save. Everything posts against{' '}
+              Amber review rows stay out of Verify & Save until you Include them (or OK them).
+              Green matched rows wait for Verify & Save. Everything posts against{' '}
               <strong>{month} {year}</strong>.
             </p>
           </>
