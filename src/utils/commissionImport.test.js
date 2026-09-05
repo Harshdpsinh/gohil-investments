@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  toNumber, mapColumns, normaliseStatement, matchRow, matchStatement,
+  toNumber, mapColumns, normaliseStatement, matchRow, matchStatement, matchCandidates,
   postingKey, legacyPostingKey, summarise, toPayoutMonth, normaliseBusinessType,
   isMaskedPolicyNumber, last4,
 } from './commissionImport'
@@ -279,6 +279,11 @@ describe('matchRow', () => {
     expect(r.reason).toMatch(/possible clients/)
   })
 
+  it('lists both possible clients so a human can OK one', () => {
+    const hits = matchCandidates(row({ policyNumber: '', insurer: '' }), policies)
+    expect(hits.map(p => p.id).sort()).toEqual(['p1', 'p3'])
+  })
+
   it('reports unmatched when nothing lines up', () => {
     const r = matchRow(row({ policyNumber: 'NOPE', clientName: 'Nobody At All' }), policies)
     expect(r.status).toBe('unmatched')
@@ -404,6 +409,18 @@ describe('Star Health masked last-4 matching', () => {
     expect(r.status).toBe('review')
     expect(r.policy).toBeNull()
     expect(r.reason).toMatch(/share last-4/)
+  })
+
+  it('lists both live last-4 hits so a human can OK one', () => {
+    const clash = [
+      ...book,
+      {
+        id: 's6', policyNumber: 'P/2026/1112955', clientName: 'Another Ashvinbhai',
+        insurer: 'Star Health and Allied Insurance', premium: 800, startDate: '2026-07-01',
+      },
+    ]
+    const hits = matchCandidates(star(), clash)
+    expect(hits.map(p => p.id)).toEqual(expect.arrayContaining(['s1', 's6']))
   })
 
   it('reads MRS-glued Star names against the book', () => {

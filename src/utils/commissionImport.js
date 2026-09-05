@@ -262,6 +262,43 @@ export function matchRow(row, policies = []) {
   return { ...row, policy: null, status: 'unmatched', reason: 'No matching policy found' }
 }
 
+/**
+ * Policies a human should see when a row is in review. Last-4 hits first,
+ * then close names. Never used to auto-post — the import sheet OK button
+ * is what attaches one of these and writes the ledger row.
+ */
+export function matchCandidates(row, policies = []) {
+  if (!row) return []
+  const seen = new Set()
+  const out = []
+  const add = list => {
+    for (const policy of list) {
+      if (!policy?.id || seen.has(policy.id)) continue
+      seen.add(policy.id)
+      out.push(policy)
+    }
+  }
+  const masked = isMaskedPolicyNumber(row.policyNumber)
+  const tail = last4(row.policyNumber)
+  const num = key(row.policyNumber)
+  if (masked && tail) {
+    add(policies.filter(p => {
+      const digits = String(p.policyNumber || '').replace(/\D/g, '')
+      return digits.length >= 8 && digits.slice(-4) === tail
+        && (!row.insurer || sameInsurer(row.insurer, p.insurer))
+    }))
+  } else if (num) {
+    add(policies.filter(p => key(p.policyNumber) === num))
+  }
+  if (row.clientName) {
+    add(
+      fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.7)
+        .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer)),
+    )
+  }
+  return out.slice(0, 8)
+}
+
 function matchLast4(row, policy) {
   const nameOk = namesAgree(row.clientName, policy.clientName)
   const premiumOk = premiumsAgree(row.premium, policy.premium)
