@@ -23,6 +23,45 @@ export function reloadOnceForStaleChunk(err, reload = defaultReload) {
   return true
 }
 
+/** Call after a successful boot so the next deploy can recover again. */
+export function clearStaleChunkFlag() {
+  try {
+    window.sessionStorage.removeItem(STALE_CHUNK_KEY)
+  } catch {
+    /* private mode / no storage */
+  }
+}
+
+export function currentPageScript() {
+  if (typeof document === 'undefined') return ''
+  return document.querySelector('script[type="module"][src*="/assets/index-"]')?.getAttribute('src') || ''
+}
+
+export function livePageScriptFromHtml(html) {
+  return String(html || '').match(/src="(\/assets\/index-[^"]+\.js)"/)?.[1] || ''
+}
+
+/**
+ * If this tab booted from an older index-*.js than the live site, reload
+ * before a lazy PDF import 404s. Returns true if a reload was started.
+ */
+export async function reloadIfPageIsStale({ fetchHtml, reload } = {}) {
+  const current = currentPageScript()
+  if (!current) return false
+  try {
+    const html = await (fetchHtml || defaultFetchHtml)()
+    const live = livePageScriptFromHtml(html)
+    if (!live || live === current) return false
+    return reloadOnceForStaleChunk(undefined, reload)
+  } catch {
+    return false
+  }
+}
+
+function defaultFetchHtml() {
+  return fetch(`/?gi-build=${Date.now()}`, { cache: 'no-store' }).then(r => r.text())
+}
+
 function defaultReload() {
   window.location.reload()
 }
