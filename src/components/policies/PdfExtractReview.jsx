@@ -15,6 +15,7 @@ import {
   markAllUncertain, matchExtractedClient, matchExtractedPolicy, splitExtractedFields,
 } from '../../utils/policyPdfExtract'
 import { fmtCurrency } from '../../utils/dateUtils'
+import { reloadOnceForStaleChunk } from '../../utils/staleChunk'
 
 const LABEL = {
   policyNumber: 'Policy number', clientName: 'Client name', insurer: 'Insurer',
@@ -141,6 +142,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       setFileName(file.name)
       setFile(file)
     } catch (err) {
+      if (reloadOnceForStaleChunk(err)) return
       toast.error(err.message || 'Could not read that PDF.')
       reset()
     } finally {
@@ -170,6 +172,7 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       setScanned(null)
       toast.success('Read from the scan — please check every value.')
     } catch (err) {
+      if (reloadOnceForStaleChunk(err)) return
       toast.error(err.message || 'Could not read the scan.')
     } finally {
       setBusy(false)

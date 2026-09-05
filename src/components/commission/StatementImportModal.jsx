@@ -10,6 +10,7 @@ import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
 import { insurerOptions } from '../../utils/insurers'
+import { reloadOnceForStaleChunk } from '../../utils/staleChunk'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -97,6 +98,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       setSkipped(new Set())
       setEdits({})
     } catch (err) {
+      if (reloadOnceForStaleChunk(err)) return
       toast.error(err.message || 'Could not read that file.')
       reset()
     } finally {
