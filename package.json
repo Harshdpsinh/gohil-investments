@@ -13,7 +13,9 @@
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 19"
+    "lint": "eslint src --ext js,jsx --report-unused-disable-directives --max-warnings 19",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@capacitor/android": "^7.0.0",
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0",
+    "@playwright/test": "^1.63.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.3",
     "@types/react": "^18.2.0",

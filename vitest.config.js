@@ -13,7 +13,7 @@ export default defineConfig({
     // Component tests opt into jsdom with a `// @vitest-environment jsdom`
     // docblock at the top of the file.
     environment: 'node',
-    include: ['src/**/*.test.{js,jsx}'],
+    include: ['src/**/*.test.{js,jsx}', 'e2e/helpers/**/*.test.js'],
     // Tests must never reach a real backend. Firebase is mocked per-file; this
     // is a second line of defence against an accidental live call.
     env: {
