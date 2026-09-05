@@ -16,22 +16,30 @@ export default function PortalOverlay({
   children,
   zClass = 'z-[200]',
   closeOnEscape = true,
+  align = 'center',
 }) {
   useEffect(() => {
     acquireModalLock()
     const onKey = event => {
       if (closeOnEscape && event.key === 'Escape') onClose?.()
     }
+    const onNativeClose = () => onClose?.()
     window.addEventListener('keydown', onKey)
+    window.addEventListener('gi:close-modal', onNativeClose)
     return () => {
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('gi:close-modal', onNativeClose)
       releaseModalLock()
     }
   }, [onClose, closeOnEscape])
 
+  const place = align === 'right'
+    ? 'items-stretch justify-end overflow-hidden p-0'
+    : 'items-center justify-center overflow-hidden p-4'
+
   return createPortal(
     <div
-      className={`gi-modal-overlay gi-standalone-overlay fixed inset-0 ${zClass} flex items-center justify-center overflow-hidden p-4`}
+      className={`gi-modal-overlay gi-standalone-overlay fixed inset-0 ${zClass} flex ${place}`}
       role="dialog"
       aria-modal="true"
     >
@@ -40,3 +48,4 @@ export default function PortalOverlay({
     document.body
   )
 }
+

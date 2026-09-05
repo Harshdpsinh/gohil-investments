@@ -16,6 +16,8 @@ import { financialYearOf, financialYearRange } from '../utils/businessDone'
 import { canonicalInsurer, duplicateInsurers, unrecognisedInsurers } from '../utils/insurers'
 import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
+import CommissionReviewDrawer from '../components/commission/CommissionReviewDrawer'
+import { latestCommissionPosting } from '../utils/commissionReview'
 import toast from 'react-hot-toast'
 import { isValid } from 'date-fns'
 
@@ -197,6 +199,7 @@ export default function CommissionPage() {
   const [ledgerPlan, setLedgerPlan] = useState('All')   // plan / LOB, as the statement said
   const [ledgerError, setLedgerError] = useState('')
   const [importOpen, setImportOpen] = useState(false)
+  const [reviewRow, setReviewRow] = useState(null)
   const [reconView, setReconView] = useState('outstanding')
   const [reconStatus, setReconStatus] = useState('all')
   const [loadingAll, setLoadingAll] = useState(false)
@@ -473,6 +476,15 @@ export default function CommissionPage() {
         user={user}
         onPosted={reloadTransactions}
       />
+      <CommissionReviewDrawer
+        open={!!reviewRow}
+        row={reviewRow}
+        policy={reviewRow ? policyById.get(reviewRow.policyId) : null}
+        existing={reviewRow ? latestCommissionPosting(transactions, reviewRow.policyId) : null}
+        user={user}
+        onClose={() => setReviewRow(null)}
+        onPosted={reloadTransactions}
+      />
 
       <div className="commission-command-grid">
         {[
@@ -492,7 +504,7 @@ export default function CommissionPage() {
           <div>
             <p className="text-sm font-extrabold text-gray-950 dark:text-white">Reconciliation · what the insurers still owe you</p>
             <p className="text-xs text-gray-600 dark:text-gray-300">
-              Every policy priced at its own FY/RY rate and matched against posted receipts.
+              Every policy priced at its own FY/RY rate and matched against posted receipts. Open a row to review and update that commission.
             </p>
           </div>
           <div className="commission-segmented">
@@ -549,11 +561,15 @@ export default function CommissionPage() {
             <div className="mt-3 max-h-[52vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
               <table className="min-w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800">
-                  <tr>{['Status','Policy / Client','Company','Expected','Received','Difference','Pending'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr>
+                  <tr>{['Status','Policy / Client','Company','Expected','Received','Difference','Pending','Review'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {reconRows.map(row => (
-                    <tr key={row.policyId}>
+                    <tr
+                      key={row.policyId}
+                      className="table-row cursor-pointer"
+                      onClick={() => setReviewRow(row)}
+                    >
                       <td className="table-cell"><span className={`font-bold ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>{!row.premiumCollected && row.chaseable && <p className="text-[10px] text-gray-500">premium not marked paid</p>}</td>
                       <td className="table-cell"><p className="font-mono">{row.policyNumber}</p><p className="text-[11px] text-gray-500">{row.clientName}</p></td>
                       <td className="table-cell">{row.insurer}</td>
@@ -561,6 +577,15 @@ export default function CommissionPage() {
                       <td className="table-cell">{fmtCurrency(row.received)}</td>
                       <td className={`table-cell font-bold ${row.difference < 0 ? 'text-red-600 dark:text-red-400' : row.difference > 0 ? 'text-amber-600 dark:text-amber-400' : ''}`}>{fmtCurrency(row.difference)}</td>
                       <td className="table-cell">{row.chaseable ? `${row.ageingDays}d` : '—'}</td>
+                      <td className="table-cell text-right">
+                        <button
+                          type="button"
+                          className="font-bold text-teal-700 dark:text-teal-300"
+                          onClick={event => { event.stopPropagation(); setReviewRow(row) }}
+                        >
+                          Review
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
