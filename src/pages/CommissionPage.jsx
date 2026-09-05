@@ -446,6 +446,7 @@ export default function CommissionPage() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         policies={policies}
+        clients={clients}
         user={user}
         onPosted={reloadTransactions}
       />

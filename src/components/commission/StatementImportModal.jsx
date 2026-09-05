@@ -6,16 +6,22 @@ import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
 import {
+  assertTypedPolicyNumber,
+  canPostAgainstPolicy,
+  candidateMismatches,
   commissionRateField,
   legacyPostingKey,
   matchCandidates,
+  matchClientCandidates,
   matchStatement,
+  newPolicyDraft,
   normaliseStatement,
   postedAmounts,
   postingKey,
   summarise,
+  isMaskedPolicyNumber,
 } from '../../utils/commissionImport'
-import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
+import { addClient, addCommissionTransaction, addPolicy, updatePolicy } from '../../firebase/firestore'
 import { upsertCommissionMaster } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import {
@@ -45,7 +51,7 @@ const sameish = (a, b) => {
 const thisYear = new Date().getFullYear()
 const YEARS = [thisYear + 1, thisYear, thisYear - 1, thisYear - 2]
 
-export default function StatementImportModal({ open, onClose, policies, user, onPosted }) {
+export default function StatementImportModal({ open, onClose, policies, clients = [], user, onPosted }) {
   const fileRef = useRef(null)
   const [month, setMonth] = useState('')
   const [year, setYear] = useState(String(thisYear))
@@ -272,6 +278,10 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       toast.error('Pick the matching policy, then press OK.')
       return
     }
+    if (!canPostAgainstPolicy(row, policy)) {
+      toast.error('This is a different policy. Add it as new, or skip the row.')
+      return
+    }
     setEdits(prev => ({
       ...prev,
       [row.sourceRow]: {
@@ -297,9 +307,6 @@ export default function StatementImportModal({ open, onClose, policies, user, on
           newPct: applied.newPct,
           structureUpdatedAt: applied.stamp.structureUpdatedAt,
         }
-      } else if (readyRow.commissionPct > 0 && readyRow.commissionPct <= 100) {
-        const field = commissionRateField(policy, readyRow.businessType)
-        await updatePolicy(policy.id, { [field]: readyRow.commissionPct })
       }
       const readyWithStructure = structureMeta
         ? { ...readyRow, _structure: structureMeta }
@@ -322,6 +329,42 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     }
   }
 
+  const addPolicyAndPost = async (row, draft) => {
+    let number
+    try {
+      number = assertTypedPolicyNumber(draft.policyNumber, row.policyNumber)
+    } catch (err) {
+      toast.error(err.message)
+      return
+    }
+    setBusy(true)
+    try {
+      let clientId = draft.clientId
+      let clientName = draft.clientName || row.clientName
+      if (!clientId) {
+        const created = await addClient({ name: clientName, kycStatus: 'Pending' })
+        clientId = created.id
+      }
+      const payload = newPolicyDraft(row, {
+        ...draft,
+        policyNumber: number,
+        clientId,
+        clientName,
+        insurer: row.insurer || insurer || draft.insurer,
+      })
+      const createdPolicy = await addPolicy(payload)
+      const policy = { id: createdPolicy.id, ...payload }
+      await addCommissionTransaction(payloadFor({ ...row, policy, policyNumber: number, clientName }))
+      markPosted(row.sourceRow)
+      toast.success('New policy added and commission posted. Check the policy book and Commission Tracker.')
+      onPosted?.()
+    } catch (err) {
+      toast.error(err.message || 'Could not add that policy.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const save = async () => {
     if (!postable.length) return
     setBusy(true)
@@ -330,10 +373,6 @@ export default function StatementImportModal({ open, onClose, policies, user, on
     for (const row of postable) {
       try {
         await addCommissionTransaction(payloadFor(row))
-        if (row.commissionPct > 0 && row.commissionPct <= 100) {
-          const field = commissionRateField(row.policy, row.businessType)
-          await updatePolicy(row.policy.id, { [field]: row.commissionPct })
-        }
         posted += 1
       } catch (err) {
         if (err?.code === 'commission/duplicate-post') duplicates += 1
@@ -535,9 +574,9 @@ export default function StatementImportModal({ open, onClose, policies, user, on
                           <button type="button" onClick={e => { e.stopPropagation(); setReviewing(row.sourceRow) }} className="block font-semibold text-teal-700 dark:text-teal-300">
                             Review
                           </button>
-                          {db && !saved && (
-                            <button type="button" onClick={e => { e.stopPropagation(); toggle(row.sourceRow, row.status) }} className="mt-1 block font-semibold text-blue-600 dark:text-blue-400">
-                              {row.status === 'review'
+                          {!saved && (
+                            <button type="button" onClick={e => { e.stopPropagation(); toggle(row.sourceRow, db ? row.status : '') }} className="mt-1 block font-semibold text-blue-600 dark:text-blue-400">
+                              {row.status === 'review' && db
                                 ? (reviewOn ? 'Skip' : 'Include')
                                 : (skipped.has(row.sourceRow) ? 'Include' : 'Skip')}
                             </button>
@@ -552,20 +591,24 @@ export default function StatementImportModal({ open, onClose, policies, user, on
             <ImportRowReview
               row={reviewRow}
               policies={policies}
+              clients={clients}
               defaultInsurer={insurer}
               posted={reviewRow ? postedRows.has(reviewRow.sourceRow) : false}
+              skipped={reviewRow ? skipped.has(reviewRow.sourceRow) : false}
               busy={busy}
               onOk={okRow}
+              onAddPolicy={addPolicyAndPost}
+              onSkip={sourceRow => toggle(sourceRow, '')}
               onUpdateStructure={updateStructureRow}
             />
             </div>
 
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Open a row, pick the matching policy if it needs review, then press OK — that
-              commission is written immediately so you can check it on Commission Tracker.
-              Amber review rows stay out of Verify & Save until you Include them (or OK them).
-              Green matched rows wait for Verify & Save. Everything posts against{' '}
-              <strong>{month} {year}</strong>.
+              Same policy (number or last-4 + name + premium) goes on that row.
+              Same person, different number or premium — add as a new policy, do not park
+              commission on their old one. Skip anything you do not want. Verify & Save
+              only posts green matched rows (and review rows you Include). Everything
+              posts against <strong>{month} {year}</strong>.
             </p>
           </>
         )}
@@ -575,7 +618,7 @@ export default function StatementImportModal({ open, onClose, policies, user, on
 }
 
 // The three stacked columns must share one row height or they drift apart.
-const ROW = 'flex h-8 items-center'
+const ROW = 'flex min-h-8 items-start py-0.5'
 
 function Field({ children }) {
   return <div className={`${ROW} text-[11px] font-bold uppercase tracking-wide text-gray-400`}>{children}</div>
@@ -583,7 +626,7 @@ function Field({ children }) {
 
 function Val({ children, mono, match }) {
   const tone = match === undefined ? '' : match ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-  return <div className={`${ROW} truncate ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
+  return <div className={`${ROW} whitespace-normal break-words ${mono ? 'font-mono' : ''} ${tone}`}>{children}</div>
 }
 
 // `block` on the input is load-bearing: .table-cell sets white-space:nowrap, and
@@ -593,9 +636,10 @@ function Cell({ value, onChange, mono, numeric }) {
   return (
     <input
       value={value ?? ''}
+      title={value ?? ''}
       onChange={e => onChange(e.target.value)}
       inputMode={numeric ? 'decimal' : undefined}
-      className={`block h-8 w-full rounded border border-transparent bg-transparent px-1 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
+      className={`block min-h-8 w-full whitespace-normal break-words rounded border border-transparent bg-transparent px-1 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:outline-none dark:focus:bg-slate-900 ${mono ? 'font-mono' : ''}`}
     />
   )
 }
@@ -609,24 +653,46 @@ function Tile({ label, value, tone = '' }) {
   )
 }
 
-function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, onUpdateStructure }) {
+function ImportRowReview({
+  row, policies, clients = [], defaultInsurer, posted, skipped, busy,
+  onOk, onAddPolicy, onSkip, onUpdateStructure,
+}) {
   const [pickedId, setPickedId] = useState('')
   const [alsoStructure, setAlsoStructure] = useState(false)
-  const candidates = useMemo(
-    () => (row ? matchCandidates(row, policies) : []),
-    [row, policies],
+  const [fullNumber, setFullNumber] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [expiryDate, setExpiryDate] = useState('')
+  const [clientId, setClientId] = useState('')
+
+  const candidates = useMemo(() => {
+    if (!row) return []
+    const hits = matchCandidates(row, policies)
+    if (row.policy && !hits.some(p => p.id === row.policy.id)) return [row.policy, ...hits]
+    return hits
+  }, [row, policies])
+  const clientHits = useMemo(
+    () => (row ? matchClientCandidates(row, policies, clients) : []),
+    [row, policies, clients],
   )
 
   useEffect(() => {
     if (!row) return
-    setPickedId(row.policy?.id || candidates[0]?.id || '')
+    setPickedId('')
     setAlsoStructure(false)
-  }, [row, candidates])
+    const draft = newPolicyDraft(row, {})
+    setFullNumber(isMaskedPolicyNumber(row.policyNumber) ? '' : (row.policyNumber || ''))
+    setStartDate(draft.startDate)
+    setExpiryDate(draft.expiryDate)
+    setClientId(clientHits[0]?.clientId || '')
+  }, [row, clientHits])
 
-  const picked = candidates.find(p => p.id === pickedId)
-    || policies.find(p => p.id === pickedId)
-    || row?.policy
-    || null
+  const fit = candidates.find(p => canPostAgainstPolicy(row, p))
+  const activeId = (pickedId && candidates.some(p => p.id === pickedId)) ? pickedId : (fit?.id || '')
+  const picked = candidates.find(p => p.id === activeId) || null
+  const pickedOk = picked ? canPostAgainstPolicy(row, picked) : false
+  const pickedIssues = picked ? candidateMismatches(row, picked) : []
+  const chosenClient = clientHits.find(c => c.clientId === clientId) || clientHits[0] || null
+  const needsNewPolicy = !pickedOk
 
   return (
     <aside className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40 lg:w-80">
@@ -636,8 +702,8 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, on
         <div className="space-y-3">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wide text-teal-700 dark:text-teal-300">Review this row</p>
-            <p className="mt-1 text-sm font-extrabold text-slate-950 dark:text-white">{row.clientName || '—'}</p>
-            <p className="font-mono text-xs text-slate-500">{row.policyNumber || 'no policy no.'}</p>
+            <p className="mt-1 text-sm font-extrabold break-words text-slate-950 dark:text-white">{row.clientName || '—'}</p>
+            <p className="font-mono text-xs break-all text-slate-500">{row.policyNumber || 'no policy no.'}</p>
             <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
               {fmtCurrency(row.commissionAmount)} commission · premium {fmtCurrency(row.premium)}
               {row.insurer || defaultInsurer ? ` · ${row.insurer || defaultInsurer}` : ''}
@@ -648,44 +714,60 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, on
             <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
               Updated in the commission book. Check it on Commission Tracker.
             </p>
+          ) : skipped ? (
+            <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              Skipped — this row will not be saved.
+            </p>
+          ) : pickedOk ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
+              Same policy — last-4, name and premium agree. OK posts commission here.
+            </p>
           ) : (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-              {candidates.length > 1
-                ? 'More than one policy could match. Pick the right one, then OK — it updates commission immediately.'
-                : row.policy
-                  ? 'Check the match, then OK to write this commission now.'
-                  : 'Pick the matching policy, then OK to write this commission now.'}
+              {clientHits.length
+                ? 'This looks like a new policy for someone already in the book. Do not put commission on their old number. Add it, or skip.'
+                : 'No matching policy. Add it as new, or skip this row.'}
             </p>
           )}
 
-          {candidates.length ? (
-            <ul className="max-h-56 space-y-1 overflow-auto">
-              {candidates.map(policy => (
-                <li key={policy.id}>
-                  <label className={`flex cursor-pointer gap-2 rounded-lg border px-2.5 py-2 text-xs ${pickedId === policy.id ? 'border-teal-500 bg-white dark:bg-slate-800' : 'border-transparent hover:bg-white/70 dark:hover:bg-slate-800/70'}`}>
-                    <input
-                      type="radio"
-                      name={`import-review-${row.sourceRow}`}
-                      checked={pickedId === policy.id}
-                      onChange={() => setPickedId(policy.id)}
-                      className="mt-0.5"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold">{policy.clientName}</span>
-                      <span className="block font-mono text-[11px] text-slate-500">{policy.policyNumber}</span>
-                      <span className="block text-[11px] text-slate-500">
-                        {policy.insurer} · premium {fmtCurrency(policy.premium)}
+          {candidates.length > 0 && (
+            <ul className="max-h-40 space-y-1 overflow-auto">
+              {candidates.map(policy => {
+                const issues = candidateMismatches(row, policy)
+                const ok = canPostAgainstPolicy(row, policy)
+                return (
+                  <li key={policy.id}>
+                    <label className={`flex cursor-pointer gap-2 rounded-lg border px-2.5 py-2 text-xs ${activeId === policy.id ? 'border-teal-500 bg-white dark:bg-slate-800' : 'border-transparent hover:bg-white/70 dark:hover:bg-slate-800/70'}`}>
+                      <input
+                        type="radio"
+                        name={`import-review-${row.sourceRow}`}
+                        checked={activeId === policy.id}
+                        onChange={() => setPickedId(policy.id)}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0">
+                        <span className="block break-words font-semibold">{policy.clientName}</span>
+                        <span className="block font-mono text-[11px] break-all text-slate-500">{policy.policyNumber}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {policy.insurer} · premium {fmtCurrency(policy.premium)}
+                        </span>
+                        {issues.length > 0 && (
+                          <span className="mt-0.5 block text-[11px] font-semibold text-red-600">
+                            Different policy · {issues.join(' · ')}
+                          </span>
+                        )}
+                        {ok && (
+                          <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">Same policy</span>
+                        )}
                       </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
+                    </label>
+                  </li>
+                )
+              })}
             </ul>
-          ) : (
-            <p className="text-xs text-slate-500">No policy in the book looks close. Type the full policy number on the left, then come back here.</p>
           )}
 
-          {picked && canUpdateStructure(row, picked) && (
+          {pickedOk && picked && canUpdateStructure(row, picked) && (
             <label className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-200">
               <input
                 type="checkbox"
@@ -698,16 +780,18 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, on
             </label>
           )}
 
-          <button
-            type="button"
-            className="btn-primary w-full"
-            disabled={busy || posted || !picked}
-            onClick={() => onOk(row, picked, { updateStructure: alsoStructure })}
-          >
-            {busy ? 'Saving…' : posted ? 'Already updated' : alsoStructure ? 'OK · commission + structure' : 'OK · update this commission'}
-          </button>
+          {pickedOk && (
+            <button
+              type="button"
+              className="btn-primary w-full"
+              disabled={busy || posted || skipped}
+              onClick={() => onOk(row, picked, { updateStructure: alsoStructure })}
+            >
+              {busy ? 'Saving…' : posted ? 'Already updated' : alsoStructure ? 'OK · commission + structure' : 'OK · update this commission'}
+            </button>
+          )}
 
-          {picked && canUpdateStructure(row, picked) && (
+          {pickedOk && picked && canUpdateStructure(row, picked) && (
             <button
               type="button"
               className="btn-secondary w-full"
@@ -715,6 +799,74 @@ function ImportRowReview({ row, policies, defaultInsurer, posted, busy, onOk, on
               onClick={() => onUpdateStructure?.(row, picked)}
             >
               Update structure only
+            </button>
+          )}
+
+          {needsNewPolicy && !posted && (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Add as new policy</p>
+              {clientHits.length > 0 && (
+                <label className="block text-xs">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Existing client</span>
+                  <select
+                    className="form-input mt-1"
+                    value={clientId}
+                    onChange={e => setClientId(e.target.value)}
+                  >
+                    {clientHits.map(c => (
+                      <option key={c.clientId || c.clientName} value={c.clientId}>
+                        {c.clientName}{c.samplePolicyNumber ? ` · existing ${c.samplePolicyNumber}` : ''}
+                      </option>
+                    ))}
+                    <option value="">New client — create from this name</option>
+                  </select>
+                </label>
+              )}
+              <label className="block text-xs">
+                <span className="font-semibold text-slate-600 dark:text-slate-300">Full policy number *</span>
+                <input
+                  className="form-input mt-1 font-mono"
+                  value={fullNumber}
+                  placeholder="Type the full number (not ************2955)"
+                  onChange={e => setFullNumber(e.target.value)}
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-xs">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Start</span>
+                  <input type="date" className="form-input mt-1" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                </label>
+                <label className="block text-xs">
+                  <span className="font-semibold text-slate-600 dark:text-slate-300">Expiry</span>
+                  <input type="date" className="form-input mt-1" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} />
+                </label>
+              </div>
+              <button
+                type="button"
+                className="btn-primary w-full"
+                disabled={busy || skipped}
+                onClick={() => onAddPolicy(row, {
+                  policyNumber: fullNumber,
+                  clientId: chosenClient?.clientId || clientId,
+                  clientName: chosenClient?.clientName || row.clientName,
+                  startDate,
+                  expiryDate,
+                  insurer: row.insurer || defaultInsurer,
+                })}
+              >
+                {busy ? 'Saving…' : 'Add policy & post commission'}
+              </button>
+            </div>
+          )}
+
+          {!posted && (
+            <button
+              type="button"
+              className="btn-secondary w-full"
+              disabled={busy}
+              onClick={() => onSkip(row.sourceRow)}
+            >
+              {skipped ? 'Undo skip' : 'Skip this row'}
             </button>
           )}
         </div>

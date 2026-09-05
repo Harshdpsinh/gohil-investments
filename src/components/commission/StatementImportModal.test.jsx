@@ -5,13 +5,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import StatementImportModal from './StatementImportModal'
-import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore'
+import { addClient, addCommissionTransaction, addPolicy, updatePolicy } from '../../firebase/firestore'
 import { upsertCommissionMaster } from '../../firebase/commissionOps'
 import { parseImportFile } from '../../utils/exportUtils'
 
 vi.mock('../../firebase/firestore', () => ({
   addCommissionTransaction: vi.fn(async () => ({ id: 'txn' })),
   updatePolicy: vi.fn(async () => {}),
+  addPolicy: vi.fn(async () => ({ id: 'new-pol' })),
+  addClient: vi.fn(async () => ({ id: 'new-cli' })),
 }))
 vi.mock('../../firebase/commissionOps', () => ({
   upsertCommissionMaster: vi.fn(async () => ({ id: 'master-1' })),
@@ -168,7 +170,7 @@ describe('StatementImportModal review table', () => {
     await waitFor(() => expect(onPosted).toHaveBeenCalled())
   })
 
-  it('writes a renewal statement rate onto ryCommission', async () => {
+  it('does not silently overwrite a policy rate on Verify & Save', async () => {
     await openWithStatement({}, [
       {
         'Policy No.': '7489112502043449',
@@ -180,8 +182,8 @@ describe('StatementImportModal review table', () => {
       },
     ])
     fireEvent.click(screen.getByRole('button', { name: /Verify & Save 1 Record$/ }))
-    await waitFor(() => expect(updatePolicy).toHaveBeenCalled())
-    expect(updatePolicy).toHaveBeenCalledWith('p2', { ryCommission: 7.5 })
+    await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalled())
+    expect(updatePolicy).not.toHaveBeenCalled()
   })
 
   it('never posts a row with no matching policy', async () => {
@@ -290,5 +292,55 @@ describe('StatementImportModal review table', () => {
       sourceFileName: 'star-july.csv',
     }))
     confirmSpy.mockRestore()
+  })
+
+  it('does not park commission on a same-name different policy — add as new instead', async () => {
+    parseImportFile.mockResolvedValue([{
+      'Policy No.': '************2955',
+      'Insured Name': 'ASHVINBHAI JITENDRABHAI BHATT',
+      Premium: 750,
+      'Total Comm': 127.12,
+    }])
+    render(
+      <StatementImportModal
+        open
+        onClose={() => {}}
+        policies={[{
+          id: 'old', policyNumber: '2845112600005923', clientId: 'c-ash',
+          clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 11800,
+        }]}
+        clients={[{ id: 'c-ash', name: 'Ashvinbhai Jitendrabhai Bhatt' }]}
+        user={{ uid: 'u1', email: 'owner@example.com' }}
+        onPosted={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Statement month *'), { target: { value: 'July' } })
+    fireEvent.change(screen.getByLabelText('Year *'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('Statement type *'), { target: { value: 'single' } })
+    fireEvent.change(screen.getByLabelText('Carrier *'), { target: { value: 'Star Health' } })
+    fireEvent.change(document.body.querySelector('input[type="file"]'), {
+      target: { files: [new File(['x'], 'star-july.csv')] },
+    })
+    await screen.findByRole('button', { name: /Add policy & post commission/ })
+    expect(screen.queryByRole('button', { name: /OK · update this commission/ })).toBeNull()
+    expect(screen.getByText(/Do not put commission on their old number/)).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText(/Type the full number/), {
+      target: { value: 'P/2026/0002955' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add policy & post commission/ }))
+    await waitFor(() => expect(addPolicy).toHaveBeenCalledTimes(1))
+    expect(addClient).not.toHaveBeenCalled()
+    expect(addPolicy).toHaveBeenCalledWith(expect.objectContaining({
+      policyNumber: 'P/2026/0002955',
+      clientId: 'c-ash',
+      premium: 750,
+      insurer: 'Star Health',
+    }))
+    await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      policyId: 'new-pol',
+      policyNumber: 'P/2026/0002955',
+      receivedCommission: 127.12,
+      payoutMonth: '2026-07',
+    })))
   })
 })
