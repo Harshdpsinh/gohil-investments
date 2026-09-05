@@ -4,10 +4,10 @@
 // pdfStatement.extractLines. Pure — no pdfjs, no Firebase, no React — so every
 // profile can be tested against a captured page without opening a PDF.
 //
-// Every insurer lays these out differently, and two of them do not use rows at
-// all: Aditya Birla wraps one record over three stacked text lines, and Star
-// Health rotates the whole table so policies become columns. Each profile below
-// was written against a real statement, not a guess.
+// Every insurer lays these out differently, and three of them do not use a
+// simple header row: Aditya Birla wraps one record over three stacked text
+// lines, Star Health June rotates the table so policies become columns, and
+// Star Health July is a portal card with policy numbers masked to last-4.
 //
 // Returning [] means the PDF genuinely holds no policy-level detail (some
 // insurers publish only totals) — the caller must say so rather than reporting
@@ -187,10 +187,119 @@ export function parseAdityaBirla(pages) {
   return rows
 }
 
-// ── Star Health: agent provisional statement ────────────────────────────
-// The table is rotated: each policy is an x-column, each field a y-row. Read
-// the label positions, then take the values sitting on those y bands.
-export function parseStarHealth(pages) {
+// ── Star Health: two live layouts ───────────────────────────────────────
+// June (and older): "AGENT PROVISIONAL STATEMENT" — table rotated 90°,
+// each policy an x-column, full policy numbers. July (portal):
+// "Commission Statement For Mon'YY" — ordinary rows, numbers masked to
+// last-4. Empty Travel / TMP / Portability / Arrear blocks must not emit
+// rows. Totals and the FRESH/RENEWAL summary table are skipped.
+const STAR_INSURER = 'Star Health & Allied Insurance'
+const STAR_MASKED = /^\*{3,}\d{4}$/
+const STAR_MONEY = /^₹?-?[\d,]+(?:\.\d+)?$/
+
+function isStarCardLayout(pages) {
+  const texts = pages.flatMap(p => p.flatMap(l => l.cells.map(c => c.text)))
+  return texts.some(t => /Commission Statement For/i.test(t))
+    || (texts.some(t => STAR_MASKED.test(t.replace(/\s/g, '')))
+      && texts.some(t => /Proposer & Product Name/i.test(t)))
+}
+
+function starCardSection(text) {
+  if (/Fresh Policy Commission/i.test(text)) return 'Fresh'
+  if (/Renewal Policy Commission/i.test(text)) return 'Renewal'
+  if (/Travel Policy Commission|TMP Policy Commission|Portability Policy Commission|Arrear Details/i.test(text)) {
+    return 'skip'
+  }
+  return ''
+}
+
+function bandText(items, lo, hi) {
+  return items
+    .filter(i => i.x >= lo && i.x < hi)
+    .sort((a, b) => (b.y - a.y) || (a.x - b.x))
+    .map(i => i.text)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function splitProposerProduct(text) {
+  const cleaned = text.replace(/\s*\|\s*/g, ' | ').replace(/\s+/g, ' ').trim()
+  const cut = cleaned.indexOf(' | ')
+  if (cut < 0) return { clientName: cleaned.replace(/\|/g, '').trim(), planName: '' }
+  return {
+    clientName: cleaned.slice(0, cut).replace(/\|/g, '').trim(),
+    planName: cleaned.slice(cut + 3).replace(/\|/g, ' ').replace(/\s+/g, ' ').trim(),
+  }
+}
+
+function starStartDate(dates) {
+  const m = String(dates || '').match(/(\d{2}\/\d{2}\/\d{4})/)
+  return m ? m[1] : ''
+}
+
+/**
+ * July portal statement. Policy numbers print as ************2955.
+ */
+export function parseStarHealthCard(pages) {
+  const rows = []
+  let section = ''
+  for (const lines of pages) {
+    const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
+    const anchors = lines
+      .map(line => {
+        const hit = line.cells.find(c => STAR_MASKED.test(c.text.replace(/\s/g, '')))
+        return hit ? { y: line.y, policyNumber: hit.text.replace(/\s/g, '') } : null
+      })
+      .filter(Boolean)
+
+    let current = section === 'skip' ? '' : section
+    for (const line of lines) {
+      const text = joined(line)
+      const nextSection = starCardSection(text)
+      if (nextSection) {
+        current = nextSection === 'skip' ? '' : nextSection
+        continue
+      }
+      if (!current) continue
+      if (/^total\b/i.test(text.trim())) continue
+
+      const masked = line.cells.find(c => STAR_MASKED.test(c.text.replace(/\s/g, '')))
+      if (!masked) continue
+
+      const nextAnchor = anchors.find(a => a.y < line.y)
+      const totalLine = lines.find(l => l.y < line.y && /^total\b/i.test(joined(l)))
+      const stops = [nextAnchor?.y, totalLine?.y].filter(y => y != null)
+      const stopY = stops.length ? Math.max(...stops) : -Infinity
+      const near = flat.filter(item => item.y <= line.y && item.y > stopY)
+
+      const policyNumber = masked.text.replace(/\s/g, '')
+      const { clientName, planName } = splitProposerProduct(bandText(near, 40, 250))
+      const dates = bandText(near, 420, 530)
+      const premium = toNumber(near.find(item => item.x >= 580 && item.x < 640 && STAR_MONEY.test(item.text))?.text)
+      const commissionAmount = toNumber(
+        near.find(item => item.x >= 640 && item.x < 740 && STAR_MONEY.test(item.text))?.text,
+      )
+      if (!policyNumber || !commissionAmount) continue
+
+      rows.push({
+        policyNumber,
+        clientName,
+        planName,
+        insurer: STAR_INSURER,
+        premium,
+        commissionPct: premium ? Number(((commissionAmount / premium) * 100).toFixed(2)) : 0,
+        commissionAmount,
+        businessType: current,
+        startDate: starStartDate(dates),
+      })
+    }
+    section = current
+  }
+  return rows
+}
+
+function parseStarHealthRotated(pages) {
   const rows = []
   for (const lines of pages) {
     const flat = lines.flatMap(l => l.cells.map(c => ({ ...c, y: l.y })))
@@ -205,11 +314,21 @@ export function parseStarHealth(pages) {
     const yName = labelY(/^Proposer's$/i)
     const yPrem = labelY(/^Premium\/Ref$/i)
     const yPay = labelY(/^Payable$/i)
+    const yComm = labelY(/^Commission$/i)
     if (yPolicy === null || yPrem === null) continue
 
-    // Data columns: the x positions of the policy-number values.
+    // Prefer Gross Commission (before GST) over the Payable band, which
+    // on live June statements is the GST-stripped net.
+    const grossLabels = flat.filter(i => i.x > 300 && i.x < 375 && /^Gross$/i.test(i.text))
+    const yGross = yComm
+      ? grossLabels.slice().sort((a, b) => Math.abs(a.y - yComm) - Math.abs(b.y - yComm))[0]?.y
+      : null
+    const amountY = yGross ?? (yPay == null ? null : yPay + 5)
+    const amountTol = yGross != null ? 12 : 14
+
+    // Ignore the 2-digit END No sitting just to the right of each policy id.
     const anchors = flat
-      .filter(i => i.x > 375 && Math.abs(i.y - yPolicy) <= 14 && /^\d{6,}$/.test(i.text))
+      .filter(i => i.x > 375 && Math.abs(i.y - yPolicy) <= 14 && /^\d{8,}$/.test(i.text))
       .sort((a, b) => a.x - b.x)
 
     for (let n = 0; n < anchors.length; n++) {
@@ -220,14 +339,17 @@ export function parseStarHealth(pages) {
           // Rotated table: reading order runs along x, not y.
           .sort((a, b) => (a.x - b.x) || (b.y - a.y)).map(i => i.text)
 
-      const policyNumber = col(yPolicy).join('')
-      const premium = toNumber(col(yPrem + 25, 14).find(t => /^[\d,.]+$/.test(t)))
-      const payable = yPay === null ? 0 : toNumber(col(yPay + 5, 14).find(t => /^[\d,.]+$/.test(t)))
+      const policyNumber = col(yPolicy).filter(t => /^\d{8,}$/.test(t))
+        .sort((a, b) => b.length - a.length)[0] || ''
+      const premium = toNumber(col(yPrem + 25, 14).find(t => /^-?[\d,.]+$/.test(t)))
+      const payable = amountY == null
+        ? 0
+        : toNumber(col(amountY, amountTol).find(t => /^-?[\d,.]+$/.test(t)))
       if (!policyNumber || !payable) continue
       rows.push({
         policyNumber,
         clientName: yName === null ? '' : col(yName + 8, 16).join(' ').replace(/\s+/g, ' ').trim(),
-        insurer: 'Star Health & Allied Insurance',
+        insurer: STAR_INSURER,
         premium,
         commissionPct: premium ? Number(((payable / premium) * 100).toFixed(2)) : 0,
         commissionAmount: payable,
@@ -237,6 +359,12 @@ export function parseStarHealth(pages) {
   }
   return rows
 }
+
+export function parseStarHealth(pages) {
+  if (isStarCardLayout(pages)) return parseStarHealthCard(pages)
+  return parseStarHealthRotated(pages)
+}
+
 
 // ── Banded table: broker / aggregator bills ─────────────────────────────
 // e.g. WealthMaker "Transaction Detailed Report". Columns are identified from
