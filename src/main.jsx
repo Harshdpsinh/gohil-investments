@@ -9,7 +9,7 @@ import '@fontsource/inter/latin-500.css'
 import '@fontsource/inter/latin-600.css'
 import '@fontsource/inter/latin-700.css'
 import '@fontsource/inter/latin-800.css'
-import { reloadOnceForStaleChunk } from './utils/staleChunk'
+import { reloadOnceForStaleChunk, clearStaleChunkFlag } from './utils/staleChunk'
 import App            from './App'
 import { AuthProvider } from './hooks/useAuth'
 import './styles/tokens.css'
@@ -21,6 +21,9 @@ if (Capacitor.isNativePlatform()) {
   document.documentElement.classList.add('gi-native')
 }
 window.__GI_READY__ = true
+// The reload flag must not stick for the life of the tab: a later deploy
+// in the same session has to be allowed to recover once more.
+setTimeout(clearStaleChunkFlag, 2500)
 
 window.addEventListener('vite:preloadError', event => {
   event.preventDefault()

@@ -7,7 +7,7 @@
 // policy goes through exactly the same checks as a hand-typed one. This is the
 // same review-then-commit shape as the commission importer, and for the same
 // reason: machine extraction is a typing aid, not an authority.
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import {
@@ -15,7 +15,7 @@ import {
   markAllUncertain, matchExtractedClient, matchExtractedPolicy, splitExtractedFields,
 } from '../../utils/policyPdfExtract'
 import { fmtCurrency } from '../../utils/dateUtils'
-import { reloadOnceForStaleChunk } from '../../utils/staleChunk'
+import { isStaleChunkError, reloadIfPageIsStale, reloadOnceForStaleChunk } from '../../utils/staleChunk'
 
 const LABEL = {
   policyNumber: 'Policy number', clientName: 'Client name', insurer: 'Insurer',
@@ -68,6 +68,20 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
   // from inside the app — the usual cause is that the carrier simply does not
   // print the label we look for, and that is invisible without this.
   const [seenLines, setSeenLines] = useState([])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    ;(async () => {
+      if (await reloadIfPageIsStale()) return
+      try {
+        await import('../../utils/pdfStatement')
+      } catch (err) {
+        if (!cancelled) reloadOnceForStaleChunk(err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [open])
 
   const duplicate = useMemo(() => findPdfDuplicate(hash, policies), [hash, policies])
 
@@ -143,7 +157,11 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       setFile(file)
     } catch (err) {
       if (reloadOnceForStaleChunk(err)) return
-      toast.error(err.message || 'Could not read that PDF.')
+      toast.error(
+        isStaleChunkError(err)
+          ? 'This page is out of date. Refresh, then drop the PDF again.'
+          : (err.message || 'Could not read that PDF.'),
+      )
       reset()
     } finally {
       setBusy(false)
@@ -173,7 +191,11 @@ export default function PdfExtractReview({ open, onClose, policies = [], clients
       toast.success('Read from the scan — please check every value.')
     } catch (err) {
       if (reloadOnceForStaleChunk(err)) return
-      toast.error(err.message || 'Could not read the scan.')
+      toast.error(
+        isStaleChunkError(err)
+          ? 'This page is out of date. Refresh, then try the scan again.'
+          : (err.message || 'Could not read the scan.'),
+      )
     } finally {
       setBusy(false)
       setOcrStatus('')

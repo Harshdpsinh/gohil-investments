@@ -1,7 +1,7 @@
 // src/components/commission/StatementImportModal.jsx
 // Upload a commission statement, verify every row against the policy book,
 // then save. Nothing is written until "Verify & Save Records" is pressed.
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
@@ -10,7 +10,7 @@ import { addCommissionTransaction, updatePolicy } from '../../firebase/firestore
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { fmtCurrency } from '../../utils/dateUtils'
 import { insurerOptions } from '../../utils/insurers'
-import { reloadOnceForStaleChunk } from '../../utils/staleChunk'
+import { isStaleChunkError, reloadIfPageIsStale, reloadOnceForStaleChunk } from '../../utils/staleChunk'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -44,6 +44,23 @@ export default function StatementImportModal({ open, onClose, policies, user, on
   const [fileName, setFileName] = useState('')
   const [format, setFormat] = useState('')
   const [noDetail, setNoDetail] = useState(false)
+
+  // A tab left open across a deploy still has the old hashed pdfStatement URL.
+  // Check the live page (and warm the parser) as soon as this sheet opens, so
+  // a missing chunk reloads before a statement is dropped.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    ;(async () => {
+      if (await reloadIfPageIsStale()) return
+      try {
+        await import('../../utils/pdfStatement')
+      } catch (err) {
+        if (!cancelled) reloadOnceForStaleChunk(err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [open])
 
   // Every known carrier plus whatever the book already uses, deduped. It used
   // to list only insurers already on a policy, so a statement from a carrier
@@ -99,7 +116,11 @@ export default function StatementImportModal({ open, onClose, policies, user, on
       setEdits({})
     } catch (err) {
       if (reloadOnceForStaleChunk(err)) return
-      toast.error(err.message || 'Could not read that file.')
+      toast.error(
+        isStaleChunkError(err)
+          ? 'This page is out of date. Refresh, then drop the statement again.'
+          : (err.message || 'Could not read that file.'),
+      )
       reset()
     } finally {
       setBusy(false)

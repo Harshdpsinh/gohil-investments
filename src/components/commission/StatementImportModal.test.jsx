@@ -13,6 +13,18 @@ vi.mock('../../firebase/firestore', () => ({
   updatePolicy: vi.fn(async () => {}),
 }))
 vi.mock('../../utils/exportUtils', () => ({ parseImportFile: vi.fn() }))
+vi.mock('../../utils/pdfStatement', () => ({
+  parsePdfStatement: vi.fn(async () => ({ rows: [], format: 'pdf' })),
+  extractLines: vi.fn(async () => []),
+}))
+vi.mock('../../utils/staleChunk', async importOriginal => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    reloadIfPageIsStale: vi.fn(async () => false),
+    reloadOnceForStaleChunk: vi.fn(() => false),
+  }
+})
 vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }))
