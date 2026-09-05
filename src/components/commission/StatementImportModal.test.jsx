@@ -156,4 +156,49 @@ describe('StatementImportModal review table', () => {
     await openWithStatement()
     expect(screen.getByRole('button', { name: /Verify & Save 0 Records/ }).disabled).toBe(true)
   })
+
+  it('lets a human OK an ambiguous last-4 row and writes that commission now', async () => {
+    parseImportFile.mockResolvedValue([{
+      'Policy No.': '************2955',
+      'Insured Name': 'ASHVINBHAI JITENDRABHAI BHATT',
+      Premium: 750,
+      'Total Comm': 127.12,
+    }])
+    const policies = [
+      {
+        id: 'a', policyNumber: 'P/2026/0002955', clientId: 'c1',
+        clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 750,
+      },
+      {
+        id: 'b', policyNumber: 'P/2026/1112955', clientId: 'c2',
+        clientName: 'Another Ashvinbhai', insurer: 'Star Health', premium: 800,
+      },
+    ]
+    render(
+      <StatementImportModal
+        open
+        onClose={() => {}}
+        policies={policies}
+        user={{ uid: 'u1', email: 'owner@example.com' }}
+        onPosted={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Statement month *'), { target: { value: 'July' } })
+    fireEvent.change(screen.getByLabelText('Year *'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('Statement type *'), { target: { value: 'single' } })
+    fireEvent.change(screen.getByLabelText('Carrier *'), { target: { value: 'Star Health' } })
+    fireEvent.change(document.body.querySelector('input[type="file"]'), {
+      target: { files: [new File(['x'], 'star-july.csv')] },
+    })
+    await screen.findByRole('button', { name: /OK · update this commission/ })
+    expect(addCommissionTransaction).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /OK · update this commission/ }))
+    await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalledTimes(1))
+    expect(addCommissionTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      policyId: 'a',
+      policyNumber: 'P/2026/0002955',
+      receivedCommission: 127.12,
+      payoutMonth: '2026-07',
+    }))
+  })
 })
