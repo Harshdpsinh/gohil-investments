@@ -13,8 +13,20 @@ import { canonicalInsurer } from './insurers'
 import { normaliseBusinessType } from './commissionImport'
 import { isRenewalPolicy } from './businessDone'
 
-/** Rupee value of one transaction. netReceived is what actually landed. */
+/** Rupees that landed in the bank (after TDS when the importer split them). */
 export const txnAmount = txn => Number(txn?.netReceived ?? txn?.receivedCommission ?? 0)
+
+/**
+ * Gross commission the insurer credited. Expected rates are on premium, so
+ * this is what reconciliation compares — a 5% TDS haircut is tax, not a short.
+ */
+export function txnGross(txn = {}) {
+  if (txn.receivedCommission != null && txn.receivedCommission !== '') {
+    const gross = Number(txn.receivedCommission)
+    if (Number.isFinite(gross)) return gross
+  }
+  return txnAmount(txn) + (Number(txn.tds) || 0)
+}
 
 /**
  * What the insurer should pay on this policy. First-year policies earn the FY
@@ -63,7 +75,7 @@ export function netByPolicy(transactions = []) {
     const id = txn?.policyId
     if (!id) continue
     const current = map.get(id) || { received: 0, credits: 0, debits: 0, tds: 0, gst: 0, count: 0, rows: [] }
-    const amount = txnAmount(txn)
+    const amount = txnGross(txn)
     current.received += amount
     if (amount < 0) current.debits += amount
     else current.credits += amount
@@ -294,14 +306,18 @@ export function tdsSummary(transactions = [], { from = '', to = '' } = {}) {
     if (month && !inRange(month)) continue
     const key = txn.insurer || 'Unknown'
     const tds = Number(txn.tds) || 0
+    const credited = txnGross(txn)
+    const net = (txn.netReceived != null && txn.netReceived !== '')
+      ? Number(txn.netReceived) || 0
+      : credited - tds
     const entry = map.get(key) || { insurer: key, gross: 0, tds: 0, net: 0, rows: 0 }
-    entry.gross += txnAmount(txn) + tds
+    entry.gross += credited
     entry.tds += tds
-    entry.net += txnAmount(txn)
+    entry.net += net
     entry.rows += 1
     map.set(key, entry)
     total += tds
-    gross += txnAmount(txn) + tds
+    gross += credited
   }
 
   return {
