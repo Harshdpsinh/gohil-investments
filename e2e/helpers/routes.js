@@ -1,0 +1,20 @@
+/** Major authenticated routes from App.jsx (excluding dynamic :id). */
+export const APP_ROUTES = Object.freeze([
+  '/dashboard',
+  '/clients',
+  '/policies',
+  '/renewals',
+  '/pipeline',
+  '/installments',
+  '/cross-sell',
+  '/proposals',
+  '/business',
+  '/inbox',
+  '/commission',
+  '/claims',
+  '/reports',
+  '/wishes',
+  '/calendar',
+  '/admin-users',
+  '/backup',
+])
