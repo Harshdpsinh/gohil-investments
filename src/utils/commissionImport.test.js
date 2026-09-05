@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement,
   postingKey, legacyPostingKey, summarise, toPayoutMonth, normaliseBusinessType,
+  isMaskedPolicyNumber, last4,
 } from './commissionImport'
 
 // Real header row from an HDFC ERGO payout export. This insurer omits the
@@ -297,6 +298,129 @@ describe('matchRow', () => {
 
   it('matches when the statement omits name and insurer', () => {
     expect(matchRow(row({ clientName: '', insurer: '' }), policies).status).toBe('matched')
+  })
+})
+
+describe('Star Health masked last-4 matching', () => {
+  const book = [
+    {
+      id: 's1', policyNumber: 'P/2026/0002955', clientName: 'Ashvinbhai Jitendrabhai Bhatt',
+      insurer: 'Star Health and Allied Insurance', premium: 750, startDate: '2026-07-30',
+    },
+    {
+      id: 's2', policyNumber: 'P/2026/0003608', clientName: 'Bhavesh B Sharma',
+      insurer: 'Star Health and Allied Insurance', premium: 24257, startDate: '2026-07-03',
+    },
+    {
+      id: 's3', policyNumber: 'P/2025/0002955', clientName: 'Someone Else Entirely',
+      insurer: 'HDFC ERGO', premium: 750, startDate: '2026-07-30',
+    },
+    {
+      id: 's4', policyNumber: 'P/2024/0001519', clientName: 'Luckyrajsinh Y Jadeja',
+      insurer: 'Star Health and Allied Insurance', premium: 9000, startDate: '2025-07-10',
+      status: 'Renewed-Out',
+    },
+    {
+      id: 's5', policyNumber: 'P/2026/0001519', clientName: 'Luckyrajsinh Y Jadeja',
+      insurer: 'Star Health and Allied Insurance', premium: 10396, startDate: '2026-07-10',
+    },
+  ]
+
+  const star = over => ({
+    policyNumber: '************2955',
+    clientName: 'ASHVINBHAI JITENDRABHAI BHATT',
+    insurer: 'Star Health & Allied Insurance',
+    premium: 750,
+    commissionAmount: 127.12,
+    startDate: '30/07/2026',
+    ...over,
+  })
+
+  it('treats ************2955 as masked, not as policy 2955', () => {
+    expect(isMaskedPolicyNumber('************2955')).toBe(true)
+    expect(isMaskedPolicyNumber('P/2026/0002955')).toBe(false)
+    expect(last4('************2955')).toBe('2955')
+    expect(last4('P/2026/0002955')).toBe('2955')
+  })
+
+  it('does not exact-match a four-digit policy number of 2955', () => {
+    const tiny = [{ id: 't', policyNumber: '2955', clientName: 'Unrelated', insurer: 'Star Health and Allied Insurance', premium: 1 }]
+    const r = matchRow(star({ clientName: 'Nobody At All', premium: 9, startDate: '' }), tiny)
+    expect(r.status).toBe('unmatched')
+    expect(r.policy).toBeNull()
+  })
+
+  it('matches when last-4, name and premium all agree on a unique Star policy', () => {
+    const r = matchRow(star(), book)
+    expect(r.status).toBe('matched')
+    expect(r.policy.id).toBe('s1')
+  })
+
+  it('matches when last-4, name and start date agree even if premium is off', () => {
+    const r = matchRow(star({ premium: 999 }), book)
+    expect(r.status).toBe('matched')
+    expect(r.policy.id).toBe('s1')
+  })
+
+  it('stays in review when last-4 and name agree but premium and date do not', () => {
+    const r = matchRow(star({ premium: 999, startDate: '01/01/2020' }), book)
+    expect(r.status).toBe('review')
+    expect(r.policy.id).toBe('s1')
+    expect(r.reason).toMatch(/confirm premium/)
+  })
+
+  it('stays in review when last-4 hits but the name is someone else', () => {
+    const r = matchRow(star({ clientName: 'Totally Different Person' }), book)
+    expect(r.status).toBe('review')
+    expect(r.reason).toMatch(/name differs/)
+  })
+
+  it('does not issue against the HDFC policy that happens to share last-4', () => {
+    const r = matchRow(star(), book)
+    expect(r.policy.id).toBe('s1')
+    expect(r.policy.insurer).toMatch(/Star Health/)
+  })
+
+  it('picks the live term when last-4 is shared with a Renewed-Out row', () => {
+    const r = matchRow(star({
+      policyNumber: '************1519',
+      clientName: 'LUCKYRAJSINH Y JADEJA',
+      premium: 10396,
+      startDate: '10/07/2026',
+    }), book)
+    expect(r.status).toBe('matched')
+    expect(r.policy.id).toBe('s5')
+  })
+
+  it('refuses to pick when two live Star policies share last-4', () => {
+    const clash = [
+      ...book,
+      {
+        id: 's6', policyNumber: 'P/2026/1112955', clientName: 'Ashvinbhai Jitendrabhai Bhatt',
+        insurer: 'Star Health and Allied Insurance', premium: 750, startDate: '2026-07-30',
+      },
+    ]
+    const r = matchRow(star(), clash)
+    expect(r.status).toBe('review')
+    expect(r.policy).toBeNull()
+    expect(r.reason).toMatch(/share last-4/)
+  })
+
+  it('reads MRS-glued Star names against the book', () => {
+    const r = matchRow(star({
+      policyNumber: '************3608',
+      clientName: 'MRBHAVESH B SHARMA',
+      premium: 24257,
+      startDate: '03/07/2026',
+    }), book)
+    expect(r.status).toBe('matched')
+    expect(r.policy.id).toBe('s2')
+  })
+
+  it('keeps June vs July posting keys apart even on the same last-4', () => {
+    const july = { policyNumber: '************2955', payoutMonth: '2026-07', commissionAmount: 127.12, sourceRow: 1 }
+    const june = { policyNumber: '63051627000082', payoutMonth: '2026-06', commissionAmount: 112.5, sourceRow: 1 }
+    expect(postingKey(july)).not.toBe(postingKey(june))
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  parseStatementLines, parseAdityaBirla, parseStarHealth,
+  parseStatementLines, parseAdityaBirla, parseStarHealth, parseStarHealthCard,
   parseIciciLombard, parseTataAia, parseGeneric, parseBandedTable,
 } from './pdfProfiles'
 
@@ -106,6 +106,147 @@ describe('parseStarHealth', () => {
     const shifted = STAR_HEALTH[0].map(l => line(l.y, l.cells.map(c =>
       c.x === 310 ? at(280, c.text) : c)))
     expect(parseStarHealth([shifted])).toEqual([])
+  })
+})
+
+// ── Star Health June: rotated table as printed (END No + Gross vs Net) ──
+const STAR_HEALTH_JUNE = [[
+  line(760, [at(64, 'STAR HEALTH AND ALLIED INSURANCE COMPANY')]),
+  line(720, [at(131, 'AGENT PROVISIONAL STATEMENT FOR THE PERIOD : 01-Jun-2026 TO 30-Jun-2026')]),
+  // High-y "Gross" (GST-net header) listed first, as extractLines sorts top-of-page first.
+  line(765, [at(324, 'Gross')]),
+  line(759, [at(368, 'Payable')]),
+  line(769, [at(381, '95.34'), at(416, '-2414.24')]),
+  line(200, [at(346, 'Policy No')]),
+  line(190, [at(381, '63051627000082'), at(389.5, '93'), at(416, '51051124030430'), at(424.5, '03')]),
+  line(294, [at(340, "Proposer's")]),
+  line(301, [at(381, 'HARENDRA'), at(416, 'VANITABEN')]),
+  line(303, [at(389.5, 'VARMORA'), at(424.5, 'GOSWAMI')]),
+  line(615, [at(335, 'Premium/Ref')]),
+  line(642, [at(381, '750'), at(416, '-18992')]),
+  line(686, [at(346, 'Commission')]),
+  line(703, [at(335, 'Gross')]),
+  line(707, [at(381, '112.5'), at(416, '-2848.8')]),
+]]
+
+describe('parseStarHealth June rotated statement', () => {
+  it('keeps the 14-digit policy number and drops the 2-digit END No', () => {
+    expect(parseStarHealth(STAR_HEALTH_JUNE).map(r => r.policyNumber))
+      .toEqual(['63051627000082', '51051124030430'])
+  })
+
+  it('posts Gross commission, not the GST-stripped Payable band', () => {
+    const rows = parseStarHealth(STAR_HEALTH_JUNE)
+    expect(rows[0]).toMatchObject({
+      clientName: 'HARENDRA VARMORA',
+      premium: 750,
+      commissionAmount: 112.5,
+    })
+  })
+
+  it('keeps a negative reversal instead of dropping it', () => {
+    expect(parseStarHealth(STAR_HEALTH_JUNE)[1].commissionAmount).toBe(-2848.8)
+    expect(parseStarHealth(STAR_HEALTH_JUNE)[1].premium).toBe(-18992)
+  })
+})
+
+// ── Star Health July: portal card statement, masked last-4 ──────────────
+// Geometry copied from the Jul'26 statement (pdfjs extractLines, y rounded).
+const STAR_HEALTH_CARD = [
+  [
+    line(541, [at(81, "Commission Statement For Jul'26")]),
+    line(340, [at(560, 'Net Commission/Reward'), at(717, '₹29,236')]),
+  ],
+  [
+    line(428, [at(76, 'Fresh Policy Commission & Reward Details :')]),
+    line(384, [
+      at(73, 'Proposer & Product Name'), at(258, 'Policy Number'),
+      at(360, 'Policy Info'), at(446, 'Policy Dates'), at(596, 'Premium'),
+      at(652, 'Commission/Reward'),
+    ]),
+    line(342, [
+      at(73, 'ASHVINBHAI JITENDRABHAI BHATT |'), at(258, '************2955'),
+      at(360, 'ACCIDENT |'), at(446, '30/07/2026 to'), at(538, '₹10 Lakh'),
+      at(596, '₹750'), at(652, '₹127.12'),
+    ]),
+    line(328, [at(73, 'FAMILY ACCIDENT CARE-2020'), at(360, 'Full | 1 Year'), at(446, '29/07/2027')]),
+    line(299, [
+      at(73, 'BHAVESH B SHARMA | ASSURE'), at(258, '************3608'),
+      at(360, 'HEALTH | Full |'), at(446, '03/07/2026 to'), at(538, '₹10 Lakh'),
+      at(596, '₹24,257'), at(652, '₹4,111.36'),
+    ]),
+    line(285, [at(73, 'INSURANCE-2026'), at(360, '3 Year'), at(446, '02/07/2029')]),
+    line(256, [at(73, 'Total'), at(652, '₹4,238.48')]),
+    line(202, [at(76, 'Renewal Policy Commission & Reward Details :')]),
+    line(128, [
+      at(73, 'LUCKYRAJSINH Y JADEJA | ASSURE'), at(258, '************1519'),
+      at(360, 'HEALTH | Full'), at(439, '10/07/2026 to'), at(534, '₹10 Lakh'),
+      at(593, '₹10,396'), at(650, '₹1,321.53'),
+    ]),
+    line(114, [at(73, 'INSURANCE-2026'), at(360, '| 1 Year'), at(439, '09/07/2027')]),
+  ],
+  [
+    line(498, [
+      at(73, 'KIRTAN D TRIVEDI | YOUNG STAR'), at(258, '************5476'),
+      at(360, 'HEALTH | EMI'), at(439, '15/04/2026 to'), at(534, '₹5 Lakh'),
+      at(593, '₹3,220'), at(650, '₹409.32'),
+    ]),
+    line(485, [at(73, 'INSURANCE POLICY REVISED - 2025'), at(360, '| 1 Year'), at(439, '14/04/2027')]),
+    line(456, [at(73, 'Total'), at(650, '₹25,594.47')]),
+    line(402, [at(76, 'Travel Policy Commission & Reward Details :')]),
+    line(370, [
+      at(73, 'Proposer & Product Name'), at(258, 'Policy Number'),
+      at(608, 'Gross Commission/Reward Payable'),
+    ]),
+    line(300, [at(76, 'TMP Policy Commission & Reward Details :')]),
+    line(198, [at(76, 'Portability Policy Commission & Reward Details :')]),
+    line(97, [at(76, 'Arrear Details :')]),
+  ],
+]
+
+describe('parseStarHealth July card statement', () => {
+  it('reads masked last-4 rows from Fresh and Renewal sections', () => {
+    const rows = parseStarHealth(STAR_HEALTH_CARD)
+    expect(rows.map(r => r.policyNumber)).toEqual([
+      '************2955', '************3608', '************1519', '************5476',
+    ])
+    expect(rows.map(r => r.businessType)).toEqual(['Fresh', 'Fresh', 'Renewal', 'Renewal'])
+  })
+
+  it('splits proposer and product, keeps gross not net, and records the start date', () => {
+    const [ashvin] = parseStarHealth(STAR_HEALTH_CARD)
+    expect(ashvin).toMatchObject({
+      clientName: 'ASHVINBHAI JITENDRABHAI BHATT',
+      planName: 'FAMILY ACCIDENT CARE-2020',
+      premium: 750,
+      commissionAmount: 127.12,
+      startDate: '30/07/2026',
+      insurer: 'Star Health & Allied Insurance',
+    })
+  })
+
+  it('does not turn the section Total into a policy', () => {
+    expect(parseStarHealth(STAR_HEALTH_CARD).some(r => r.commissionAmount === 4238.48)).toBe(false)
+  })
+
+  it('emits nothing from empty Travel / TMP / Portability / Arrear blocks', () => {
+    expect(parseStarHealth(STAR_HEALTH_CARD)).toHaveLength(4)
+  })
+
+  it('keeps an EMI renewal on the statement month rather than dropping it', () => {
+    const kirtan = parseStarHealth(STAR_HEALTH_CARD).find(r => r.policyNumber.endsWith('5476'))
+    expect(kirtan).toMatchObject({
+      clientName: 'KIRTAN D TRIVEDI',
+      businessType: 'Renewal',
+      premium: 3220,
+      commissionAmount: 409.32,
+      startDate: '15/04/2026',
+    })
+  })
+
+  it('is claimed as Star Health, not the generic table', () => {
+    expect(parseStatementLines(STAR_HEALTH_CARD).format).toBe('Star Health')
+    expect(parseStarHealthCard(STAR_HEALTH_CARD)).toHaveLength(4)
   })
 })
 
