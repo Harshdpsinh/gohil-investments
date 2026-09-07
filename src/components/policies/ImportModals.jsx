@@ -5,6 +5,7 @@
 import { useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import DateInput from '../ui/DateInput'
+import SearchableSelect, { toClientOptions } from '../ui/SearchableSelect'
 import { addClient, checkDuplicate, findClientByMobileOrName, importPoliciesBatch } from '../../firebase/firestore'
 import { parseAnyDate } from '../../utils/dateUtils'
 import {
@@ -64,18 +65,18 @@ function ClientMappingStep({ unmapped, clients, onConfirm, onBack }) {
                   ⏭ Import without linking
                 </button>
               </div>
-              <select
+              <SearchableSelect
                 value={res.type==='existing' ? res.clientId : ''}
-                onChange={e => {
-                  const id = e.target.value
-                  if (!id) return
+                options={toClientOptions(clients)}
+                onChange={id => {
                   const cl = clients.find(c => c.id === id)
-                  setRes(name, { type: 'existing', clientId: id, clientName: cl?.name || name })
+                  if (!cl) return
+                  setRes(name, { type: 'existing', clientId: id, clientName: cl.name || name })
                 }}
-                className="form-select text-xs w-full">
-                <option value="">— Or map to existing client —</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+                placeholder="Type a name to map to an existing client…"
+                emptyText="No client matches that name"
+                className="text-xs"
+              />
               {res.type === 'existing' && <p className="text-xs text-green-600 mt-1 font-medium">✅ Will be linked to: {res.clientName}</p>}
             </div>
           )

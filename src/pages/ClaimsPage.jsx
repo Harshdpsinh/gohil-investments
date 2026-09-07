@@ -10,6 +10,7 @@ import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import SearchBar     from '../components/ui/SearchBar'
 import DateInput     from '../components/ui/DateInput'
+import SearchableSelect, { toClientOptions } from '../components/ui/SearchableSelect'
 import AppIcon       from '../components/ui/AppIcon'
 import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
@@ -113,10 +114,14 @@ function ClaimForm({ initial, clients, policies, onSave, onCancel }) {
         {inp('claimNumber', 'Claim Number', 'text', { placeholder: 'CLM-2024-001' })}
         <div>
           <label className="form-label">Client *</label>
-          <select value={form.clientId} onChange={e=>onClientChange(e.target.value)} className="form-select">
-            <option value="">— Select Client —</option>
-            {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <SearchableSelect
+            value={form.clientId || ''}
+            options={toClientOptions(clients)}
+            onChange={onClientChange}
+            placeholder="Type a name to find…"
+            emptyText="No client matches that name"
+            required
+          />
         </div>
         <div>
           <label className="form-label">Policy</label>

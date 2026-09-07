@@ -7,6 +7,7 @@ import PortalOverlay from '../ui/PortalOverlay'
 import toast from 'react-hot-toast'
 import { addClient } from '../../firebase/firestore'
 import DateInput from '../ui/DateInput'
+import SearchableSelect, { toClientOptions } from '../ui/SearchableSelect'
 import PolicyPdfUpload from './PolicyPdfUpload'
 import {
   HEALTH_RELATIONSHIPS, MOTOR_NCB_OPTIONS, MOTOR_COVER_TYPES,
@@ -390,13 +391,12 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     })
   }
 
-  const onClientChange = e => {
-    const id = e.target.value
-    const cl = localClients.find(c=>c.id===id)
-    set('clientId',  id)
-    set('clientName',cl?.name||'')
-    set('_clientMobile', cl?.mobile||'')
-    set('_clientEmail',  cl?.email||'')
+  const onClientChange = id => {
+    const cl = localClients.find(c => c.id === id)
+    set('clientId', id)
+    set('clientName', cl?.name || '')
+    set('_clientMobile', cl?.mobile || '')
+    set('_clientEmail', cl?.email || '')
   }
   const onClientCreated = nc => {
     setLocalClients(prev=>[nc,...prev])
@@ -495,10 +495,15 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           <div>
             <label className="form-label">Client *</label>
             <div className="flex gap-2 items-center">
-              <select value={form.clientId||''} onChange={onClientChange} className="form-select flex-1" required>
-                <option value="">— Select Client —</option>
-                {localClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <SearchableSelect
+                className="flex-1 min-w-0"
+                value={form.clientId || ''}
+                options={toClientOptions(localClients)}
+                onChange={onClientChange}
+                placeholder="Type a name to find…"
+                emptyText="No client matches that name"
+                required
+              />
               <button type="button" onClick={()=>setShowQA(true)} title="Add new client"
                       className="flex-shrink-0 w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-lg font-bold">+</button>
             </div>

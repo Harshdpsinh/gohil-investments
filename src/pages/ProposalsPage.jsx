@@ -11,6 +11,7 @@ import { generateProposalPDF } from '../utils/proposalPDF'
 import Modal        from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
+import SearchableSelect, { toClientOptions } from '../components/ui/SearchableSelect'
 import { fmtDateTime } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
 
@@ -114,8 +115,8 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
     const members = [...p.members]; members[idx] = { ...members[idx], [k]: v }; return { ...p, members }
   })
 
-  const onClientSelect = e => {
-    const cl = clients.find(c => c.id === e.target.value)
+  const onClientSelect = id => {
+    const cl = clients.find(c => c.id === id)
     if (!cl) return
     setForm(p => ({
       ...p, clientId: cl.id,
@@ -229,10 +230,13 @@ function ProposalForm({ clients, initial, onSave, onCancel }) {
       {/* Auto-fill from client */}
       <div>
         <label className="form-label">Auto-fill from existing client (optional)</label>
-        <select onChange={onClientSelect} className="form-select">
-          <option value="">— Select client to auto-fill —</option>
-          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <SearchableSelect
+          value={form.clientId || ''}
+          options={toClientOptions(clients)}
+          onChange={onClientSelect}
+          placeholder="Type a name to find…"
+          emptyText="No client matches that name"
+        />
       </div>
 
       {/* Upsert status badge */}
