@@ -7,7 +7,7 @@ import { useAuth }     from '../hooks/useAuth'
 import {
   addClient, cascadeUpdateClient, deleteClient,
   bulkDeleteClients, getDocMeta,
-  mergeClients, bulkMergeClients
+  bulkMergeClients
 } from '../firebase/firestore'
 import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath, openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
 import { computeCoverageGaps } from '../utils/policySchemas'
@@ -15,7 +15,9 @@ import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput     from '../components/ui/DateInput'
 import AppIcon       from '../components/ui/AppIcon'
+import SearchableSelect, { toClientOptions } from '../components/ui/SearchableSelect'
 import { fmtDate, fmtCurrency, parseAnyDate } from '../utils/dateUtils'
+import { duplicateClusters } from '../utils/clientMerge'
 import { exportToCSV, exportToExcel, exportToPDF, CLIENT_COLS } from '../utils/exportUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
@@ -269,10 +271,83 @@ function DocumentManager({ clientId }) {
 }
 
 // ── CliMer — Client Merger UI ─────────────────────────────────
+function ClusterCard({ cluster, merging, onMerge }) {
+  const [masterId, setMasterId] = useState(cluster.suggestedMasterId)
+  const others = cluster.members.filter(m => m.id !== masterId)
+  const [dupIds, setDupIds] = useState(() => others.map(m => m.id))
+
+  const pickMaster = id => {
+    setMasterId(id)
+    setDupIds(cluster.members.filter(m => m.id !== id).map(m => m.id))
+  }
+  const toggle = id => {
+    setDupIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const master = cluster.members.find(m => m.id === masterId)
+  const selected = others.filter(m => dupIds.includes(m.id))
+
+  return (
+    <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 dark:border-orange-800 dark:bg-orange-900/20">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
+          Same mobile · {cluster.mobile} · {cluster.members.length} records
+        </span>
+        <button
+          type="button"
+          className="text-[11px] font-semibold text-orange-700 hover:underline"
+          onClick={() => setDupIds(others.map(m => m.id))}
+        >
+          Select all others
+        </button>
+      </div>
+      <ul className="space-y-1">
+        {cluster.members.map(m => {
+          const isMaster = m.id === masterId
+          return (
+            <li key={m.id} className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs ${isMaster ? 'border-emerald-400 bg-white dark:bg-gray-800' : 'border-transparent bg-white/70 dark:bg-gray-800/70'}`}>
+              {isMaster ? (
+                <span className="mt-0.5 text-emerald-600">✓</span>
+              ) : (
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={dupIds.includes(m.id)}
+                  onChange={() => toggle(m.id)}
+                />
+              )}
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => pickMaster(m.id)}>
+                <span className="block font-semibold text-gray-900 dark:text-white">{m.name}</span>
+                <span className="block text-[11px] text-gray-500">
+                  {m.mobile || 'No mobile'}
+                  {m._policyCount ? ` · ${m._policyCount} policies` : ''}
+                  {m.email ? ` · ${m.email}` : ''}
+                </span>
+                {isMaster && (
+                  <span className="mt-0.5 block font-semibold text-emerald-700">Master — keep this one</span>
+                )}
+                {!isMaster && (
+                  <span className="mt-0.5 block text-[11px] text-slate-400">Click name to make master</span>
+                )}
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <button
+        type="button"
+        disabled={merging || !masterId || selected.length === 0}
+        onClick={() => onMerge(selected.map(m => m.id), masterId, master?.name)}
+        className="btn-primary mt-3 w-full"
+      >
+        {merging ? 'Merging…' : `Merge ${selected.length} into ${master?.name || 'master'}`}
+      </button>
+    </div>
+  )
+}
+
 function CliMerModal({ clients, onClose, onMerged }) {
-  const [mode,        setMode]        = useState('suggest') // 'suggest' | 'single' | 'bulk' | 'family'
+  const [mode,        setMode]        = useState('suggest')
   const [masterId,    setMasterId]    = useState('')
-  const [dupId,       setDupId]       = useState('')
   const [dupIds,      setDupIds]      = useState([])
   const [merging,     setMerging]     = useState(false)
   const [results,     setResults]     = useState(null)
@@ -285,35 +360,12 @@ function CliMerModal({ clients, onClose, onMerged }) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return !q ? sortedClients : sortedClients.filter(c =>
-      c.name.toLowerCase().includes(q) || (c.mobile||'').includes(q)
+      c.name.toLowerCase().includes(q) || (c.mobile||'').includes(q) || (c.email||'').toLowerCase().includes(q)
     )
   }, [sortedClients, search])
 
-  // Auto-detect duplicate pairs: same mobile OR name similarity (first 6 chars match)
-  const suggestedPairs = useMemo(() => {
-    const pairs = []
-    const seen  = new Set()
-    for (let i = 0; i < clients.length; i++) {
-      for (let j = i + 1; j < clients.length; j++) {
-        const a = clients[i], b = clients[j]
-        const key = [a.id, b.id].sort().join('|')
-        if (seen.has(key)) continue
-        const aMob = (a.mobile||'').replace(/\D/g,'')
-        const bMob = (b.mobile||'').replace(/\D/g,'')
-        const sameMobile = aMob.length >= 8 && aMob === bMob
-        const aName = a.name.toLowerCase().replace(/\s+/g,'')
-        const bName = b.name.toLowerCase().replace(/\s+/g,'')
-        const nameSim = aName.length >= 5 && bName.length >= 5 &&
-          (aName.startsWith(bName.slice(0,6)) || bName.startsWith(aName.slice(0,6)) ||
-           aName.includes(bName.slice(0,5)) || bName.includes(aName.slice(0,5)))
-        if (sameMobile || nameSim) {
-          seen.add(key)
-          pairs.push({ a, b, reason: sameMobile ? '📱 Same mobile' : '👤 Similar name' })
-        }
-      }
-    }
-    return pairs
-  }, [clients])
+  const clusters = useMemo(() => duplicateClusters(clients), [clients])
+  const clientOptions = useMemo(() => toClientOptions(sortedClients), [sortedClients])
 
   const toggleDup = id => {
     setDupIds(prev =>
@@ -353,114 +405,67 @@ function CliMerModal({ clients, onClose, onMerged }) {
     }
   }
 
-  const quickMerge = async (dupClientId, masterClientId) => {
+  const mergeIntoMaster = async (ids, keepId, keepName) => {
+    if (!keepId) { toast.error('Select a master client'); return }
+    const dups = (ids || []).filter(id => id && id !== keepId)
+    if (!dups.length) { toast.error('Select at least one duplicate'); return }
     setMerging(true)
     try {
-      const r = await mergeClients(dupClientId, masterClientId)
-      toast.success(`✅ Merged! ${r.policiesMoved} policies and ${r.claimsMoved} claims moved.`)
-      onMerged()
-    } catch(err) { toast.error('Merge failed: ' + err.message) }
-    finally { setMerging(false) }
-  }
-
-  const quickFamilyLink = async (aId, bId) => {
-    await linkAsFamily([aId, bId])
-  }
-
-  const doSingleMerge = async () => {
-    if (!masterId) { toast.error('Select a master client'); return }
-    if (!dupId)    { toast.error('Select a duplicate client'); return }
-    if (dupId === masterId) { toast.error('Master and duplicate cannot be the same'); return }
-    setMerging(true)
-    try {
-      const r = await mergeClients(dupId, masterId)
-      toast.success(`✅ Merged! ${r.policiesMoved} policies, ${r.claimsMoved} claims, and ${r.docsMoved} documents moved.`)
-      onMerged()
-      onClose()
-    } catch(err) { toast.error('Merge failed: ' + err.message) }
-    finally { setMerging(false) }
-  }
-
-  const doBulkMerge = async () => {
-    if (!masterId)       { toast.error('Select a master client'); return }
-    if (!dupIds.length)  { toast.error('Select at least one duplicate'); return }
-    if (dupIds.includes(masterId)) { toast.error('Master cannot be in duplicates list'); return }
-    setMerging(true)
-    try {
-      const res = await bulkMergeClients(dupIds, masterId)
+      const res = await bulkMergeClients(dups, keepId)
       setResults(res)
       const ok  = res.filter(r => r.success).length
       const err = res.filter(r => !r.success).length
-      toast.success(`✅ Bulk merge complete: ${ok} merged${err>0?`, ${err} failed`:''}`)
+      const moved = res.filter(r => r.success).reduce((n, r) => n + (r.policiesMoved || 0) + (r.claimsMoved || 0), 0)
+      toast.success(`Merged ${ok} into ${keepName || 'master'}${moved ? ` · ${moved} policies/claims moved` : ''}${err ? ` · ${err} failed` : ''}`)
       onMerged()
-    } catch(err) { toast.error('Bulk merge failed: ' + err.message) }
+    } catch(err) { toast.error('Merge failed: ' + err.message) }
     finally { setMerging(false) }
   }
 
+  const doBulkMerge = async () => mergeIntoMaster(dupIds, masterId, masterClient?.name)
+
   const masterClient = clients.find(c => c.id === masterId)
-  const dupClient    = clients.find(c => c.id === dupId)
+  const mergeCandidates = filtered.filter(c => c.id !== masterId)
 
   return (
     <div className="space-y-5">
-      {/* Mode tabs */}
-            <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap">
         {[
-          ['suggest', `Suggested (${suggestedPairs.length})`],
+          ['suggest', `Suggested (${clusters.length})`],
           ['family', 'Family Link (safe)'],
-          ['single', 'Single Merge'],
-          ['bulk', 'Bulk Merge'],
+          ['merge', 'Merge'],
         ].map(([m,l]) => (
-          <button key={m} onClick={() => { setMode(m); setResults(null) }}
+          <button key={m} type="button" onClick={() => { setMode(m); setResults(null); setDupIds([]); setMasterId(''); setSearch('') }}
                   className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${mode===m?'bg-blue-600 text-white':'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
             {l}
           </button>
         ))}
       </div>
 
-      {/* Info banner */}
       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-xs text-blue-700 dark:text-blue-300">
         <p className="font-semibold">How CliMer works:</p>
-        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves policies, claims, and documents into the master client, then archives the duplicate record instead of deleting it.</p>
+        <p className="mt-1"><strong>Family Link</strong> is safe and non-destructive: clients and policies stay exactly where they are. <strong>Merge</strong> moves policies, claims, and documents into the master client, then archives the duplicates instead of deleting them. Same-mobile groups (all four Ketans, one phone) merge together in one click.</p>
       </div>
 
-      {/* ── SUGGESTED DUPLICATES TAB ── */}
       {mode === 'suggest' && (
         <>
-          {suggestedPairs.length === 0 ? (
+          {clusters.length === 0 ? (
             <div className="text-center py-10 text-gray-400 dark:text-gray-500">
-              <p className="text-2xl mb-2">✅</p>
-              <p className="font-semibold">No duplicate clients detected</p>
-              <p className="text-xs mt-1">No clients share a mobile number or a similar name.</p>
+              <p className="font-semibold">No same-mobile duplicates</p>
+              <p className="text-xs mt-1">People who only share a similar name belong in Family Link, not merge.</p>
             </div>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {suggestedPairs.length} possible duplicate pair{suggestedPairs.length!==1?'s':''} found. For each pair, click <strong>Keep →</strong> to set that side as master and merge the other into it.
+                {clusters.length} group{clusters.length !== 1 ? 's' : ''} share a mobile. Keep the most complete record. Tick every copy that is the same person, then merge them all at once.
               </p>
-              {suggestedPairs.map(({ a, b, reason }) => (
-                <div key={`${a.id}|${b.id}`} className="border border-orange-200 dark:border-orange-800 rounded-xl p-3 bg-orange-50 dark:bg-orange-900/20">
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-xs font-semibold text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-900/40 px-2 py-0.5 rounded-full">{reason}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg p-2 border border-gray-200 dark:border-gray-700">
-                      <p className="font-semibold text-gray-800 dark:text-gray-200">{a.name}</p>
-                      <p className="text-gray-400 dark:text-gray-500 mt-0.5">{a.mobile||'No mobile'}</p>
-                      <button onClick={() => quickMerge(b.id, a.id)} disabled={merging}
-                              className="mt-2 w-full px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700 disabled:opacity-50">
-                        Keep this → merge other
-                      </button>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 rounded-lg p-2 border border-gray-200 dark:border-gray-700">
-                      <p className="font-semibold text-gray-800 dark:text-gray-200">{b.name}</p>
-                      <p className="text-gray-400 dark:text-gray-500 mt-0.5">{b.mobile||'No mobile'}</p>
-                      <button onClick={() => quickMerge(a.id, b.id)} disabled={merging}
-                              className="mt-2 w-full px-2 py-1 bg-green-600 text-white rounded text-xs font-semibold hover:bg-green-700 disabled:opacity-50">
-                        Keep this → merge other
-                      </button>
-                    </div>
-                  </div>
-                </div>
+              {clusters.map(cluster => (
+                <ClusterCard
+                  key={cluster.key}
+                  cluster={cluster}
+                  merging={merging}
+                  onMerge={(ids, keepId, keepName) => mergeIntoMaster(ids, keepId, keepName)}
+                />
               ))}
             </div>
           )}
@@ -535,110 +540,93 @@ function CliMerModal({ clients, onClose, onMerged }) {
           </div>
         </div>
       )}
-      {/* SINGLE / BULK TABS */}
-      {mode !== 'suggest' && mode !== 'family' && (
+      {mode === 'merge' && (
         <>
-          {/* Master client selector */}
           <div>
-            <label className="form-label">✅ Master Client (keep this one)</label>
-            <input type="text" placeholder="Search…" value={search}
-                   onChange={e => setSearch(e.target.value)} className="form-input mb-2" />
-            <select value={masterId} onChange={e => { setMasterId(e.target.value); setDupId('') }}
-                    className="form-select" size={5}>
-              <option value="">— Select master —</option>
-              {filtered.map(c => (
-                <option key={c.id} value={c.id}>{c.name} {c.mobile ? `· ${c.mobile}` : ''}</option>
-              ))}
-            </select>
+            <label className="form-label">Master client (keep this one)</label>
+            <SearchableSelect
+              className="mt-1"
+              value={masterId}
+              options={clientOptions}
+              onChange={id => { setMasterId(id); setDupIds(prev => prev.filter(x => x !== id)) }}
+              placeholder="Type a name to find the master…"
+              emptyText="No client matches that name"
+            />
             {masterClient && (
-              <p className="text-xs text-green-600 dark:text-green-400 mt-1 font-semibold">
-                ✅ Master: {masterClient.name} {masterClient.mobile ? `(${masterClient.mobile})` : ''}
+              <p className="mt-1 text-xs font-semibold text-green-600 dark:text-green-400">
+                Master: {masterClient.name} {masterClient.mobile ? `(${masterClient.mobile})` : ''}
               </p>
             )}
           </div>
 
-          {mode === 'single' ? (
-            <>
-              <div>
-                <label className="form-label">Duplicate Client (will be archived after merge)</label>
-                <select value={dupId} onChange={e => setDupId(e.target.value)}
-                        className="form-select" size={5}>
-                  <option value="">— Select duplicate —</option>
-                  {filtered.filter(c => c.id !== masterId).map(c => (
-                    <option key={c.id} value={c.id}>{c.name} {c.mobile ? `· ${c.mobile}` : ''}</option>
-                  ))}
-                </select>
-                {dupClient && (
-                  <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 font-semibold">
-                    Duplicate: {dupClient.name} — will be archived after merge
-                  </p>
-                )}
-              </div>
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <label className="form-label mb-0">Duplicates to archive into master</label>
+              <button
+                type="button"
+                className="text-xs font-semibold text-blue-700 hover:underline"
+                disabled={!masterId}
+                onClick={() => setDupIds(mergeCandidates.map(c => c.id))}
+              >
+                Select all in this list
+              </button>
+            </div>
+            <input type="text" placeholder="Filter by name or mobile…" value={search}
+                   onChange={e => setSearch(e.target.value)} className="form-input mb-2" />
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
+              {mergeCandidates.map(c => (
+                <label key={c.id} className={`flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 ${dupIds.includes(c.id) ? 'bg-orange-50 dark:bg-orange-900/20' : 'bg-white dark:bg-gray-800'}`}>
+                  <input type="checkbox" checked={dupIds.includes(c.id)}
+                         onChange={() => toggleDup(c.id)} className="h-4 w-4 cursor-pointer" />
+                  <span className="min-w-0 text-sm text-gray-800 dark:text-gray-200">
+                    <span className="block font-medium">{c.name}</span>
+                    <span className="block text-[11px] text-gray-400">
+                      {c.mobile || 'No mobile'}
+                      {c._policyCount ? ` · ${c._policyCount} policies` : ''}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {dupIds.length > 0 && (
+              <p className="mt-1 text-xs font-semibold text-orange-600 dark:text-orange-400">
+                {dupIds.length} will be archived after their policies and claims move to {masterClient?.name || 'the master'}
+              </p>
+            )}
+          </div>
 
-              {masterId && dupId && masterId !== dupId && (
-                <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-xl p-3 text-sm">
-                  <p className="font-semibold text-orange-700 dark:text-orange-300">Confirm merge:</p>
-                  <p className="text-orange-600 dark:text-orange-400 mt-1">
-                    Move all linked policies, claims, and documents from <strong>{dupClient?.name}</strong> to <strong>{masterClient?.name}</strong>, then archive {dupClient?.name}. Original policy details remain unchanged.
-                  </p>
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button onClick={doSingleMerge} disabled={merging || !masterId || !dupId || dupId===masterId}
-                        className="btn-primary">
-                  {merging ? '⏳ Merging…' : '🔀 Merge Now'}
-                </button>
-                <button onClick={onClose} className="btn-secondary">Cancel</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <label className="form-label">Duplicate Clients (select all to merge into master and archive)</label>
-                <div className="max-h-52 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-xl divide-y divide-gray-100 dark:divide-gray-700">
-                  {filtered.filter(c => c.id !== masterId).map(c => (
-                    <label key={c.id} className={`flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 ${dupIds.includes(c.id) ? 'bg-orange-50 dark:bg-orange-900/20' : 'bg-white dark:bg-gray-800'}`}>
-                      <input type="checkbox" checked={dupIds.includes(c.id)}
-                             onChange={() => toggleDup(c.id)} className="w-4 h-4 cursor-pointer" />
-                      <span className="text-sm text-gray-800 dark:text-gray-200">
-                        {c.name} {c.mobile ? <span className="text-gray-400 dark:text-gray-500">· {c.mobile}</span> : null}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                {dupIds.length > 0 && (
-                  <p className="text-xs text-orange-600 dark:text-orange-400 mt-1 font-semibold">
-                    {dupIds.length} client(s) selected for deletion after merge
-                  </p>
-                )}
-              </div>
-
-              {results && (
-                <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 px-3 py-2 bg-gray-50 dark:bg-gray-700">Merge Results</p>
-                  {results.map(r => {
-                    const c = clients.find(x => x.id === r.duplicateId)
-                    return (
-                      <div key={r.duplicateId} className={`px-3 py-2 text-xs border-t border-gray-100 dark:border-gray-700 ${r.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'}`}>
-                        {r.success
-                          ? `✅ ${c?.name||r.duplicateId}: ${r.policiesMoved} policies, ${r.claimsMoved} claims, ${r.docsMoved} docs moved`
-                          : `❌ ${c?.name||r.duplicateId}: ${r.error}`}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-
-              <div className="flex gap-3">
-                <button onClick={doBulkMerge} disabled={merging || !masterId || !dupIds.length}
-                        className="btn-primary">
-                  {merging ? '⏳ Merging…' : `🔀 Bulk Merge ${dupIds.length} Client${dupIds.length!==1?'s':''}`}
-                </button>
-                <button onClick={onClose} className="btn-secondary">Cancel</button>
-              </div>
-            </>
+          {masterId && dupIds.length > 0 && (
+            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm dark:border-orange-800 dark:bg-orange-900/20">
+              <p className="font-semibold text-orange-700 dark:text-orange-300">Confirm merge:</p>
+              <p className="mt-1 text-orange-600 dark:text-orange-400">
+                Move policies, claims, and documents from {dupIds.length} client{dupIds.length === 1 ? '' : 's'} into <strong>{masterClient?.name}</strong>, then archive the duplicates. Policy numbers stay unchanged.
+              </p>
+            </div>
           )}
+
+          {results && (
+            <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+              <p className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-400">Merge results</p>
+              {results.map(r => {
+                const c = clients.find(x => x.id === r.duplicateId)
+                return (
+                  <div key={r.duplicateId} className={`border-t border-gray-100 px-3 py-2 text-xs dark:border-gray-700 ${r.success ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300' : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'}`}>
+                    {r.success
+                      ? `${c?.name || r.duplicateId}: ${r.policiesMoved} policies, ${r.claimsMoved} claims, ${r.docsMoved} docs moved`
+                      : `${c?.name || r.duplicateId}: ${r.error}`}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <button onClick={doBulkMerge} disabled={merging || !masterId || !dupIds.length}
+                    className="btn-primary">
+              {merging ? 'Merging…' : `Merge ${dupIds.length} into master`}
+            </button>
+            <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
+          </div>
         </>
       )}
     </div>
@@ -1127,7 +1115,7 @@ export default function ClientsPage() {
       {/* CliMer modal */}
       <Modal open={modal==='climer'} onClose={() => setModal(null)} title="🔀 CliMer — Client Merger" size="lg">
         <CliMerModal
-          clients={clients}
+          clients={clientData}
           onClose={() => setModal(null)}
           onMerged={() => {}}
         />
