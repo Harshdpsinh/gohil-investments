@@ -323,7 +323,7 @@ describe('StatementImportModal review table', () => {
     })
     await screen.findByRole('button', { name: /Add policy & post commission/ })
     expect(screen.queryByRole('button', { name: /OK · update this commission/ })).toBeNull()
-    expect(screen.getByText(/Do not put commission on their old number/)).toBeTruthy()
+    expect(screen.getByText(/do not park commission on a different number/i)).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText(/Type the full number/), {
       target: { value: 'P/2026/0002955' },
     })
@@ -342,5 +342,103 @@ describe('StatementImportModal review table', () => {
       receivedCommission: 127.12,
       payoutMonth: '2026-07',
     })))
+  })
+
+  it('lets you type a name, see that client\'s policies, and post onto the same number', async () => {
+    parseImportFile.mockResolvedValue([{
+      'Policy No.': '************2955',
+      'Insured Name': 'A J BHATT',
+      Premium: 750,
+      'Total Comm': 127.12,
+    }])
+    render(
+      <StatementImportModal
+        open
+        onClose={() => {}}
+        policies={[{
+          id: 's-ash', policyNumber: 'P/2026/0002955', clientId: 'c-ash',
+          clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 750,
+        }, {
+          id: 's-old', policyNumber: '2845112600005923', clientId: 'c-ash',
+          clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 11800,
+        }, {
+          id: 's-med', policyNumber: '4016/1000891187', clientId: 'c-med',
+          clientName: 'MEDOVATE PRIVATE LIMITED', insurer: 'ICICI Lombard', premium: 616000,
+        }]}
+        clients={[
+          { id: 'c-ash', name: 'Ashvinbhai Jitendrabhai Bhatt', mobile: '9000000001' },
+          { id: 'c-med', name: 'MEDOVATE PRIVATE LIMITED' },
+          { id: 'c-nav', name: 'Navin Bhaskaran' },
+        ]}
+        user={{ uid: 'u1', email: 'owner@example.com' }}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Statement month *'), { target: { value: 'July' } })
+    fireEvent.change(screen.getByLabelText('Year *'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('Statement type *'), { target: { value: 'single' } })
+    fireEvent.change(screen.getByLabelText('Carrier *'), { target: { value: 'Star Health' } })
+    fireEvent.change(document.body.querySelector('input[type="file"]'), {
+      target: { files: [new File(['x'], 'star-july.csv')] },
+    })
+    const combo = await screen.findByPlaceholderText('Type a name to find…')
+    fireEvent.focus(combo)
+    fireEvent.change(combo, { target: { value: 'ashvin' } })
+    fireEvent.click(screen.getByRole('button', { name: /Ashvinbhai Jitendrabhai Bhatt/ }))
+    expect(screen.getAllByText('P/2026/0002955').length).toBeGreaterThan(0)
+    expect(screen.getByText('2845112600005923')).toBeTruthy()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: /OK · update this commission/ }))
+    await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      policyId: 's-ash',
+      policyNumber: 'P/2026/0002955',
+      receivedCommission: 127.12,
+    })))
+    expect(addPolicy).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
+  it('two people with similar names stay in review until you pick one', async () => {
+    parseImportFile.mockResolvedValue([{
+      'Policy No.': '4226/1000154054',
+      'Insured Name': 'HEMANT MURLIDHAR AGRAWAL',
+      Premium: 19037.37,
+      'Total Comm': 2420,
+    }])
+    render(
+      <StatementImportModal
+        open
+        onClose={() => {}}
+        policies={[{
+          id: 'h-old', policyNumber: '1111/0000001', clientId: 'c-hem1',
+          clientName: 'Hemant Agrawal', insurer: 'ICICI Lombard', premium: 5000,
+        }, {
+          id: 'h-other', policyNumber: '2222/0000002', clientId: 'c-hem2',
+          clientName: 'Hemant Murlidhar Agrawal', insurer: 'ICICI Lombard', premium: 8000,
+        }]}
+        clients={[
+          { id: 'c-hem1', name: 'Hemant Agrawal' },
+          { id: 'c-hem2', name: 'Hemant Murlidhar Agrawal' },
+        ]}
+        user={{ uid: 'u1', email: 'owner@example.com' }}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText('Statement month *'), { target: { value: 'August' } })
+    fireEvent.change(screen.getByLabelText('Year *'), { target: { value: '2026' } })
+    fireEvent.change(screen.getByLabelText('Statement type *'), { target: { value: 'single' } })
+    fireEvent.change(screen.getByLabelText('Carrier *'), { target: { value: 'ICICI Lombard' } })
+    fireEvent.change(document.body.querySelector('input[type="file"]'), {
+      target: { files: [new File(['x'], 'icici.csv')] },
+    })
+    await screen.findByPlaceholderText('Type a name to find…')
+    expect(screen.getByText('review')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /OK · update this commission/ })).toBeNull()
+    const combo = screen.getByPlaceholderText('Type a name to find…')
+    fireEvent.focus(combo)
+    fireEvent.change(combo, { target: { value: 'murlidhar' } })
+    fireEvent.click(screen.getByRole('button', { name: /Hemant Murlidhar Agrawal/ }))
+    await screen.findByText('2222/0000002')
+    expect(screen.getByText(/Different policy/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Add policy & post commission/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /OK · update this commission/ })).toBeNull()
   })
 })
