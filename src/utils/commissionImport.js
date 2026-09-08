@@ -267,15 +267,18 @@ export function matchRow(row, policies = []) {
 
   // Name without a number is an existing client, not their old policy.
   // Never attach a policy here — the review panel offers "add as new".
+  // Count people, not policies: two Star policies on the same Hemant is
+  // one client, not "2 clients share this name".
   const near = row.clientName
     ? fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.8)
         .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer))
     : []
-  if (near.length === 1) {
+  const people = new Set(near.map(p => p.clientId || p.clientName).filter(Boolean))
+  if (people.size === 1) {
     return { ...row, policy: null, status: 'review', reason: 'Existing client — new policy?' }
   }
-  if (near.length > 1) {
-    return { ...row, policy: null, status: 'review', reason: `${near.length} clients share this name — new policy?` }
+  if (people.size > 1) {
+    return { ...row, policy: null, status: 'review', reason: `${people.size} clients share this name — new policy?` }
   }
   return { ...row, policy: null, status: 'unmatched', reason: 'No matching policy found' }
 }
@@ -326,7 +329,7 @@ export function matchClientCandidates(row, policies = [], clients = []) {
   const near = fuzzyMatch(row.clientName, policies.map(p => ({ ...p, name: p.clientName })), 0.7)
     .filter(p => !row.insurer || sameInsurer(row.insurer, p.insurer))
   for (const policy of near) {
-    take(policy.clientId || `policy:${policy.id}`, {
+    take(policy.clientId || policy.clientName || `policy:${policy.id}`, {
       clientId: policy.clientId || '',
       clientName: policy.clientName,
       samplePolicyNumber: policy.policyNumber,
@@ -380,6 +383,43 @@ export function canPostAgainstPolicy(row, policy) {
     return !issues.some(i => i === 'name differs' || i === 'insurer differs' || i === 'policy number differs')
   }
   return false
+}
+
+/**
+ * After a human picks a policy in review: same number (or masked last-4)
+ * may take commission. A different full number may not — that is a new policy.
+ * Premium / name mismatches stay as warnings; the UI confirms before posting.
+ */
+export function canBindManually(row, policy) {
+  if (!row || !policy) return false
+  if (canPostAgainstPolicy(row, policy)) return true
+  const stmt = key(row.policyNumber)
+  const book = key(policy.policyNumber)
+  if (isMaskedPolicyNumber(row.policyNumber)) {
+    const want = last4(row.policyNumber)
+    const got = last4(policy.policyNumber)
+    return Boolean(want && got && want === got)
+  }
+  return Boolean(stmt && book && stmt === book)
+}
+
+/** Book policies for one client, closest to the statement row first. */
+export function policiesForClient(policies = [], clientId, row = {}) {
+  if (!clientId) return []
+  const stmt = key(row.policyNumber)
+  const tail = last4(row.policyNumber)
+  const score = policy => {
+    let n = 0
+    if (stmt && key(policy.policyNumber) === stmt) n += 8
+    if (tail && last4(policy.policyNumber) === tail) n += 4
+    if (row.insurer && sameInsurer(row.insurer, policy.insurer)) n += 2
+    if (row.premium && premiumsAgree(row.premium, policy.premium)) n += 1
+    return n
+  }
+  return policies
+    .filter(p => p.clientId === clientId)
+    .slice()
+    .sort((a, b) => score(b) - score(a) || String(a.policyNumber).localeCompare(String(b.policyNumber)))
 }
 
 export function assertTypedPolicyNumber(typed, statementNumber) {

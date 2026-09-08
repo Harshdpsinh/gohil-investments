@@ -7,7 +7,7 @@ import Modal from '../ui/Modal'
 import { parseImportFile } from '../../utils/exportUtils'
 import {
   assertTypedPolicyNumber,
-  canPostAgainstPolicy,
+  canBindManually,
   candidateMismatches,
   commissionRateField,
   legacyPostingKey,
@@ -16,6 +16,7 @@ import {
   matchStatement,
   newPolicyDraft,
   normaliseStatement,
+  policiesForClient,
   postedAmounts,
   postingKey,
   summarise,
@@ -32,6 +33,7 @@ import {
 import { fmtCurrency } from '../../utils/dateUtils'
 import { insurerOptions } from '../../utils/insurers'
 import { isStaleChunkError, reloadIfPageIsStale, reloadOnceForStaleChunk } from '../../utils/staleChunk'
+import SearchableSelect, { toClientOptions } from '../ui/SearchableSelect'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -278,9 +280,16 @@ export default function StatementImportModal({ open, onClose, policies, clients 
       toast.error('Pick the matching policy, then press OK.')
       return
     }
-    if (!canPostAgainstPolicy(row, policy)) {
+    if (!canBindManually(row, policy)) {
       toast.error('This is a different policy. Add it as new, or skip the row.')
       return
+    }
+    const issues = candidateMismatches(row, policy)
+    if (issues.length) {
+      const ok = window.confirm(
+        `This policy does not match perfectly:\n• ${issues.join('\n• ')}\n\nPost commission on ${policy.policyNumber} for ${policy.clientName}?`,
+      )
+      if (!ok) return
     }
     setEdits(prev => ({
       ...prev,
@@ -605,10 +614,10 @@ export default function StatementImportModal({ open, onClose, policies, clients 
 
             <p className="text-xs text-gray-500 dark:text-gray-400">
               Same policy (number or last-4 + name + premium) goes on that row.
-              Same person, different number or premium — add as a new policy, do not park
-              commission on their old one. Skip anything you do not want. Verify & Save
-              only posts green matched rows (and review rows you Include). Everything
-              posts against <strong>{month} {year}</strong>.
+              In review, type a name on the right to see that client's policies.
+              Same number → OK. Different number → add as a new policy. Skip
+              anything you do not want. Verify & Save only posts green matched
+              rows. Everything posts against <strong>{month} {year}</strong>.
             </p>
           </>
         )}
@@ -664,7 +673,7 @@ function ImportRowReview({
   const [expiryDate, setExpiryDate] = useState('')
   const [clientId, setClientId] = useState('')
 
-  const candidates = useMemo(() => {
+  const numberHits = useMemo(() => {
     if (!row) return []
     const hits = matchCandidates(row, policies)
     if (row.policy && !hits.some(p => p.id === row.policy.id)) return [row.policy, ...hits]
@@ -674,6 +683,31 @@ function ImportRowReview({
     () => (row ? matchClientCandidates(row, policies, clients) : []),
     [row, policies, clients],
   )
+  const clientOptions = useMemo(() => {
+    const fromBook = toClientOptions(clients)
+    const seen = new Set(fromBook.map(o => o.value))
+    const extra = []
+    for (const hit of clientHits) {
+      if (!hit.clientId || seen.has(hit.clientId)) continue
+      seen.add(hit.clientId)
+      extra.push({ value: hit.clientId, label: hit.clientName, hint: hit.samplePolicyNumber || '' })
+    }
+    return extra.length ? [...extra, ...fromBook] : fromBook
+  }, [clients, clientHits])
+  const clientPolicies = useMemo(
+    () => (row && clientId ? policiesForClient(policies, clientId, row) : []),
+    [row, policies, clientId],
+  )
+  const shownPolicies = useMemo(() => {
+    const seen = new Set()
+    const out = []
+    for (const policy of [...numberHits, ...clientPolicies]) {
+      if (!policy?.id || seen.has(policy.id)) continue
+      seen.add(policy.id)
+      out.push(policy)
+    }
+    return out.slice(0, 12)
+  }, [numberHits, clientPolicies])
 
   useEffect(() => {
     if (!row) return
@@ -683,15 +717,20 @@ function ImportRowReview({
     setFullNumber(isMaskedPolicyNumber(row.policyNumber) ? '' : (row.policyNumber || ''))
     setStartDate(draft.startDate)
     setExpiryDate(draft.expiryDate)
-    setClientId(clientHits[0]?.clientId || '')
+    const unique = [...new Set(clientHits.map(c => c.clientId).filter(Boolean))]
+    setClientId(unique.length === 1 ? unique[0] : '')
   }, [row, clientHits])
 
-  const fit = candidates.find(p => canPostAgainstPolicy(row, p))
-  const activeId = (pickedId && candidates.some(p => p.id === pickedId)) ? pickedId : (fit?.id || '')
-  const picked = candidates.find(p => p.id === activeId) || null
-  const pickedOk = picked ? canPostAgainstPolicy(row, picked) : false
+  const bindable = shownPolicies.find(p => canBindManually(row, p))
+  const activeId = (pickedId && shownPolicies.some(p => p.id === pickedId))
+    ? pickedId
+    : (bindable?.id || '')
+  const picked = shownPolicies.find(p => p.id === activeId) || null
+  const pickedOk = picked ? canBindManually(row, picked) : false
   const pickedIssues = picked ? candidateMismatches(row, picked) : []
-  const chosenClient = clientHits.find(c => c.clientId === clientId) || clientHits[0] || null
+  const chosenClient = clients.find(c => c.id === clientId)
+    || clientHits.find(c => c.clientId === clientId)
+    || null
   const needsNewPolicy = !pickedOk
 
   return (
@@ -720,51 +759,82 @@ function ImportRowReview({
             </p>
           ) : pickedOk ? (
             <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100">
-              Same policy — last-4, name and premium agree. OK posts commission here.
+              {pickedIssues.length
+                ? `Same policy number, with differences: ${pickedIssues.join(' · ')}. OK posts here after you confirm.`
+                : 'Same policy. OK posts commission here.'}
             </p>
           ) : (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-              {clientHits.length
-                ? 'This looks like a new policy for someone already in the book. Do not put commission on their old number. Add it, or skip.'
-                : 'No matching policy. Add it as new, or skip this row.'}
+              Find the person by name. If they already have this policy, pick it and post. If not, add it as new — do not park commission on a different number.
             </p>
           )}
 
-          {candidates.length > 0 && (
-            <ul className="max-h-40 space-y-1 overflow-auto">
-              {candidates.map(policy => {
-                const issues = candidateMismatches(row, policy)
-                const ok = canPostAgainstPolicy(row, policy)
-                return (
-                  <li key={policy.id}>
-                    <label className={`flex cursor-pointer gap-2 rounded-lg border px-2.5 py-2 text-xs ${activeId === policy.id ? 'border-teal-500 bg-white dark:bg-slate-800' : 'border-transparent hover:bg-white/70 dark:hover:bg-slate-800/70'}`}>
-                      <input
-                        type="radio"
-                        name={`import-review-${row.sourceRow}`}
-                        checked={activeId === policy.id}
-                        onChange={() => setPickedId(policy.id)}
-                        className="mt-0.5"
-                      />
-                      <span className="min-w-0">
-                        <span className="block break-words font-semibold">{policy.clientName}</span>
-                        <span className="block font-mono text-[11px] break-all text-slate-500">{policy.policyNumber}</span>
-                        <span className="block text-[11px] text-slate-500">
-                          {policy.insurer} · premium {fmtCurrency(policy.premium)}
-                        </span>
-                        {issues.length > 0 && (
-                          <span className="mt-0.5 block text-[11px] font-semibold text-red-600">
-                            Different policy · {issues.join(' · ')}
+          {!posted && (
+            <label className="block text-xs">
+              <span className="font-semibold text-slate-600 dark:text-slate-300">Find client by name</span>
+              <SearchableSelect
+                className="mt-1"
+                value={clientId}
+                options={clientOptions}
+                onChange={id => { setClientId(id); setPickedId('') }}
+                placeholder="Type a name to find…"
+                emptyText="No client matches that name"
+              />
+              {clientId && (
+                <button
+                  type="button"
+                  className="mt-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+                  onClick={() => { setClientId(''); setPickedId('') }}
+                >
+                  This is a new client
+                </button>
+              )}
+            </label>
+          )}
+
+          {shownPolicies.length > 0 && (
+            <div>
+              <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                {clientId ? 'This client\'s policies' : 'Possible matches'}
+              </p>
+              <ul className="max-h-40 space-y-1 overflow-auto">
+                {shownPolicies.map(policy => {
+                  const issues = candidateMismatches(row, policy)
+                  const ok = canBindManually(row, policy)
+                  return (
+                    <li key={policy.id}>
+                      <label className={`flex cursor-pointer gap-2 rounded-lg border px-2.5 py-2 text-xs ${activeId === policy.id ? 'border-teal-500 bg-white dark:bg-slate-800' : 'border-transparent hover:bg-white/70 dark:hover:bg-slate-800/70'}`}>
+                        <input
+                          type="radio"
+                          name={`import-review-${row.sourceRow}`}
+                          checked={activeId === policy.id}
+                          onChange={() => setPickedId(policy.id)}
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0">
+                          <span className="block break-words font-semibold">{policy.clientName}</span>
+                          <span className="block font-mono text-[11px] break-all text-slate-500">{policy.policyNumber}</span>
+                          <span className="block text-[11px] text-slate-500">
+                            {policy.insurer} · premium {fmtCurrency(policy.premium)}
                           </span>
-                        )}
-                        {ok && (
-                          <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">Same policy</span>
-                        )}
-                      </span>
-                    </label>
-                  </li>
-                )
-              })}
-            </ul>
+                          {issues.length > 0 && (
+                            <span className="mt-0.5 block text-[11px] font-semibold text-red-600">
+                              {ok ? 'Check differences' : 'Different policy'} · {issues.join(' · ')}
+                            </span>
+                          )}
+                          {ok && !issues.length && (
+                            <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">Same policy</span>
+                          )}
+                          {ok && issues.length > 0 && (
+                            <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">Same number — confirm to post</span>
+                          )}
+                        </span>
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
           )}
 
           {pickedOk && picked && canUpdateStructure(row, picked) && (
@@ -805,23 +875,11 @@ function ImportRowReview({
           {needsNewPolicy && !posted && (
             <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
               <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Add as new policy</p>
-              {clientHits.length > 0 && (
-                <label className="block text-xs">
-                  <span className="font-semibold text-slate-600 dark:text-slate-300">Existing client</span>
-                  <select
-                    className="form-input mt-1"
-                    value={clientId}
-                    onChange={e => setClientId(e.target.value)}
-                  >
-                    {clientHits.map(c => (
-                      <option key={c.clientId || c.clientName} value={c.clientId}>
-                        {c.clientName}{c.samplePolicyNumber ? ` · existing ${c.samplePolicyNumber}` : ''}
-                      </option>
-                    ))}
-                    <option value="">New client — create from this name</option>
-                  </select>
-                </label>
-              )}
+              <p className="text-[11px] text-slate-500">
+                {chosenClient
+                  ? `Under ${chosenClient.name || chosenClient.clientName}.`
+                  : 'Creates a client from the statement name if you have not picked one.'}
+              </p>
               <label className="block text-xs">
                 <span className="font-semibold text-slate-600 dark:text-slate-300">Full policy number *</span>
                 <input
@@ -847,8 +905,8 @@ function ImportRowReview({
                 disabled={busy || skipped}
                 onClick={() => onAddPolicy(row, {
                   policyNumber: fullNumber,
-                  clientId: chosenClient?.clientId || clientId,
-                  clientName: chosenClient?.clientName || row.clientName,
+                  clientId: chosenClient?.id || chosenClient?.clientId || clientId,
+                  clientName: chosenClient?.name || chosenClient?.clientName || row.clientName,
                   startDate,
                   expiryDate,
                   insurer: row.insurer || defaultInsurer,

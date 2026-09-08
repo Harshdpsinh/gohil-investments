@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   toNumber, mapColumns, normaliseStatement, matchRow, matchStatement, matchCandidates,
-  matchClientCandidates, candidateMismatches, canPostAgainstPolicy, assertTypedPolicyNumber,
+  matchClientCandidates, candidateMismatches, canPostAgainstPolicy, canBindManually,
+  policiesForClient, assertTypedPolicyNumber,
   newPolicyDraft,
   postingKey, legacyPostingKey, summarise, toPayoutMonth, normaliseBusinessType,
   isMaskedPolicyNumber, last4,
@@ -282,11 +283,26 @@ describe('matchRow', () => {
     expect(r.reason).toMatch(/new policy/)
   })
 
+  it('counts one person with two policies as one client, not two', () => {
+    const book = [
+      { id: 'a', policyNumber: '4016/1000891187', clientId: 'c-med', clientName: 'MEDOVATE PRIVATE LIMITED', insurer: 'ICICI Lombard', premium: 616000 },
+      { id: 'b', policyNumber: '4016/1000000001', clientId: 'c-med', clientName: 'MEDOVATE PRIVATE LIMITED', insurer: 'ICICI Lombard', premium: 10000 },
+    ]
+    const r = matchRow({
+      policyNumber: '4226/1000154054', clientName: 'MEDOVATE PRIVATE LIMITED',
+      insurer: 'ICICI Lombard', premium: 19037,
+    }, book)
+    expect(r.status).toBe('review')
+    expect(r.policy).toBeNull()
+    expect(r.reason).toMatch(/Existing client/)
+    expect(r.reason).not.toMatch(/2 clients/)
+  })
+
   it('lists existing clients for add-as-new, not as commission targets', () => {
     const blank = row({ policyNumber: '', insurer: '' })
     expect(matchCandidates(blank, policies)).toEqual([])
     expect(matchClientCandidates(blank, policies).map(c => c.clientName).sort())
-      .toEqual(['Meera Patel', 'Meera Patel'])
+      .toEqual(['Meera Patel'])
   })
 
   it('reports unmatched when nothing lines up', () => {
@@ -458,8 +474,59 @@ describe('Star Health masked last-4 matching', () => {
     expect(r.reason).toMatch(/new policy/)
     expect(matchCandidates(star(), old)).toEqual([])
     expect(canPostAgainstPolicy(star(), old[0])).toBe(false)
+    expect(canBindManually(star(), old[0])).toBe(false)
     expect(candidateMismatches(star(), old[0]).some(i => i.startsWith('last-4'))).toBe(true)
     expect(matchClientCandidates(star(), old).map(c => c.clientId)).toEqual(['c-ash'])
+  })
+})
+
+describe('review bind: pick client, see their policies', () => {
+  const hemant = {
+    policyNumber: '4226/1000154054',
+    clientName: 'HEMANT MURLIDHAR AGRAWAL',
+    insurer: 'ICICI Lombard',
+    premium: 19037.37,
+    commissionAmount: 2420,
+  }
+  const book = [
+    {
+      id: 'h1', clientId: 'c-hem', policyNumber: '4226/1000154054',
+      clientName: 'Hemant Murlidhar Agrawal', insurer: 'ICICI Lombard', premium: 19037,
+    },
+    {
+      id: 'h2', clientId: 'c-hem', policyNumber: '4016/9999999',
+      clientName: 'Hemant Murlidhar Agrawal', insurer: 'ICICI Lombard', premium: 5000,
+    },
+    {
+      id: 'm1', clientId: 'c-med', policyNumber: '4016/1000891187',
+      clientName: 'MEDOVATE PRIVATE LIMITED', insurer: 'ICICI Lombard', premium: 616000,
+    },
+  ]
+
+  it('lists only that client\'s policies, closest number first', () => {
+    expect(policiesForClient(book, 'c-hem', hemant).map(p => p.id)).toEqual(['h1', 'h2'])
+    expect(policiesForClient(book, 'c-med', hemant).map(p => p.id)).toEqual(['m1'])
+  })
+
+  it('lets a reviewer bind the same number even if auto-match sent it to review', () => {
+    expect(canBindManually(hemant, book[0])).toBe(true)
+    expect(canBindManually(hemant, book[1])).toBe(false)
+    expect(canBindManually(hemant, book[2])).toBe(false)
+  })
+
+  it('lets a reviewer bind a masked last-4 hit when premium is off', () => {
+    const row = {
+      policyNumber: '************2955',
+      clientName: 'ASHVINBHAI JITENDRABHAI BHATT',
+      insurer: 'Star Health',
+      premium: 750,
+    }
+    const same = {
+      id: 's', clientId: 'c-ash', policyNumber: 'P/2026/0002955',
+      clientName: 'Ashvinbhai Jitendrabhai Bhatt', insurer: 'Star Health', premium: 11800,
+    }
+    expect(canPostAgainstPolicy(row, same)).toBe(false)
+    expect(canBindManually(row, same)).toBe(true)
   })
 })
 
