@@ -1,6 +1,6 @@
 // src/components/auth/Login.jsx
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate, Link } from 'react-router-dom'
 import { useAuth }     from '../../hooks/useAuth'
 import BootScreen      from '../ui/BootScreen'
 import toast           from 'react-hot-toast'
@@ -14,6 +14,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
+  const [adult,   setAdult]   = useState(false)
 
   if (authLoading || user === undefined) return <BootScreen />
   if (user) return <Navigate to="/dashboard" replace />
@@ -23,6 +24,7 @@ export default function Login() {
   const onSubmit = async e => {
     e.preventDefault()
     if (!form.email || !form.password) { toast.error('Please enter email and password'); return }
+    if (!adult) { toast.error('Confirm you are 18 or older.'); return }
     if (Date.now() - lastAttempt < 1500) { toast.error('Please wait before trying again.'); return }
     lastAttempt = Date.now()
     setLoading(true)
@@ -136,7 +138,17 @@ export default function Login() {
                   </div>
                 </div>
 
-                <button type="submit" disabled={loading} className="btn-primary w-full">
+                <label className="flex items-start gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={adult}
+                    onChange={e => setAdult(e.target.checked)}
+                  />
+                  <span>I am 18 or older. This workspace is for staff only — not for children.</span>
+                </label>
+
+                <button type="submit" disabled={loading || !adult} className="btn-primary w-full">
                   {loading ? 'Signing in…' : 'Sign in'}
                 </button>
               </form>
@@ -149,6 +161,13 @@ export default function Login() {
               >
                 {resetting ? 'Sending reset email…' : 'Forgot password'}
               </button>
+              <p className="mt-6 text-center text-xs text-slate-400">
+                <Link to="/privacy" className="hover:underline">Privacy</Link>
+                {' · '}
+                <Link to="/terms" className="hover:underline">Terms</Link>
+                {' · '}
+                <Link to="/dmca" className="hover:underline">DMCA</Link>
+              </p>
             </div>
           </div>
         </section>

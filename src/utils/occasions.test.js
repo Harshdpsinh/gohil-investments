@@ -33,12 +33,22 @@ describe('listOccasions', () => {
     ], { withinDays: 7 })
     expect(rows.map(r => `${r.client.id}:${r.kind}`)).toEqual(['1:birthday', '2:anniversary'])
   })
+
+  it('skips clients who opted out of greetings', () => {
+    const rows = listOccasions([
+      { id: '1', name: 'A', dob: '1990-07-27', marketingOptOut: true },
+      { id: '2', name: 'B', dob: '1990-07-27' },
+    ], { withinDays: 7 })
+    expect(rows.map(r => r.client.id)).toEqual(['2'])
+  })
 })
 
 describe('messages', () => {
   it('names the client and does not invent tokens', () => {
     expect(birthdayGreeting({ name: 'Mehta' }, 2)).toContain('Mehta')
     expect(birthdayGreeting({ name: 'Mehta' }, 2)).toContain('2 active policies')
+    expect(birthdayGreeting({ name: 'Mehta' }, 2)).toMatch(/STOP/)
+    expect(birthdayGreeting({ name: 'Mehta' }, 2)).toMatch(/Bhavnagar/)
     expect(crossSellMessage({ name: 'Mehta' }, [{ label: 'No Health Cover' }])).toContain('Health')
   })
 })

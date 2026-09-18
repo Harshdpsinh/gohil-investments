@@ -5,6 +5,7 @@ import { useAuth }           from './hooks/useAuth'
 import { ThemeProvider }     from './context/ThemeContext'
 import Layout                from './components/layout/Layout'
 import Login                 from './components/auth/Login'
+import LegalPage             from './pages/LegalPage'
 import DashboardPage         from './pages/DashboardPage'
 import ClientsPage           from './pages/ClientsPage'
 import ClientProfilePage     from './pages/ClientProfilePage'
@@ -82,6 +83,10 @@ export default function App() {
     <ThemeProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/privacy" element={<LegalPage section="privacy" />} />
+        <Route path="/terms" element={<LegalPage section="terms" />} />
+        <Route path="/dmca" element={<LegalPage section="dmca" />} />
+        <Route path="/legal" element={<LegalPage section="privacy" />} />
         <Route path="/*" element={
           <ProtectedRoute>
             <Layout>

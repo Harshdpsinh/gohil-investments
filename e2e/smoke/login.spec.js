@@ -22,4 +22,10 @@ test.describe('Login gate smoke', () => {
     await waitForAuthGate(page)
     await expect(page.locator('input[name="email"]')).toBeVisible()
   })
+
+  test('privacy page is public and names Bhavnagar', async ({ page }) => {
+    await page.goto('/privacy')
+    await expect(page.getByRole('heading', { name: /privacy/i })).toBeVisible()
+    await expect(page.getByText(/Bhavnagar/i).first()).toBeVisible()
+  })
 })
