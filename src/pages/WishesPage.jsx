@@ -32,6 +32,10 @@ export default function WishesPage() {
       toast.error('No mobile number on this client.')
       return
     }
+    if (draft.client.marketingOptOut) {
+      toast.error('This client opted out of greetings.')
+      return
+    }
     try {
       openWhatsAppLink({ mobile: draft.client.mobile, message: draft.message })
     } catch (err) {

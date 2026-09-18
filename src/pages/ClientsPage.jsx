@@ -28,7 +28,8 @@ const EMPTY = {
   dob:'', gender:'', address:'', city:'', state:'',
   occupation:'', employment:'', income:'',
   qualification:'', designation:'',
-  kycStatus:'Pending', familyId:'', familyName:'', familyRole:'', notes:''
+  kycStatus:'Pending', familyId:'', familyName:'', familyRole:'', notes:'',
+  marketingOptOut: false,
 }
 const CLIENT_FORM_FIELDS = Object.keys(EMPTY)
 const KYC_OPTIONS = ['Pending','In Progress','Complete']
@@ -87,7 +88,10 @@ function ClientForm({ initial, onSave, onCancel }) {
       toast.error('Annual income cannot be negative'); return
     }
     setSaving(true)
-    const cleanForm = Object.fromEntries(CLIENT_FORM_FIELDS.map(field => [field, form[field] ?? '']))
+    const cleanForm = Object.fromEntries(CLIENT_FORM_FIELDS.map(field => {
+      if (field === 'marketingOptOut') return [field, !!form[field]]
+      return [field, form[field] ?? '']
+    }))
     try { await onSave(cleanForm) }
     catch(err) { toast.error('Save failed: ' + (err.message || 'Unknown error')) }
     finally { setSaving(false) }
@@ -134,6 +138,15 @@ function ClientForm({ initial, onSave, onCancel }) {
       </div>
       <div><label className="form-label">Notes</label>
         <textarea rows={2} value={form.notes||''} onChange={e=>set('notes',e.target.value)} className="form-input" /></div>
+      <label className="flex items-start gap-2 text-sm text-slate-600">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={!!form.marketingOptOut}
+          onChange={e => set('marketingOptOut', e.target.checked)}
+        />
+        <span>No greeting messages (birthday / anniversary). Renewal reminders for policies still go out.</span>
+      </label>
       </div>
       <div className="gi-mobile-form-actions flex gap-3 pt-2">
         <button type="submit" disabled={saving} className="btn-primary">{saving?'⏳ Saving…':'💾 Save Client'}</button>

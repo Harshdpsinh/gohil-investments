@@ -19,7 +19,7 @@ export default function AdminUsersPage() {
   const [users,    setUsers]    = useState([])
   const [loading,  setLoading]  = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [form,     setForm]     = useState({ name: '', email: '', password: '', role: 'staff' })
+  const [form,     setForm]     = useState({ name: '', email: '', password: '', role: 'staff', adult: false })
   const [saving,   setSaving]   = useState(false)
   const [pendingRoleChange, setPendingRoleChange] = useState(null)
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }))
@@ -49,13 +49,14 @@ export default function AdminUsersPage() {
     if (!cleanName)  { toast.error('Name is required'); return }
     if (!cleanEmail) { toast.error('Email is required'); return }
     if (form.password.length < 8) { toast.error('Password must be at least 8 characters'); return }
+    if (!form.adult) { toast.error('Staff must be confirmed 18 or older.'); return }
     setSaving(true)
     try {
       const result = await createStaffAccount(cleanEmail, form.password, cleanName, form.role)
       toast.success(result?.attached
         ? `Linked existing login for ${cleanName} (${form.role}). They can sign in again now.`
         : `Account created for ${cleanName} (${form.role})`)
-      setForm({ name: '', email: '', password: '', role: 'staff' })
+      setForm({ name: '', email: '', password: '', role: 'staff', adult: false })
       setShowForm(false)
       await load()
     } catch (err) {
@@ -129,6 +130,10 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <p className="text-xs text-slate-500">If this email already has a login, type that account’s password. Create Account will attach it.</p>
+            <label className="flex items-start gap-2 text-sm text-slate-600">
+              <input type="checkbox" className="mt-1" checked={form.adult} onChange={e => set('adult', e.target.checked)} />
+              <span>This person is 18 or older and is staff, not a child account.</span>
+            </label>
             <div className="flex gap-3">
               <button type="submit" disabled={saving} className="btn-primary">
                 {saving ? 'Creating…' : 'Create Account'}

@@ -168,6 +168,13 @@ export default function Layout({ children }) {
             <CommissionBookBanner />
             {children}
           </div>
+          <footer className="border-t border-slate-200 px-4 py-3 text-center text-[11px] text-slate-400 dark:border-slate-800">
+            <NavLink to="/privacy" className="hover:underline">Privacy</NavLink>
+            {' · '}
+            <NavLink to="/terms" className="hover:underline">Terms</NavLink>
+            {' · '}
+            <NavLink to="/dmca" className="hover:underline">DMCA</NavLink>
+          </footer>
           <button
             id="back-to-top"
             className="back-to-top"

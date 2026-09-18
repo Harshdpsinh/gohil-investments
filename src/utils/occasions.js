@@ -2,6 +2,7 @@
 // through the existing WhatsApp Cloud API / wa.me paths.
 import { parseAnyDate } from './dateUtils.js'
 import { differenceInDays, startOfDay } from 'date-fns'
+import { MARKETING_OPT_OUT_LINE, isMarketingAllowed } from './legal.js'
 
 export function occasionThisYear(dateValue, asOf = new Date()) {
   const source = parseAnyDate(dateValue)
@@ -32,6 +33,7 @@ export function isOccasionWithinDays(dateValue, windowDays = 7, asOf = new Date(
 export function listOccasions(clients = [], { asOf = new Date(), withinDays = 7 } = {}) {
   const rows = []
   for (const client of clients) {
+    if (!isMarketingAllowed(client)) continue
     const bday = daysUntilOccasion(client.dob, asOf)
     if (bday !== null && bday >= 0 && bday <= withinDays) {
       rows.push({ client, kind: 'birthday', days: bday, date: client.dob })
@@ -62,7 +64,8 @@ export function birthdayGreeting(client, policyCount = 0) {
     `${policyLine}` +
     `If you wish to review your cover, we are here to help.\n\n` +
     `Gohil Investments\nWealth Management & Insurance Advisory\n` +
-    `Harshdipsinh Gohil — 7698997894\nPradipsinh Gohil — 9426204547\nBhavnagar, Gujarat`
+    `Harshdipsinh Gohil — 7698997894\nPradipsinh Gohil — 9426204547\nBhavnagar, Gujarat\n\n` +
+    MARKETING_OPT_OUT_LINE
   )
 }
 
@@ -71,7 +74,8 @@ export function anniversaryGreeting(client) {
     `Dear ${client?.name || 'Customer'},\n\n` +
     `Wishing you a happy anniversary.\n\n` +
     `Thank you for trusting Gohil Investments. We are here if you would like to review your cover.\n\n` +
-    `Gohil Investments\nBhavnagar, Gujarat`
+    `Gohil Investments\nBhavnagar, Gujarat\n\n` +
+    MARKETING_OPT_OUT_LINE
   )
 }
 
@@ -83,6 +87,7 @@ export function crossSellMessage(client, gaps = []) {
     `Greetings from Gohil Investments.\n\n` +
     `${gapLine}\n\n` +
     `A short review can close those gaps before a claim surprises you. Reply to this message or call us to set a time.\n\n` +
-    `Gohil Investments\nHarshdipsinh Gohil — 7698997894\nBhavnagar, Gujarat`
+    `Gohil Investments\nHarshdipsinh Gohil — 7698997894\nBhavnagar, Gujarat\n\n` +
+    MARKETING_OPT_OUT_LINE
   )
 }
