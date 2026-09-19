@@ -71,6 +71,14 @@ function textOf(message) {
   return ''
 }
 
+export function lastInboundAtFromRows(rows = []) {
+  let last = 0
+  for (const row of rows) {
+    if (row?.direction === 'in') last = Math.max(last, Number(row.timestamp) || 0)
+  }
+  return last
+}
+
 export const WINDOW_MS = 24 * 60 * 60 * 1000
 
 /**

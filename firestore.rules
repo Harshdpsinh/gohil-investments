@@ -48,6 +48,13 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasAny(['deleted', 'deletedAt']);
     }
+    function frozen(field) {
+      return !(field in resource.data)
+        || (field in request.resource.data && request.resource.data[field] == resource.data[field]);
+    }
+    function commissionIdentityFrozen() {
+      return frozen('postingKey') && frozen('policyId') && frozen('clientId');
+    }
     function validAttemptLog() {
       return request.resource.data.op is string
         && request.resource.data.outcome is string
@@ -132,7 +139,8 @@ service cloud.firestore {
     }
     match /commission_transactions/{commissionTransactionId} {
       allow read: if canReadBusiness();
-      allow create, update: if isStaff();
+      allow create: if isStaff();
+      allow update: if isStaff() && commissionIdentityFrozen();
       allow delete: if isAdmin();
     }
     match /audit_logs/{auditId} {

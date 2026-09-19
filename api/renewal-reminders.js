@@ -7,6 +7,7 @@ import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.j
 // or lower — 01/12/2026 became 12 Jan, eleven months early. Import, never copy.
 import { getDueDate, daysUntilPolicyDue, parseAnyDate } from '../src/utils/dateUtils.js'
 import { isOccasionToday } from '../src/utils/occasions.js'
+import { bearerMatches } from '../src/utils/timingSafe.js'
 
 const DEFAULT_PROMPT = 'Please renew your policy on time to keep your insurance protection active without interruption.'
 const DEFAULT_INTERVALS = [30, 15, 7, 1, 0].map(days => ({ id: `d${days}`, days, enabled: true }))
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
   if (!cronSecret) {
     return res.status(503).json({ error: 'CRON_SECRET is not configured. Refusing to run.' })
   }
-  if (req.headers.authorization !== `Bearer ${cronSecret}`) {
+  if (!bearerMatches(req.headers.authorization, cronSecret)) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
@@ -45,7 +46,13 @@ export default async function handler(req, res) {
       const dueDate = getDueDate(policy)          // yyyy-MM-dd, same as the app shows
       const daysBefore = daysUntilPolicyDue(policy)
       const status = String(policy.status || 'Active').trim()
-      if (!dueDate || !enabledDays.has(daysBefore) || STOP_STATUSES.has(status) || policy.is_renewed) {
+      if (
+        policy.deleted
+        || !dueDate
+        || !enabledDays.has(daysBefore)
+        || STOP_STATUSES.has(status)
+        || policy.is_renewed
+      ) {
         skipped += 1
         continue
       }

@@ -14,6 +14,8 @@ import {
   templateParameters,
   toE164,
 } from '../src/utils/whatsappCloud.js'
+import { lastInboundAtFromRows, windowState } from '../src/utils/whatsappInbox.js'
+import { OWNER_ADMIN_EMAILS as OWNER_ADMIN_EMAIL_LIST } from '../src/utils/roles.js'
 
 export function getAdminDb() {
   ensureAdminApp()
@@ -49,10 +51,7 @@ export async function verifyIdToken(idToken) {
   return uid ? { uid, email: account.email || '' } : null
 }
 
-const OWNER_ADMIN_EMAILS = new Set([
-  'harshdeepgohil@gmail.com',
-  'harshdpsinh@gmail.com',
-])
+const OWNER_ADMIN_EMAILS = new Set(OWNER_ADMIN_EMAIL_LIST)
 
 /** Same bar as firestore.rules: owner email or a provisioned users/{uid} role. */
 export async function assertStaff(db, decoded) {
@@ -73,16 +72,11 @@ export async function assertStaff(db, decoded) {
  */
 export async function inboundWindowOpen(db, waId, now = Date.now()) {
   if (!waId) return false
-  const snap = await db.collection('whatsapp_messages')
-    .where('waId', '==', waId)
-    .limit(50)
-    .get()
-  let lastInbound = 0
-  snap.forEach(doc => {
-    const row = doc.data() || {}
-    if (row.direction === 'in') lastInbound = Math.max(lastInbound, Number(row.timestamp) || 0)
-  })
-  return lastInbound > 0 && (now - lastInbound) < (24 * 60 * 60 * 1000)
+  // Equality-only query so this does not wait on a composite index. Cap was
+  // 50 unordered docs, which missed the latest inbound on a busy thread.
+  const snap = await db.collection('whatsapp_messages').where('waId', '==', waId).get()
+  const lastInbound = lastInboundAtFromRows(snap.docs.map(doc => doc.data() || {}))
+  return windowState(lastInbound, now).open
 }
 
 function ensureAdminApp() {
