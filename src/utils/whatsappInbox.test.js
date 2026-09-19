@@ -3,6 +3,7 @@ import {
   WINDOW_MS,
   buildConversations,
   formatWindow,
+  lastInboundAtFromRows,
   matchConversationClient,
   parseWebhookPayload,
   windowState,
@@ -166,5 +167,20 @@ describe('matchConversationClient', () => {
     expect(matchConversationClient('919999999999', clients)).toBeNull()
     expect(matchConversationClient('123', clients)).toBeNull()
     expect(matchConversationClient('', clients)).toBeNull()
+  })
+})
+
+describe('lastInboundAtFromRows', () => {
+  it('uses the latest inbound even when older rows sit first', () => {
+    expect(lastInboundAtFromRows([
+      { direction: 'out', timestamp: NOW },
+      { direction: 'in', timestamp: NOW - 60_000 },
+      { direction: 'in', timestamp: NOW - 5_000 },
+    ])).toBe(NOW - 5_000)
+  })
+
+  it('ignores outbound-only threads', () => {
+    expect(lastInboundAtFromRows([{ direction: 'out', timestamp: NOW }])).toBe(0)
+    expect(windowState(lastInboundAtFromRows([]), NOW).open).toBe(false)
   })
 })
