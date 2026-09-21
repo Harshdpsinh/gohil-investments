@@ -291,6 +291,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
   const [localClients, setLocalClients] = useState(initClients)
   const [pdfUrl,  setPdfUrl]        = useState(initial?.policyPdfUrl  || '')
   const [pdfName, setPdfName]       = useState(initial?.policyPdfName || '')
+  const [pendingPdfFile, setPendingPdfFile] = useState(null)
   const [pdfMeta, setPdfMeta]       = useState({
     documentYear: initial?.policyPdfYear || policyDocumentYear(initial || form),
     storagePath: initial?.policyPdfStoragePath || '',
@@ -467,6 +468,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
     if (!isLifePolicy) cleanForm.nextPremiumDue = toInputDate(cleanForm.expiryDate) || cleanForm.expiryDate
     try { await onSave({
       ...cleanForm,
+      _pendingPdfFile: pendingPdfFile,
       policyPdfUrl: pdfUrl,
       policyPdfName: pdfName,
       policyPdfYear: pdfMeta.documentYear || policyDocumentYear(form),
@@ -641,6 +643,7 @@ function PolicyForm({ initial, clients: initClients, onSave, onCancel, onPolicyN
           policyNumber={form.policyNumber || ''}
           insurer={form.insurer || ''}
           premium={form.premium || ''}
+          onHold={setPendingPdfFile}
           onUploaded={(u,n,meta)=>{setPdfUrl(u);setPdfName(n);setPdfMeta({
             documentYear: meta?.documentYear || policyDocumentYear(form),
             storagePath: meta?.storagePath || '',

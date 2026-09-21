@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { usePolicies } from '../hooks/usePolicies'
 import { exportToCSV, exportToExcel } from '../utils/exportUtils'
 import { fmtCurrency, fmtDate } from '../utils/dateUtils'
+import TableHScroll from '../components/ui/TableHScroll'
 import {
   GROUP_KEYS,
   PERIOD_PRESETS,
@@ -276,7 +277,7 @@ export default function BusinessDonePage() {
             description="Change the period above, or check that policy start dates are filled in."
           />
         ) : (
-          <div className="mt-3 overflow-x-auto">
+          <TableHScroll>
             <table className="commission-table min-w-full text-xs">
               <thead>
                 <tr>
@@ -307,7 +308,7 @@ export default function BusinessDonePage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableHScroll>
         )}
       </div>
 

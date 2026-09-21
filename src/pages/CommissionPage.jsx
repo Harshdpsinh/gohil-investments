@@ -21,6 +21,7 @@ import StatementImportModal from '../components/commission/StatementImportModal'
 import CommissionReviewDrawer from '../components/commission/CommissionReviewDrawer'
 import { latestCommissionPosting } from '../utils/commissionReview'
 import toast from 'react-hot-toast'
+import TableHScroll from '../components/ui/TableHScroll'
 import { isValid } from 'date-fns'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -594,7 +595,7 @@ export default function CommissionPage() {
               <button className="btn-primary text-xs" onClick={() => downloadSimple(scorecard, SCORECARD_COLS, 'Scorecard', 'commission-company-scorecard', 'excel')}>⬇ Excel</button>
               <button className="btn-secondary text-xs" onClick={() => downloadSimple(scorecard, SCORECARD_COLS, 'Scorecard', 'commission-company-scorecard', 'csv')}>⬇ CSV</button>
             </div>
-            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+            <TableHScroll topClassName="rounded-t-xl border border-b-0 border-slate-200 dark:border-slate-700">
               <table className="min-w-full text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-800"><tr>{['Company','Policies','Expected','Received','Settled %','Outstanding','Avg days to pay'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr></thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -611,7 +612,7 @@ export default function CommissionPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableHScroll>
           </div>
         )}
 
@@ -655,7 +656,7 @@ export default function CommissionPage() {
                 re-import a statement that has a TDS column and it will appear here.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <TableHScroll topClassName="rounded-t-xl border border-b-0 border-slate-200 dark:border-slate-700">
                 <table className="min-w-full text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800"><tr>{['Company','Entries','Gross','TDS','Net received'].map(h => <th key={h} className="table-header whitespace-nowrap">{h}</th>)}</tr></thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -671,7 +672,7 @@ export default function CommissionPage() {
                   </tbody>
                   <tfoot><tr className="bg-slate-50 dark:bg-slate-800"><td className="table-cell font-extrabold">Total</td><td className="table-cell" /><td className="table-cell font-extrabold">{fmtCurrency(tds.gross)}</td><td className="table-cell font-extrabold">{fmtCurrency(tds.total)}</td><td className="table-cell" /></tr></tfoot>
                 </table>
-              </div>
+              </TableHScroll>
             )}
           </div>
         )}
@@ -804,7 +805,7 @@ export default function CommissionPage() {
         </select>
       </div>
 
-      <div className="table-container">
+      <TableHScroll>
         <table className="min-w-full">
           <thead><tr>
             {['Policy No','Client','Type','Insurer','Premium','FY %','FY ₹','RY %','RY ₹','Total Comm','Start','Yr'].map(h=>(
@@ -857,7 +858,7 @@ export default function CommissionPage() {
             </tfoot>
           )}
         </table>
-      </div>
+      </TableHScroll>
     </div>
   )
 }

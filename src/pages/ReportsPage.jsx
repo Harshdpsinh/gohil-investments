@@ -7,6 +7,7 @@ import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, parseAnyDate } from '../utils/dateUtils'
 import { subscribeClaims } from '../firebase/firestore'
 import AppIcon from '../components/ui/AppIcon'
+import TableHScroll from '../components/ui/TableHScroll'
 
 const reportTypes = [
   'Company',
@@ -222,7 +223,7 @@ export default function ReportsPage() {
         <select className="form-input" value={status} onChange={e => setStatus(e.target.value)}>{statuses.map(s => <option key={s}>{s}</option>)}</select>
       </div>
 
-      <div className="overflow-auto rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+      <TableHScroll>
         <table className="gi-report-table min-w-full text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-500 dark:bg-slate-950">
             <tr>{columns.map(c => <th key={c.header} className="whitespace-nowrap px-4 py-3 text-left">{c.header}</th>)}</tr>
@@ -248,7 +249,7 @@ export default function ReportsPage() {
             {rows.length === 0 && <tr><td className="px-4 py-8 text-slate-400" colSpan={columns.length}>No report rows found.</td></tr>}
           </tbody>
         </table>
-      </div>
+      </TableHScroll>
     </div>
   )
 }

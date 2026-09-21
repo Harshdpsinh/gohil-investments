@@ -21,6 +21,7 @@ import { duplicateClusters } from '../utils/clientMerge'
 import { exportToCSV, exportToExcel, exportToPDF, CLIENT_COLS } from '../utils/exportUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
+import TableHScroll from '../components/ui/TableHScroll'
 import { differenceInDays } from 'date-fns'
 
 const EMPTY = {
@@ -919,7 +920,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Side-scrollable table */}
-      <div className="table-container hidden md:block">
+      <TableHScroll className="hidden md:block">
         <table className="min-w-full" style={{ minWidth: '900px' }}>
           <thead>
             <tr>
@@ -995,7 +996,7 @@ export default function ClientsPage() {
             }
           </tbody>
         </table>
-      </div>
+      </TableHScroll>
 
       <button type="button" className="gi-fab md:hidden" onClick={() => { setSelected(null); setModal('add') }} aria-label="Add client">
         <span aria-hidden="true">+</span>

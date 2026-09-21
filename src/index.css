@@ -629,6 +629,7 @@ textarea::placeholder {
 
 .table-scroll-top {
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .renewals-table-container .table-header,

@@ -28,6 +28,7 @@ import PolicyForm from '../components/policies/PolicyForm'
 import PolicyPdfUpload from '../components/policies/PolicyPdfUpload'
 import PolicyShareBar from '../components/policies/PolicyShareBar'
 import PdfExtractReview from '../components/policies/PdfExtractReview'
+import TableHScroll from '../components/ui/TableHScroll'
 
 
 
@@ -265,8 +266,6 @@ export default function PoliciesPage() {
   const [pendingPdf, setPendingPdf] = useState(null)
   const [page,           setPage]           = useState(1)
   const consumedProposalRef = useRef(null)
-  const tableScrollRef = useRef(null)
-  const topScrollRef   = useRef(null)
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
@@ -472,18 +471,18 @@ export default function PoliciesPage() {
   }
 
   const onAdd    = async form => {
+    const { _pendingPdfFile, ...payload } = form
     try {
-      const ref = await addPolicy(form)
+      const ref = await addPolicy(payload)
 
-      // Attach the schedule this policy was read from. A failure here is
-      // reported but never fails the save — the policy is already correct, and
-      // the PDF can be uploaded again from the policy row.
-      if (pendingPdf?.file && ref?.id) {
+      // Attach the schedule this policy was read from, or the PDF chosen on
+      // the add form. A failure here never fails the save — the policy is
+      // already correct, and the PDF can be uploaded again from the row.
+      const file = _pendingPdfFile || pendingPdf?.file
+      if (file && ref?.id) {
         try {
-          const uploaded = await uploadPolicyPdf(ref.id, pendingPdf.file, () => {}, String(form.startDate || '').slice(0, 4))
-          // The hash goes on the policy so re-reading this same file later is
-          // recognised instead of quietly creating a second policy.
-          await savePolicyPdfUrl(ref.id, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, { ...uploaded, hash: pendingPdf.hash })
+          const uploaded = await uploadPolicyPdf(ref.id, file, () => {}, String(payload.startDate || '').slice(0, 4))
+          await savePolicyPdfUrl(ref.id, uploaded.url, uploaded.name, uploaded.storagePath, uploaded.storageBucket, { ...uploaded, hash: pendingPdf?.hash })
           toast.success('Policy PDF attached.')
         } catch (pdfErr) {
           toast.error(`Policy saved, but the PDF was not attached: ${pdfErr.message}`)
@@ -491,10 +490,10 @@ export default function PoliciesPage() {
         setPendingPdf(null)
       }
 
-      if (form.proposalId) {
-        await updateProposal(form.proposalId, {
+      if (payload.proposalId) {
+        await updateProposal(payload.proposalId, {
           status: 'Converted',
-          convertedPolicyNumber: form.policyNumber || '',
+          convertedPolicyNumber: payload.policyNumber || '',
           convertedAt: new Date().toISOString(),
         })
       }
@@ -506,8 +505,9 @@ export default function PoliciesPage() {
     }
   }
   const onEdit   = async form => {
+    const { _pendingPdfFile, ...payload } = form
     try {
-      await updatePolicy(selected.id, form)
+      await updatePolicy(selected.id, payload)
       toast.success('Policy updated!')
       setModal(null)
     } catch(err) {
@@ -662,21 +662,8 @@ export default function PoliciesPage() {
         })}
       </div>
 
-      {/* Top scrollbar — mirrors the table's horizontal scroll so user
-          doesn't have to scroll all the way to the bottom to see right columns */}
-      <div
-        ref={topScrollRef}
-        style={{ overflowX: 'auto', overflowY: 'hidden', height: 14 }}
-        onScroll={e => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
-        className="hidden rounded md:block"
-      >
-        <div style={{ height: 1, minWidth: 2200 }} />
-      </div>
-      <div
-        ref={tableScrollRef}
-        className="table-container hidden md:block"
-        onScroll={e => { if (topScrollRef.current) topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }}
-      >
+      {/* Top scrollbar tracks the real table width so it reaches the last column. */}
+      <TableHScroll className="hidden md:block">
         <table className="min-w-full" style={{ minWidth: 2200 }}>
           <thead><tr>
             <th className="table-header w-10">
@@ -793,7 +780,7 @@ export default function PoliciesPage() {
             }
           </tbody>
         </table>
-      </div>
+      </TableHScroll>
       <button type="button" className="gi-fab md:hidden" onClick={() => { resetDeleteState(); setDupWarning(''); setProposalPrefill(null); setModal('add') }} aria-label="Add policy">
         <span aria-hidden="true">+</span>
       </button>
