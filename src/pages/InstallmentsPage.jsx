@@ -5,6 +5,7 @@ import { fmtCurrency, fmtDate } from '../utils/dateUtils'
 import { listInstallments } from '../utils/installments'
 import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
+import TableHScroll from '../components/ui/TableHScroll'
 import toast from 'react-hot-toast'
 
 const TONE = {
@@ -55,7 +56,7 @@ export default function InstallmentsPage() {
       {rows.length === 0 ? (
         <div className="card text-sm text-slate-500">No installment premiums in this window.</div>
       ) : (
-        <div className="table-container">
+        <TableHScroll>
           <table>
             <thead>
               <tr>
@@ -84,7 +85,7 @@ export default function InstallmentsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </TableHScroll>
       )}
     </div>
   )

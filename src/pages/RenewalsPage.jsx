@@ -29,6 +29,7 @@ import DateInput from '../components/ui/DateInput'
 import AppIcon from '../components/ui/AppIcon'
 import Modal from '../components/ui/Modal'
 import PortalOverlay from '../components/ui/PortalOverlay'
+import TableHScroll from '../components/ui/TableHScroll'
 import toast from 'react-hot-toast'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'   // ✅ FIX R8: proper PDF table
@@ -750,8 +751,6 @@ export default function RenewalsPage() {
   const [manualSendingId, setManualSendingId] = useState('')
   const [saving,       setSaving]       = useState(false)
   const submittingRef  = useRef(false)
-  const topScrollRef = useRef(null)
-  const tableScrollRef = useRef(null)
 
   useEffect(() => {
     const unsubSettings = subscribeRenewalReminderSettings(data => {
@@ -876,31 +875,6 @@ export default function RenewalsPage() {
   }), [filtered, clientById])
 
   // ─── Summary stats ────────────────────────────────────────────
-  useEffect(() => {
-    const top = topScrollRef.current
-    const table = tableScrollRef.current
-    if (!top || !table) return undefined
-    let syncing = false
-    const syncTop = () => {
-      if (syncing) return
-      syncing = true
-      table.scrollLeft = top.scrollLeft
-      syncing = false
-    }
-    const syncTable = () => {
-      if (syncing) return
-      syncing = true
-      top.scrollLeft = table.scrollLeft
-      syncing = false
-    }
-    top.addEventListener('scroll', syncTop)
-    table.addEventListener('scroll', syncTable)
-    return () => {
-      top.removeEventListener('scroll', syncTop)
-      table.removeEventListener('scroll', syncTable)
-    }
-  }, [filtered.length])
-
   const stats = useMemo(() => {
     const summaryPolicies = policies.filter(p => {
       if (['Renewed-Out', 'Cancelled', 'Matured'].includes((p.status || '').trim())) return false
@@ -1265,11 +1239,12 @@ export default function RenewalsPage() {
         ))}
       </div>
 
-      {/* ✅ FIX R7, R9: Table with premium + insurer columns — desktop only */}
-      <div ref={topScrollRef} className="table-scroll-top hidden lg:block overflow-x-auto rounded-t-2xl border border-b-0 border-slate-200/80 bg-white/80 dark:border-slate-700/70 dark:bg-slate-900/80">
-        <div className="h-3 min-w-[1180px]" />
-      </div>
-      <div ref={tableScrollRef} className="table-container renewals-table-container hidden lg:block">
+      {/* Desktop table — top bar width tracks the real table. */}
+      <TableHScroll
+        className="hidden lg:block"
+        topClassName="rounded-t-2xl border border-b-0 border-slate-200/80 bg-white/80 dark:border-slate-700/70 dark:bg-slate-900/80"
+        tableClassName="renewals-table-container"
+      >
         <table className="min-w-[1180px]">
           <thead>
             <tr>
@@ -1348,7 +1323,7 @@ export default function RenewalsPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </TableHScroll>
 
       {/* ✅ FIX R1 + R10: Renew modal */}
       {renewModal && (

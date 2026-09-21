@@ -23,6 +23,7 @@ function PolicyPdfUpload({
   existingResourceType = '',
   existingDeleteToken = '',
   onUploaded = () => {},
+  onHold = () => {},
   compact = false,
   clientMobile = '',
   clientName = '',
@@ -33,6 +34,7 @@ function PolicyPdfUpload({
   const fileRef = useRef()
   const [progress, setProgress]   = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [heldName, setHeldName]   = useState('')
   const canDeleteOldPdf = !isLifePolicyType(policyType)
 
   const maybeOpenWhatsApp = url => {
@@ -62,7 +64,10 @@ function PolicyPdfUpload({
     const file = e.target.files[0]
     if (!file) return
     if (!policyId) {
-      toast.error('First save the policy, then use Upload PDF from the policy row or edit screen.')
+      onHold(file)
+      setHeldName(file.name)
+      toast.success('PDF selected. It will upload when you save this policy.')
+      if (fileRef.current) fileRef.current.value = ''
       return
     }
 
@@ -107,8 +112,27 @@ function PolicyPdfUpload({
   }
 
   if (!policyId) return (
-    <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl p-3 text-xs text-gray-400 text-center">
-      Save policy first, then attach PDF from the policy row.
+    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-2">
+      <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wider">Policy Document (PDF)</p>
+      {heldName ? (
+        <div className="flex items-center gap-2 bg-white border border-indigo-200 rounded-lg px-3 py-2">
+          <span className="text-xs text-indigo-700 font-medium flex-1 truncate">{heldName}</span>
+          <button
+            type="button"
+            onClick={() => { onHold(null); setHeldName('') }}
+            className="text-xs text-slate-500 font-semibold hover:underline"
+          >
+            Remove
+          </button>
+        </div>
+      ) : null}
+      <label className="btn-secondary relative w-full overflow-hidden text-center sm:w-auto cursor-pointer">
+        <input ref={fileRef} type="file" accept="application/pdf,.pdf" onChange={onFileChange} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+        {heldName ? 'Change PDF' : 'Choose PDF'}
+      </label>
+      <p className="text-[11px] text-indigo-700">
+        Pick the schedule on this screen. It attaches automatically after you save.
+      </p>
     </div>
   )
 

@@ -13,6 +13,7 @@ import { openWhatsAppLink } from '../services/whatsappService'
 import AppIcon from '../components/ui/AppIcon'
 import ClientTimeline from '../components/clients/ClientTimeline'
 import PolicyShareBar from '../components/policies/PolicyShareBar'
+import TableHScroll from '../components/ui/TableHScroll'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -302,7 +303,7 @@ export default function ClientProfilePage() {
           {clientPolicies.length === 0 ? (
             <p className="text-xs text-gray-400 dark:text-gray-500">No policies found</p>
           ) : (
-            <div className="table-container">
+            <TableHScroll>
               <table className="min-w-full">
                 <thead><tr>
                   {['Policy No', 'Type', 'Insurer', 'Plan', 'Premium', 'Sum Insured/Assured', 'Start', 'Premium Due', 'Expiry', 'Days', 'Status', 'Share'].map(h => (
@@ -355,7 +356,7 @@ export default function ClientProfilePage() {
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableHScroll>
           )}
         </Section>
       )}

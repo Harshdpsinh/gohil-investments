@@ -16,6 +16,7 @@ import { exportToCSV, exportToExcel, exportToPDF } from '../utils/exportUtils'
 import { fmtDate, fmtCurrency } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
 import toast from 'react-hot-toast'
+import TableHScroll from '../components/ui/TableHScroll'
 
 const CLAIM_TYPES  = ['Cashless','Reimbursement','Death','Maturity','Motor Accident','Motor Theft','Other']
 const STATUS_COLORS = {
@@ -412,7 +413,7 @@ export default function ClaimsPage() {
           onStatusChange={onStatusChange}
         />
       ) : (
-        <div className="table-container">
+        <TableHScroll>
           <table className="min-w-full">
             <thead><tr>
               {['Claim No','Client','Policy No','Type','Insurer','Intimation','Claimed ₹','Approved ₹','Status','Hospital','Docs'].map(h=>(
@@ -466,7 +467,7 @@ export default function ClaimsPage() {
               }
             </tbody>
           </table>
-        </div>
+        </TableHScroll>
       )}
 
       <Modal open={modal==='add'} onClose={()=>setModal(null)} title="🔍 Add New Claim" size="xl">

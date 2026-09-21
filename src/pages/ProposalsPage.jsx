@@ -14,6 +14,7 @@ import DateInput from '../components/ui/DateInput'
 import SearchableSelect, { toClientOptions } from '../components/ui/SearchableSelect'
 import { fmtDateTime } from '../utils/dateUtils'
 import toast from 'react-hot-toast'
+import TableHScroll from '../components/ui/TableHScroll'
 
 import { KNOWN_INSURERS } from '../utils/constants'
 function InsurerCombo({ value, onChange }) {
@@ -440,7 +441,7 @@ export default function ProposalsPage() {
             <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading…
           </div>
         : (
-          <div className="table-container">
+          <TableHScroll>
             <table className="min-w-full">
               <thead>
                 <tr>
@@ -491,7 +492,7 @@ export default function ProposalsPage() {
                   ))}
               </tbody>
             </table>
-          </div>
+          </TableHScroll>
         )
       }
 
