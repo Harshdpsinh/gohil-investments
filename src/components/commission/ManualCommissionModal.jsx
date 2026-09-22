@@ -3,6 +3,7 @@ import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
 import { addManualCommission, updateCommissionTransaction } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
+import { validateCommissionAmount } from '../../utils/commissionTracker'
 import { fmtCurrency } from '../../utils/dateUtils'
 
 export default function ManualCommissionModal({
@@ -36,6 +37,11 @@ export default function ManualCommissionModal({
   const editing = Boolean(existing?.id)
 
   const save = async () => {
+    const amountError = validateCommissionAmount(amount)
+    if (amountError) {
+      toast.error(amountError)
+      return
+    }
     setBusy(true)
     try {
       if (editing) {

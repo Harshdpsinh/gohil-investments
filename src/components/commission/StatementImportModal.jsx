@@ -23,8 +23,20 @@ import {
   isMaskedPolicyNumber,
 } from '../../utils/commissionImport'
 import { addClient, addCommissionTransaction, addPolicy, updatePolicy } from '../../firebase/firestore'
-import { upsertCommissionMaster } from '../../firebase/commissionOps'
+import { upsertCommissionMaster, recordImportBatch } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
+import {
+  alreadyPostedHashes,
+  commissionDiscrepancy,
+  fileHashFromBuffer,
+  importBucket,
+  matchScore,
+  receivedPct,
+  expectedPct,
+  rowHash,
+} from '../../utils/commissionMatch'
+import { saveCommissionTemplate, templateFor } from '../../utils/commissionTemplates'
+import { pickNativeDocument } from '../../services/androidFilePicker'
 import {
   canUpdateStructure,
   policyStructureStamp,
@@ -53,7 +65,7 @@ const sameish = (a, b) => {
 const thisYear = new Date().getFullYear()
 const YEARS = [thisYear + 1, thisYear, thisYear - 1, thisYear - 2]
 
-export default function StatementImportModal({ open, onClose, policies, clients = [], user, onPosted }) {
+export default function StatementImportModal({ open, onClose, policies, clients = [], user, onPosted, transactions = [] }) {
   const fileRef = useRef(null)
   const [month, setMonth] = useState('')
   const [year, setYear] = useState(String(thisYear))
@@ -70,6 +82,14 @@ export default function StatementImportModal({ open, onClose, policies, clients 
   const [noDetail, setNoDetail] = useState(false)
   const [reviewing, setReviewing] = useState(null) // sourceRow
   const [postedRows, setPostedRows] = useState(() => new Set())
+  const [progress, setProgress] = useState('')
+  const [importTab, setImportTab] = useState('all')
+  const [acceptedVariance, setAcceptedVariance] = useState(() => new Set())
+  const [flagged, setFlagged] = useState(() => new Set())
+  const [sourceFileHash, setSourceFileHash] = useState('')
+  const [fileDuplicateOn, setFileDuplicateOn] = useState('')
+  const [forceDuplicates, setForceDuplicates] = useState(false)
+  const [batchId, setBatchId] = useState(() => `batch-${Date.now()}`)
 
   // A tab left open across a deploy still has the old hashed pdfStatement URL.
   // Check the live page (and warm the parser) as soon as this sheet opens, so
@@ -95,21 +115,38 @@ export default function StatementImportModal({ open, onClose, policies, clients 
 
   // Gate: nothing may be uploaded until the statement is described.
   const ready = Boolean(month && year && mode && (mode === 'multi' || insurer))
+  const payoutMonth = month && year ? `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}` : ''
 
   // Edits apply before matching, so correcting a policy number re-matches live.
   const rows = useMemo(() => {
     const applied = parsed.map(row => ({ ...row, ...(edits[row.sourceRow] || {}) }))
-    return matchStatement(applied, policies, mode === 'single' ? insurer : '')
-  }, [parsed, edits, policies, insurer, mode])
+    return matchStatement(applied, policies, mode === 'single' ? insurer : '').map(row => ({
+      ...row,
+      matchScore: matchScore(row),
+      rowHash: rowHash({ ...row, payoutMonth }),
+    }))
+  }, [parsed, edits, policies, insurer, mode, payoutMonth])
 
   const stats = useMemo(() => summarise(rows), [rows])
+  const buckets = useMemo(() => ({
+    ready: rows.filter(r => importBucket(r, r.policy) === 'ready').length,
+    review: rows.filter(r => importBucket(r, r.policy) === 'review').length,
+    unmatched: rows.filter(r => importBucket(r, r.policy) === 'unmatched').length,
+  }), [rows])
+  const visibleRows = importTab === 'all' ? rows : rows.filter(r => importBucket(r, r.policy) === importTab)
+  const postedHashes = useMemo(() => alreadyPostedHashes(transactions), [transactions])
   const postable = rows.filter(r => {
     if (!r.policy || skipped.has(r.sourceRow) || postedRows.has(r.sourceRow)) return false
-    if (r.status === 'matched') return true
+    if (flagged.has(r.sourceRow)) return false
+    if (!forceDuplicates && r.rowHash && postedHashes.rows.has(r.rowHash)) return false
+    if (r.status === 'matched') {
+      const disc = commissionDiscrepancy(r, r.policy)
+      if (disc.hasDiscrepancy && !acceptedVariance.has(r.sourceRow)) return false
+      return true
+    }
     if (r.status === 'review') return includedReview.has(r.sourceRow)
     return false
   })
-  const payoutMonth = month && year ? `${year}-${String(MONTHS.indexOf(month) + 1).padStart(2, '0')}` : ''
   const reviewRow = rows.find(r => r.sourceRow === reviewing) || null
 
   useEffect(() => {
@@ -124,6 +161,10 @@ export default function StatementImportModal({ open, onClose, policies, clients 
     setParsed([]); setEdits({}); setSkipped(new Set()); setIncludedReview(new Set())
     setFileName(''); setFormat(''); setNoDetail(false)
     setReviewing(null); setPostedRows(new Set())
+    setProgress(''); setImportTab('all')
+    setAcceptedVariance(new Set()); setFlagged(new Set())
+    setSourceFileHash(''); setFileDuplicateOn(''); setForceDuplicates(false)
+    setBatchId(`batch-${Date.now()}`)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -132,23 +173,37 @@ export default function StatementImportModal({ open, onClose, policies, clients 
   const handleFile = async file => {
     if (!file || !ready) return
     setBusy(true)
+    setProgress('Parsing rows…')
     try {
+      const buffer = await file.arrayBuffer()
+      const hash = await fileHashFromBuffer(buffer)
+      setSourceFileHash(hash)
+      const prior = postedHashes.dates[hash]
+      setFileDuplicateOn(prior || (postedHashes.files.has(hash) ? 'an earlier import' : ''))
+      const readable = new File([buffer], file.name, { type: file.type || 'application/octet-stream' })
       let list, detected
       if (/\.pdf$/i.test(file.name)) {
-        // Loaded on demand: pdfjs is ~330KB and most statements are sheets.
+        setProgress('Extracting text…')
         const { parsePdfStatement } = await import('../../utils/pdfStatement')
-        const result = await parsePdfStatement(await file.arrayBuffer())
+        const result = await parsePdfStatement(buffer)
         list = result.rows
         detected = result.format
         if (!list.length) {
-          setNoDetail(true); setFileName(file.name); setFormat(detected); setBusy(false)
+          setNoDetail(true); setFileName(file.name); setFormat(detected); setBusy(false); setProgress('')
           return
         }
       } else {
-        list = normaliseStatement(await parseImportFile(file))
+        setProgress('Reading spreadsheet…')
+        list = normaliseStatement(await parseImportFile(readable))
         detected = 'spreadsheet'
         if (!list.length) throw new Error('No usable rows found. Check the file has a header row.')
+        const saved = templateFor(insurer)
+        if (saved && list[0] && Object.keys(saved.headers || {}).length) {
+          toast.success(`Using saved ${insurer || 'carrier'} column map.`)
+        }
+        if (insurer && list[0]) saveCommissionTemplate(insurer, Object.fromEntries(Object.keys(list[0]).map(h => [h, h])))
       }
+      setProgress('Matching policies…')
       setParsed(list)
       setFormat(detected)
       setNoDetail(false)
@@ -158,6 +213,7 @@ export default function StatementImportModal({ open, onClose, policies, clients 
       setEdits({})
       setPostedRows(new Set())
       setReviewing(null)
+      setImportTab('all')
     } catch (err) {
       if (reloadOnceForStaleChunk(err)) return
       toast.error(
@@ -168,6 +224,7 @@ export default function StatementImportModal({ open, onClose, policies, clients 
       reset()
     } finally {
       setBusy(false)
+      setProgress('')
     }
   }
 
@@ -188,6 +245,24 @@ export default function StatementImportModal({ open, onClose, policies, clients 
       const next = new Set(prev)
       if (next.has(sourceRow)) next.delete(sourceRow)
       else next.add(sourceRow)
+      return next
+    })
+  }
+
+  const acceptVariance = sourceRow => {
+    setAcceptedVariance(prev => new Set(prev).add(sourceRow))
+    setFlagged(prev => {
+      const next = new Set(prev)
+      next.delete(sourceRow)
+      return next
+    })
+  }
+
+  const flagRow = sourceRow => {
+    setFlagged(prev => new Set(prev).add(sourceRow))
+    setAcceptedVariance(prev => {
+      const next = new Set(prev)
+      next.delete(sourceRow)
       return next
     })
   }
@@ -214,6 +289,16 @@ export default function StatementImportModal({ open, onClose, policies, clients 
     payoutDate: row.payoutDate || '',
     status: 'posted',
     postingKey: `${postingKey(row)}_${payoutMonth}`,
+    rowHash: row.rowHash || rowHash({ ...row, payoutMonth }),
+    sourceFileHash,
+    matchScore: row.matchScore ?? matchScore(row),
+    grossCommission: amounts.receivedCommission,
+    expectedPct: row.policy ? expectedPct(row.policy) : 0,
+    receivedPct: receivedPct(row, row.policy || {}),
+    varianceAccepted: acceptedVariance.has(row.sourceRow),
+    flagged: flagged.has(row.sourceRow),
+    batchId,
+    forcePost: forceDuplicates,
     legacyPostingKeys: [
       `${legacyPostingKey(row)}_${payoutMonth}`,
       legacyPostingKey(row),
@@ -221,6 +306,7 @@ export default function StatementImportModal({ open, onClose, policies, clients 
     createdBy: user?.uid || '',
     createdByEmail: user?.email || '',
     remarks: `Imported from ${fileName} row ${row.sourceRow}`,
+    sourceFileName: fileName || '',
     ...(row._structure ? {
       structureUpdated: true,
       previousPct: row._structure.previousPct,
@@ -395,6 +481,20 @@ export default function StatementImportModal({ open, onClose, policies, clients 
     if (failed) parts.push(`${failed} failed`)
     if (failed) toast.error(parts.join(' · '))
     else toast.success(parts.join(' · '))
+    try {
+      await recordImportBatch({
+        id: batchId,
+        fileName,
+        fileHash: sourceFileHash,
+        payoutMonth,
+        insurer,
+        posted,
+        duplicates,
+        failed,
+        createdBy: user?.uid || '',
+        createdByEmail: user?.email || '',
+      })
+    } catch { /* history is optional — posting already happened */ }
     if (posted) onPosted?.()
     closeAll()
   }
@@ -491,22 +591,55 @@ export default function StatementImportModal({ open, onClose, policies, clients 
                    onChange={e => handleFile(e.target.files?.[0])} />
             <p className="font-semibold text-gray-700 dark:text-gray-200">
               {busy
-                ? 'Reading…'
+                ? (progress || 'Working…')
                 : ready
                   ? 'Drop the statement here, or click to choose'
                   : 'Select month, year and statement type first'}
             </p>
+            {busy && progress ? (
+              <div className="mx-auto mt-3 h-1.5 w-48 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full w-2/3 animate-pulse rounded-full bg-teal-500" />
+              </div>
+            ) : null}
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               .csv, .xlsx and text .pdf accepted for any carrier
             </p>
+            {ready && !busy ? (
+              <button
+                type="button"
+                className="btn-secondary mt-3 text-xs"
+                onClick={async e => {
+                  e.stopPropagation()
+                  const picked = await pickNativeDocument({ statements: true })
+                  if (picked) handleFile(picked)
+                }}
+              >
+                Choose from phone
+              </button>
+            ) : null}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               <Tile label={format ? `Rows · ${format}` : 'Rows'} value={stats.total} />
               <Tile label="Matched" value={stats.matched} tone="text-emerald-600 dark:text-emerald-400" />
-              <Tile label="Needs review" value={stats.review} tone="text-amber-600 dark:text-amber-400" />
-              <Tile label="Statement total" value={fmtCurrency(stats.amount)} />
+              <Tile label="Ready to post" value={buckets.ready} tone="text-emerald-600 dark:text-emerald-400" />
+              <Tile label="Needs review" value={buckets.review} tone="text-amber-600 dark:text-amber-400" />
+              <Tile label="Unmatched" value={buckets.unmatched} tone="text-red-600 dark:text-red-400" />
+            </div>
+            {fileDuplicateOn ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+                This exact file was already imported{fileDuplicateOn ? ` (${fileDuplicateOn})` : ''}. Rows already in the book stay blocked. Admin can override below.
+                <label className="mt-2 flex items-center gap-2 text-xs font-bold">
+                  <input type="checkbox" checked={forceDuplicates} onChange={e => setForceDuplicates(e.target.checked)} />
+                  Override and post again
+                </label>
+              </div>
+            ) : null}
+            <div className="commission-segmented">
+              {[['all', `All ${stats.total}`], ['ready', `Ready ${buckets.ready}`], ['review', `Review ${buckets.review}`], ['unmatched', `Unmatched ${buckets.unmatched}`]].map(([key, label]) => (
+                <button key={key} type="button" className={importTab === key ? 'active' : ''} onClick={() => setImportTab(key)}>{label}</button>
+              ))}
             </div>
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -520,7 +653,7 @@ export default function StatementImportModal({ open, onClose, policies, clients 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {rows.map(row => {
+                  {visibleRows.map(row => {
                     const reviewOn = row.status === 'review' && includedReview.has(row.sourceRow)
                     const off = skipped.has(row.sourceRow) || (row.status === 'review' && !reviewOn && !postedRows.has(row.sourceRow))
                     const db = row.policy
@@ -528,6 +661,9 @@ export default function StatementImportModal({ open, onClose, policies, clients 
                     const active = reviewing === row.sourceRow
                     const rateField = db ? commissionRateField(db, row.businessType) : 'fyCommission'
                     const rateOnFile = db ? Number(db[rateField] || 0) : 0
+                    const disc = db ? commissionDiscrepancy(row, db) : null
+                    const alreadyOn = row.rowHash ? postedHashes.rowDates[row.rowHash] : ''
+                    const already = Boolean(row.rowHash && postedHashes.rows.has(row.rowHash))
                     return (
                       <tr
                         key={row.sourceRow}
@@ -564,6 +700,7 @@ export default function StatementImportModal({ open, onClose, policies, clients 
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${saved ? STATUS_STYLE.matched : STATUS_STYLE[row.status]}`}>
                             {saved ? 'posted' : row.status}
                           </span>
+                          <div className="mt-0.5 text-[11px] font-bold text-slate-400">{row.matchScore ?? 0}% match</div>
                           <div className="mt-0.5 text-[11px] text-gray-500">{saved ? 'Updated in commission book' : row.reason}</div>
                           {mode === 'multi' && row.insurer && (
                             <div className="mt-1 inline-block rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold dark:bg-slate-700">
@@ -577,6 +714,25 @@ export default function StatementImportModal({ open, onClose, policies, clients 
                           )}
                           {row.commissionAmount < 0 && (
                             <div className="mt-0.5 text-[11px] font-semibold text-red-600">Reversal / negative</div>
+                          )}
+                          {disc?.hasDiscrepancy && (
+                            <div className={`mt-2 rounded-lg px-2 py-1.5 text-[11px] ${disc.tone === 'short' ? 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'}`}>
+                              <p className="font-bold">Expected {fmtCurrency(disc.expected)} ({disc.expectedPct}%) vs received {fmtCurrency(disc.received)} ({disc.receivedPct}%)</p>
+                              <p>Gross {fmtCurrency(disc.received)} · TDS {fmtCurrency(disc.tds)} · Net {fmtCurrency(disc.net)}</p>
+                              {!saved && !acceptedVariance.has(row.sourceRow) && !flagged.has(row.sourceRow) && (
+                                <div className="mt-1 flex flex-wrap gap-2">
+                                  <button type="button" className="font-bold underline" onClick={e => { e.stopPropagation(); acceptVariance(row.sourceRow) }}>Accept variance</button>
+                                  <button type="button" className="font-bold underline" onClick={e => { e.stopPropagation(); flagRow(row.sourceRow) }}>Flag for review</button>
+                                </div>
+                              )}
+                              {acceptedVariance.has(row.sourceRow) && <p className="mt-1 font-semibold">Variance accepted — will post</p>}
+                              {flagged.has(row.sourceRow) && <p className="mt-1 font-semibold">Flagged — will not post</p>}
+                            </div>
+                          )}
+                          {already && !saved && (
+                            <div className="mt-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                              This exact row was already posted{alreadyOn ? ` on ${alreadyOn}` : ''}.
+                            </div>
                           )}
                         </td>
                         <td className="table-cell">
@@ -605,10 +761,14 @@ export default function StatementImportModal({ open, onClose, policies, clients 
               posted={reviewRow ? postedRows.has(reviewRow.sourceRow) : false}
               skipped={reviewRow ? skipped.has(reviewRow.sourceRow) : false}
               busy={busy}
+              varianceAccepted={reviewRow ? acceptedVariance.has(reviewRow.sourceRow) : false}
+              flagged={reviewRow ? flagged.has(reviewRow.sourceRow) : false}
               onOk={okRow}
               onAddPolicy={addPolicyAndPost}
               onSkip={sourceRow => toggle(sourceRow, '')}
               onUpdateStructure={updateStructureRow}
+              onAcceptVariance={acceptVariance}
+              onFlag={flagRow}
             />
             </div>
 
@@ -664,7 +824,8 @@ function Tile({ label, value, tone = '' }) {
 
 function ImportRowReview({
   row, policies, clients = [], defaultInsurer, posted, skipped, busy,
-  onOk, onAddPolicy, onSkip, onUpdateStructure,
+  varianceAccepted, flagged,
+  onOk, onAddPolicy, onSkip, onUpdateStructure, onAcceptVariance, onFlag,
 }) {
   const [pickedId, setPickedId] = useState('')
   const [alsoStructure, setAlsoStructure] = useState(false)
@@ -732,6 +893,7 @@ function ImportRowReview({
     || clientHits.find(c => c.clientId === clientId)
     || null
   const needsNewPolicy = !pickedOk
+  const disc = row?.policy ? commissionDiscrepancy(row, row.policy) : (row ? commissionDiscrepancy(row, picked) : null)
 
   return (
     <aside className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40 lg:w-80">
@@ -748,6 +910,23 @@ function ImportRowReview({
               {row.insurer || defaultInsurer ? ` · ${row.insurer || defaultInsurer}` : ''}
             </p>
           </div>
+
+          {disc && (row.policy || picked) && (
+            <div className={`rounded-lg border px-3 py-2 text-xs ${disc.hasDiscrepancy ? (disc.tone === 'short' ? 'border-red-200 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/30 dark:text-red-100' : 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100') : 'border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100'}`}>
+              <p className="font-bold">Expected {fmtCurrency(disc.expected)} ({disc.expectedPct}%) vs statement {fmtCurrency(disc.received)} ({disc.receivedPct}%)</p>
+              <p className="mt-0.5">Gross {fmtCurrency(disc.received)} · TDS {fmtCurrency(disc.tds)} · Net {fmtCurrency(disc.net)}</p>
+              {disc.hasDiscrepancy && !posted && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" className="btn-primary text-xs" disabled={varianceAccepted} onClick={() => onAcceptVariance?.(row.sourceRow)}>
+                    {varianceAccepted ? 'Variance accepted' : 'Accept variance'}
+                  </button>
+                  <button type="button" className="btn-secondary text-xs" disabled={flagged} onClick={() => onFlag?.(row.sourceRow)}>
+                    {flagged ? 'Flagged' : 'Flag for review'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {posted ? (
             <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">

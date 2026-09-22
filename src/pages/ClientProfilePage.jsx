@@ -14,6 +14,8 @@ import AppIcon from '../components/ui/AppIcon'
 import ClientTimeline from '../components/clients/ClientTimeline'
 import PolicyShareBar from '../components/policies/PolicyShareBar'
 import TableHScroll from '../components/ui/TableHScroll'
+import CommissionHistory from '../components/commission/CommissionHistory'
+import { useCommissionLedger } from '../hooks/useCommissionLedger'
 import toast from 'react-hot-toast'
 
 const CLAIM_STATUS_COLORS = {
@@ -60,12 +62,13 @@ export default function ClientProfilePage() {
   const navigate  = useNavigate()
   const { policies } = usePolicies()
   const { clients } = useClients()
+  const [tab, setTab] = useState('overview')
+  const { transactions } = useCommissionLedger(tab === 'commission')
 
   const [client,  setClient]  = useState(null)
   const [claims,  setClaims]  = useState([])
   const [docs,    setDocs]    = useState([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('overview')
 
   useEffect(() => {
     if (!id) return
@@ -157,6 +160,7 @@ export default function ClientProfilePage() {
     { id: 'family', label: `Family (${familyMembers.length})` },
     { id: 'claims', label: `Claims (${claims.length})` },
     { id: 'docs', label: `Documents (${docs.length + policyDocuments.length})` },
+    { id: 'commission', label: 'Commission' },
   ]
 
   return (
@@ -418,6 +422,28 @@ export default function ClientProfilePage() {
                     {c.claimedAmount && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">₹{Number(c.claimedAmount).toLocaleString('en-IN')}</p>}
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {tab === 'commission' && (
+        <Section title="Commission history" icon="rupee">
+          <CommissionHistory
+            transactions={transactions}
+            policyIds={clientPolicies.map(p => p.id)}
+            title="Posted receipts for this client"
+          />
+          {clientPolicies.length > 1 && (
+            <div className="mt-5 space-y-4">
+              {clientPolicies.map(policy => (
+                <CommissionHistory
+                  key={policy.id}
+                  transactions={transactions}
+                  policyIds={[policy.id]}
+                  title={`${policy.policyNumber || 'Policy'} · ${policy.insurer || ''}`}
+                />
               ))}
             </div>
           )}

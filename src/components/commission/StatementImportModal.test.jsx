@@ -17,6 +17,10 @@ vi.mock('../../firebase/firestore', () => ({
 }))
 vi.mock('../../firebase/commissionOps', () => ({
   upsertCommissionMaster: vi.fn(async () => ({ id: 'master-1' })),
+  recordImportBatch: vi.fn(async () => 'batch-1'),
+}))
+vi.mock('../../services/androidFilePicker', () => ({
+  pickNativeDocument: vi.fn(async () => null),
 }))
 vi.mock('../../utils/exportUtils', () => ({ parseImportFile: vi.fn() }))
 vi.mock('../../utils/pdfStatement', () => ({
@@ -123,6 +127,7 @@ describe('StatementImportModal review table', () => {
       target: { value: 'Mukeshbhai Bhupatbhai Vatukiya' },
     })
     await waitFor(() => expect(rowCells(1).getByText('matched')).toBeTruthy())
+    fireEvent.click(rowCells(1).getByRole('button', { name: 'Accept variance' }))
     expect(screen.getByRole('button', { name: /Verify & Save 2 Records/ })).toBeTruthy()
   })
 
@@ -440,5 +445,17 @@ describe('StatementImportModal review table', () => {
     expect(screen.getByText(/Different policy/i)).toBeTruthy()
     expect(screen.getByRole('button', { name: /Add policy & post commission/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /OK · update this commission/ })).toBeNull()
+  })
+
+  it('holds a short-paid exact match until variance is accepted', async () => {
+    await openWithStatement({}, [{
+      'Policy No.': '6305162700008293',
+      'Insured Name': 'Harendra Varmora',
+      Premium: 748,
+      'Total Comm': 10,
+    }])
+    expect(screen.getByRole('button', { name: /Verify & Save 0 Records/ })).toBeTruthy()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept variance' })[0])
+    expect(screen.getByRole('button', { name: /Verify & Save 1 Record$/ })).toBeTruthy()
   })
 })
