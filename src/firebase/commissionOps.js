@@ -12,7 +12,7 @@ const MASTER = CRM_COLLECTIONS.COMMISSION_MASTER
 export async function updateCommissionTransaction(id, data = {}) {
   if (!id) throw new Error('Commission row id is required.')
   const payload = {}
-  const numeric = ['premium', 'expectedCommission', 'receivedCommission', 'rewardCommission', 'tds', 'gst', 'netReceived', 'difference']
+  const numeric = ['premium', 'expectedCommission', 'receivedCommission', 'rewardCommission', 'tds', 'gst', 'netReceived', 'difference', 'matchScore', 'grossCommission', 'expectedPct', 'receivedPct']
   for (const field of numeric) {
     if (data[field] !== undefined) payload[field] = Number(data[field]) || 0
   }
@@ -117,4 +117,24 @@ export async function upsertCommissionMaster(proposal, { existing } = {}) {
 
   await setDoc(ref, payload, { merge: true })
   return { id: proposal.id, previousPct, newPct: payload.newPct, ref }
+}
+
+export async function recordImportBatch(batch = {}) {
+  const id = batch.id || `batch-${Date.now()}`
+  const ref = doc(db, MASTER, id)
+  await setDoc(ref, {
+    type: 'import-batch',
+    fileName: batch.fileName || '',
+    fileHash: batch.fileHash || '',
+    payoutMonth: batch.payoutMonth || '',
+    insurer: batch.insurer || '',
+    posted: Number(batch.posted) || 0,
+    duplicates: Number(batch.duplicates) || 0,
+    failed: Number(batch.failed) || 0,
+    createdBy: batch.createdBy || '',
+    createdByEmail: batch.createdByEmail || '',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true })
+  return id
 }

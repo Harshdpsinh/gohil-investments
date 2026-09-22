@@ -19,6 +19,8 @@ import { canonicalInsurer, duplicateInsurers, unrecognisedInsurers } from '../ut
 import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import CommissionReviewDrawer from '../components/commission/CommissionReviewDrawer'
+import CommissionTracker from '../components/commission/CommissionTracker'
+import { CommissionBatches, CommissionLedgerTable } from '../components/commission/CommissionHistory'
 import { latestCommissionPosting } from '../utils/commissionReview'
 import toast from 'react-hot-toast'
 import TableHScroll from '../components/ui/TableHScroll'
@@ -214,6 +216,7 @@ export default function CommissionPage() {
   const [reviewRow, setReviewRow] = useState(null)
   const [reconView, setReconView] = useState('outstanding')
   const [reconStatus, setReconStatus] = useState('all')
+  const [workspace, setWorkspace] = useState('tracker')
 
   // NEW-004: full ledger via useCommissionLedger so unpaid/awaited flags are not
   // wrong on a partial page of 100. Hook auto-pages until hasMore is false.
@@ -355,6 +358,13 @@ export default function CommissionPage() {
   const scorecard = useMemo(() => insurerScorecard(reconciled), [reconciled])
   const forecast = useMemo(() => receivablesForecast(policies), [policies])
   const currentFy = useMemo(() => financialYearRange(financialYearOf(new Date())), [])
+  const thisMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+  const monthPostedTotal = useMemo(
+    () => transactions
+      .filter(item => item.payoutMonth === thisMonthKey)
+      .reduce((sum, item) => sum + Number(item.netReceived || item.receivedCommission || 0), 0),
+    [transactions, thisMonthKey]
+  )
   const tds = useMemo(
     () => tdsSummary(transactions, { from: currentFy.from.slice(0, 7), to: currentFy.to.slice(0, 7) }),
     [transactions, currentFy]
@@ -449,6 +459,7 @@ export default function CommissionPage() {
         policies={policies}
         clients={clients}
         user={user}
+        transactions={transactions}
         onPosted={reloadTransactions}
       />
       <CommissionReviewDrawer
@@ -463,7 +474,7 @@ export default function CommissionPage() {
 
       <div className="commission-command-grid">
         {[
-          { label:'Actual posted', val: fmtCurrency(actualStats.total), note: `${ledgerRows.length} ledger entries${ledgerRows.length === transactions.length ? '' : ' (filtered)'}`, tone:'text-emerald-600' },
+          { label:'Actual posted', val: fmtCurrency(actualStats.total), note: `${thisMonthKey} received ${fmtCurrency(monthPostedTotal)} · not an estimate`, tone:'text-emerald-600' },
           { label:'Estimated total', val: fmtCurrency(stats.total), note: 'From policy rates' },
           { label:'FY estimate', val: fmtCurrency(stats.fyTotal), note: 'First-year business' },
           { label:'RY estimate', val: fmtCurrency(stats.ryTotal), note: 'Renewal business' },
@@ -473,7 +484,35 @@ export default function CommissionPage() {
         ))}
       </div>
 
-      {/* ── Reconciliation ─────────────────────────────────────────────── */}
+      {monthPostedTotal === 0 && (
+        <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <p><strong>Upload this month’s statements.</strong> Posted figures below are receipts, not the FY/RY estimates on the policy. Nothing is in {thisMonthKey} yet.</p>
+          <button type="button" className="btn-primary text-xs" onClick={() => setImportOpen(true)}>Import statement</button>
+        </div>
+      )}
+
+      <div className="commission-segmented">
+        {[
+          ['tracker', 'Month tracker'],
+          ['chase', 'Chase / recon'],
+          ['posted', 'Posted ledger'],
+          ['rates', 'Rates on file'],
+        ].map(([key, label]) => (
+          <button key={key} type="button" className={workspace === key ? 'active' : ''} onClick={() => setWorkspace(key)}>{label}</button>
+        ))}
+      </div>
+
+      {workspace === 'tracker' && (
+        <CommissionTracker
+          policies={policies}
+          transactions={transactions}
+          clients={clients}
+          user={user}
+          onPosted={reloadTransactions}
+        />
+      )}
+
+      {workspace === 'chase' && (
       <div className="fintech-panel p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -677,7 +716,10 @@ export default function CommissionPage() {
           </div>
         )}
       </div>
+      )}
 
+      {workspace === 'posted' && (
+      <>
       <div className="fintech-panel p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-extrabold text-gray-950 dark:text-white">Actual commission breakdown</p><p className="text-xs text-gray-600 dark:text-gray-300">Posted ledger values only · {ledgerRows.length} of {transactions.length} entries</p><div className="mt-2 flex gap-2"><button type="button" className="btn-secondary text-xs" onClick={() => downloadLedger('csv')}>⬇ Ledger CSV</button><button type="button" className="btn-secondary text-xs" onClick={() => downloadLedger('excel')}>⬇ Ledger Excel</button></div></div><div className="commission-segmented">{[['insurer','Company-wise'],['category','Category-wise'],['client','Client-wise'],['month','Month-wise'],['business','Fresh vs Renewal'],['plan','Plan-wise']].map(([key,label]) => <button key={key} className={actualView === key ? 'active' : ''} onClick={() => setActualView(key)}>{label}</button>)}</div></div>
         {actualView === 'insurer' && insurerDupes.length > 0 && (
@@ -733,6 +775,52 @@ export default function CommissionPage() {
       </div>
       {hasMoreTransactions && <div className="text-center"><button className="btn-secondary" disabled={loadingMore} onClick={loadMoreTransactions}>{loadingMore ? 'Loading...' : 'Load 100 more commission records'}</button></div>}
 
+      <div className="fintech-panel space-y-3 p-4 sm:p-5">
+        <p className="text-sm font-extrabold text-slate-950 dark:text-white">Posted ledger · 100 rows per page</p>
+        <p className="text-xs text-slate-500">Receipts only. Click Edit to correct a row — identity fields stay frozen.</p>
+        <CommissionLedgerTable
+          rows={ledgerRows}
+          onReview={txn => {
+            const recon = reconciled.find(row => row.policyId === txn.policyId)
+            setReviewRow(recon || {
+              policyId: txn.policyId,
+              policyNumber: txn.policyNumber,
+              clientName: txn.clientName,
+              insurer: txn.insurer,
+              expected: txn.expectedCommission,
+              received: txn.receivedCommission,
+              difference: txn.difference,
+              status: 'received',
+              premium: txn.premium,
+            })
+          }}
+        />
+      </div>
+      <div className="fintech-panel space-y-3 p-4 sm:p-5">
+        <p className="text-sm font-extrabold text-slate-950 dark:text-white">Import history</p>
+        <CommissionBatches
+          transactions={transactions}
+          onPick={txn => {
+            const recon = reconciled.find(row => row.policyId === txn.policyId)
+            setReviewRow(recon || {
+              policyId: txn.policyId,
+              policyNumber: txn.policyNumber,
+              clientName: txn.clientName,
+              insurer: txn.insurer,
+              expected: txn.expectedCommission,
+              received: txn.receivedCommission,
+              difference: txn.difference,
+              status: 'received',
+              premium: txn.premium,
+            })
+          }}
+        />
+      </div>
+      </>
+      )}
+
+      {workspace === 'rates' && (
+      <>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-4">📅 Commission by Start Month</p>
@@ -859,6 +947,8 @@ export default function CommissionPage() {
           )}
         </table>
       </TableHScroll>
+      </>
+      )}
     </div>
   )
 }

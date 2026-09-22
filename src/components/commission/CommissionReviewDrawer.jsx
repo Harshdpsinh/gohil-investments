@@ -6,6 +6,7 @@ import PortalOverlay from '../ui/PortalOverlay'
 import AppIcon from '../ui/AppIcon'
 import { addManualCommission, updateCommissionTransaction } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
+import { validateCommissionAmount } from '../../utils/commissionTracker'
 import { commissionReviewPrompt, draftFromReview } from '../../utils/commissionReview'
 import { fmtCurrency } from '../../utils/dateUtils'
 
@@ -49,6 +50,8 @@ export default function CommissionReviewDrawer({
     setBusy(true)
     try {
       if (!Number.isFinite(received)) throw new Error('Commission amount is required.')
+      const amountError = validateCommissionAmount(received)
+      if (amountError) throw new Error(amountError)
       const payload = {
         receivedCommission: received,
         netReceived: received,

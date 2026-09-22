@@ -139,8 +139,8 @@ service cloud.firestore {
     }
     match /commission_transactions/{commissionTransactionId} {
       allow read: if canReadBusiness();
-      allow create: if isStaff();
-      allow update: if isStaff() && commissionIdentityFrozen();
+      allow create: if isAdmin();
+      allow update: if isAdmin() && commissionIdentityFrozen();
       allow delete: if isAdmin();
     }
     match /audit_logs/{auditId} {

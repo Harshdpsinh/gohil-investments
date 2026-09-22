@@ -9,11 +9,18 @@ function base64ToFile(data, name, type) {
   return new File([bytes], name || 'document.pdf', { type: type || 'application/pdf' })
 }
 
-export async function pickNativeDocument({ pdfOnly = false } = {}) {
+export async function pickNativeDocument({ pdfOnly = false, statements = false } = {}) {
   if (!Capacitor.isNativePlatform()) return null
   try {
     const result = await NativeFilePicker.pickFiles({
-      types: pdfOnly ? ['application/pdf'] : ['application/pdf', 'image/jpeg', 'image/png'],
+      types: statements
+        ? [
+          'application/pdf',
+          'text/csv',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]
+        : pdfOnly ? ['application/pdf'] : ['application/pdf', 'image/jpeg', 'image/png'],
       multiple: false,
       readData: true,
     })

@@ -491,28 +491,39 @@ export async function addCommissionTransaction(data = {}) {
     previousPct: data.previousPct === undefined || data.previousPct === '' ? null : Number(data.previousPct),
     newPct: data.newPct === undefined || data.newPct === '' ? null : Number(data.newPct),
     sourceFileName: data.sourceFileName || '',
+    sourceFileHash: data.sourceFileHash || '',
+    rowHash: data.rowHash || '',
+    matchScore: data.matchScore === undefined || data.matchScore === '' ? null : Number(data.matchScore),
+    grossCommission: data.grossCommission === undefined || data.grossCommission === '' ? null : Number(data.grossCommission),
+    expectedPct: data.expectedPct === undefined || data.expectedPct === '' ? null : Number(data.expectedPct),
+    receivedPct: data.receivedPct === undefined || data.receivedPct === '' ? null : Number(data.receivedPct),
+    varianceAccepted: Boolean(data.varianceAccepted),
+    flagged: Boolean(data.flagged),
+    batchId: data.batchId || '',
     structureUpdatedAt: data.structureUpdatedAt || '',
     structureUpdatedBy: data.structureUpdatedBy || data.updatedByEmail || data.createdByEmail || '',
   })
   if (!payload.postingKey) return addFoundationDoc(COMMISSION_TRANSACTIONS, payload)
 
   const transactionRef = doc(db, COMMISSION_TRANSACTIONS, payload.postingKey)
-  // The posting-key shape has changed twice, and rows already in the ledger keep
-  // whichever id was current when they were posted. Every historical shape has to
-  // be checked or re-uploading an old statement posts the whole thing again.
   const legacyRefs = [...new Set((data.legacyPostingKeys || []).map(k => String(k || '').trim()))]
     .filter(k => k && k !== payload.postingKey)
     .map(k => doc(db, COMMISSION_TRANSACTIONS, k))
   await runTransaction(db, async transaction => {
     const existing = await transaction.get(transactionRef)
     const legacy = await Promise.all(legacyRefs.map(ref => transaction.get(ref)))
-    if (existing.exists() || legacy.some(snapshot => snapshot.exists())) {
+    const already = existing.exists() || legacy.some(snapshot => snapshot.exists())
+    if (already && !data.forcePost) {
       const error = new Error('This commission row has already been posted.')
       error.code = 'commission/duplicate-post'
       throw error
     }
-    transaction.set(transactionRef, {
+    const writeRef = already && data.forcePost
+      ? doc(db, COMMISSION_TRANSACTIONS, `${payload.postingKey}_ovr_${Date.now()}`)
+      : transactionRef
+    transaction.set(writeRef, {
       ...payload,
+      postingKey: writeRef.id,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       postedAt: serverTimestamp(),
