@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { BUSINESS } from '../utils/legal'
+import { BUSINESS, phoneTel } from '../utils/legal'
 
 const SECTIONS = [
   { id: 'privacy', label: 'Privacy' },
@@ -11,9 +11,12 @@ export default function LegalPage({ section = 'privacy' }) {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-4">
-          <Link to="/login" className="text-sm font-bold text-teal-800">Gohil Investments</Link>
-          <nav className="flex gap-4 text-sm font-semibold text-slate-600">
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-4">
+          <Link to="/dashboard" className="flex min-w-0 items-center gap-2 text-sm font-bold text-teal-800">
+            <img src="/g1.jpg" alt="" className="h-8 w-8 rounded-md object-cover" />
+            Gohil Investments
+          </Link>
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 text-sm font-semibold text-slate-600" aria-label="Legal">
             {SECTIONS.map(s => (
               <Link key={s.id} to={`/${s.id}`} className={section === s.id ? 'text-teal-800' : ''}>{s.label}</Link>
             ))}
@@ -25,6 +28,9 @@ export default function LegalPage({ section = 'privacy' }) {
         {section === 'terms' && <Terms />}
         {section === 'dmca' && <Dmca />}
       </main>
+      <footer className="border-t border-slate-200 px-4 py-4 text-center text-xs text-slate-500">
+        © {new Date().getFullYear()} {BUSINESS.name}
+      </footer>
     </div>
   )
 }
@@ -105,8 +111,16 @@ function Address() {
       {BUSINESS.name}<br />
       {BUSINESS.line}<br />
       {BUSINESS.city}<br />
-      {BUSINESS.phones.map(p => <span key={p}>{p}<br /></span>)}
-      {BUSINESS.email}
+      {BUSINESS.phones.map(label => {
+        const href = phoneTel(label)
+        return (
+          <span key={label}>
+            {href ? <a href={href} className="underline-offset-2 hover:underline">{label}</a> : label}
+            <br />
+          </span>
+        )
+      })}
+      <a href={`mailto:${BUSINESS.email}`} className="underline-offset-2 hover:underline">{BUSINESS.email}</a>
     </address>
   )
 }

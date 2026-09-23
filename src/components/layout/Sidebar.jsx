@@ -98,15 +98,15 @@ export default function Sidebar({ mobile, onClose }) {
   return (
     <aside className="app-sidebar flex h-full w-72 flex-col">
       <div className="border-b border-slate-200 px-5 py-5 dark:border-white/10">
-        <div className="flex items-center gap-3">
+        <NavLink to="/dashboard" onClick={closeIfMobile} className="flex items-center gap-3 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-teal-600" aria-label="Gohil Investments home">
           <div className="brand-mark">
-            <img src="/g1.jpg" alt="Gohil Investments" className="h-full w-full object-cover" />
+            <img src="/g1.jpg" alt="" className="h-full w-full object-cover" />
           </div>
           <div className="min-w-0">
             <p className="truncate text-[15px] font-bold text-slate-950 dark:text-white">Gohil Investments</p>
             <p className="truncate text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Insurance operations</p>
           </div>
-        </div>
+        </NavLink>
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">

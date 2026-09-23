@@ -5,6 +5,7 @@ import {
   isMarketingAllowed,
   blocksGoogleFontCdn,
   blocksSessionReplay,
+  phoneTel,
 } from './legal.js'
 
 describe('legal identity', () => {
@@ -12,6 +13,8 @@ describe('legal identity', () => {
     expect(BUSINESS.city).toMatch(/Bhavnagar/)
     expect(BUSINESS.dmcaAgent).toMatch(/Gohil/)
     expect(BUSINESS.email).toContain('@')
+    expect(phoneTel(BUSINESS.phones[0])).toBe('tel:+917698997894')
+    expect(phoneTel('not a number')).toBe('')
     expect(MARKETING_OPT_OUT_LINE).toMatch(/STOP/)
     expect(MARKETING_OPT_OUT_LINE).toMatch(/Bhavnagar/)
   })

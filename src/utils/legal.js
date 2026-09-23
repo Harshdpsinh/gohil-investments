@@ -16,6 +16,13 @@ export const BUSINESS = {
 export const MARKETING_OPT_OUT_LINE =
   `Reply STOP to opt out of greetings. ${BUSINESS.name}, ${BUSINESS.city}. ${BUSINESS.email}`
 
+/** Last 10 digits of a labelled phone line, for tel: links. */
+export function phoneTel(label) {
+  const digits = String(label || '').replace(/\D/g, '')
+  const local = digits.length > 10 ? digits.slice(-10) : digits
+  return local.length >= 10 ? `tel:+91${local}` : ''
+}
+
 export function isMarketingAllowed(client) {
   return !client?.marketingOptOut
 }
