@@ -24,6 +24,7 @@ import RenewalPipelinePage   from './pages/RenewalPipelinePage'
 import CrossSellPage         from './pages/CrossSellPage'
 import WishesPage            from './pages/WishesPage'
 import PremiumCalendarPage   from './pages/PremiumCalendarPage'
+import NotFoundPage           from './pages/NotFoundPage'
 import BootScreen            from './components/ui/BootScreen'
 
 class RouteErrorBoundary extends Component {
@@ -111,7 +112,7 @@ export default function App() {
                 <Route path="/calendar"            element={<PremiumCalendarPage />} />
                 <Route path="/admin-users"         element={<AdminUsersPage />} />
                 <Route path="/backup"              element={<BackupPage />} />
-                <Route path="*"                    element={<Navigate to="/dashboard" replace />} />
+                <Route path="*"                    element={<NotFoundPage />} />
               </Routes>
               </RouteErrorBoundary>
             </Layout>

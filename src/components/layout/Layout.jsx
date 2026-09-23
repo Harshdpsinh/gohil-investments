@@ -11,6 +11,7 @@ import CommissionBookBanner from '../commission/CommissionBookBanner'
 import { useAuth } from '../../hooks/useAuth'
 import { recordAgentAttempt } from '../../firebase/agentActionLog'
 import { isForbiddenClickLabel } from '../../utils/forbiddenActions'
+import { BUSINESS, phoneTel } from '../../utils/legal'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -169,11 +170,20 @@ export default function Layout({ children }) {
             {children}
           </div>
           <footer className="border-t border-slate-200 px-4 py-3 text-center text-[11px] text-slate-400 dark:border-slate-800">
-            <NavLink to="/privacy" className="hover:underline">Privacy</NavLink>
-            {' · '}
-            <NavLink to="/terms" className="hover:underline">Terms</NavLink>
-            {' · '}
-            <NavLink to="/dmca" className="hover:underline">DMCA</NavLink>
+            <p>© {new Date().getFullYear()} {BUSINESS.name}</p>
+            <p className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+              {BUSINESS.phones.map(label => (
+                <a key={label} href={phoneTel(label)} className="hover:underline">{label.replace(/^.*—\s*/, '')}</a>
+              ))}
+              <a href={`mailto:${BUSINESS.email}`} className="hover:underline">{BUSINESS.email}</a>
+            </p>
+            <p className="mt-1">
+              <NavLink to="/privacy" className="hover:underline">Privacy</NavLink>
+              {' · '}
+              <NavLink to="/terms" className="hover:underline">Terms</NavLink>
+              {' · '}
+              <NavLink to="/dmca" className="hover:underline">DMCA</NavLink>
+            </p>
           </footer>
           <button
             id="back-to-top"
