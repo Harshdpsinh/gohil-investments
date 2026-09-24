@@ -14,6 +14,7 @@ import AppIcon from '../components/ui/AppIcon'
 import ClientTimeline from '../components/clients/ClientTimeline'
 import PolicyShareBar from '../components/policies/PolicyShareBar'
 import TableHScroll from '../components/ui/TableHScroll'
+import CopyButton from '../components/ui/CopyButton'
 import CommissionHistory from '../components/commission/CommissionHistory'
 import { useCommissionLedger } from '../hooks/useCommissionLedger'
 import toast from 'react-hot-toast'
@@ -174,8 +175,18 @@ export default function ClientProfilePage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{client.name}</h1>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
-              <span className="text-sm text-gray-500 dark:text-gray-400">{client.mobile}</span>
-              {client.email && <span className="text-sm text-gray-500 dark:text-gray-400">{client.email}</span>}
+              {client.mobile && (
+                <span className="inline-flex items-center text-sm text-gray-500 dark:text-gray-400">
+                  <a href={`tel:${String(client.mobile).replace(/[^\d+]/g, '')}`}>{client.mobile}</a>
+                  <CopyButton value={client.mobile} label="Copy mobile" />
+                </span>
+              )}
+              {client.email && (
+                <span className="inline-flex items-center text-sm text-gray-500 dark:text-gray-400">
+                  <a href={`mailto:${client.email}`}>{client.email}</a>
+                  <CopyButton value={client.email} label="Copy email" />
+                </span>
+              )}
               <span className={`text-xs px-2 py-0.5 rounded-full font-semibold
                 ${client.kycStatus === 'Complete' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
                   client.kycStatus === 'In Progress' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200' :
@@ -321,7 +332,10 @@ export default function ClientProfilePage() {
                     const history = policyHistoryStatus(p)
                     return (
                       <tr key={p.id} className={`table-row ${history.label === 'Renewed' ? 'opacity-60' : ''}`}>
-                        <td className="table-cell font-mono text-xs font-semibold">{p.policyNumber}</td>
+                        <td className="table-cell font-mono text-xs font-semibold">
+                          {p.policyNumber}
+                          <CopyButton value={p.policyNumber} label="Copy policy number" />
+                        </td>
                         <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                         <td className="table-cell text-xs">{p.insurer}</td>
                         <td className="table-cell text-xs">{p.planName || '—'}</td>

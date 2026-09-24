@@ -16,10 +16,10 @@ export default function Login() {
   const [resetting, setResetting] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
   const [adult,   setAdult]   = useState(false)
-  const [notice,  setNotice]  = useState({ tone: '', text: '' })
+  const [notice,  setNotice]  = useState({ tone: '', text: '', field: '' })
 
-  const say = (tone, text) => {
-    setNotice({ tone, text })
+  const say = (tone, text, field = '') => {
+    setNotice({ tone, text, field })
     if (tone === 'error') toast.error(text)
     else toast.success(text)
   }
@@ -27,12 +27,23 @@ export default function Login() {
   if (authLoading || user === undefined) return <BootScreen />
   if (user) return <Navigate to="/dashboard" replace />
 
-  const onChange = e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))
+  const onChange = e => {
+    setForm(p => ({ ...p, [e.target.name]: e.target.value }))
+    setNotice(current => (
+      current.field === e.target.name || current.field === 'both' ? { tone: '', text: '', field: '' } : current
+    ))
+  }
+
+  const describedBy = field => (
+    notice.text && (notice.field === field || notice.field === 'both') ? 'login-notice' : undefined
+  )
+  const invalid = field => notice.tone === 'error' && (notice.field === field || notice.field === 'both')
 
   const onSubmit = async e => {
     e.preventDefault()
-    if (!form.email || !form.password) { say('error', 'Please enter email and password'); return }
-    if (!adult) { say('error', 'Confirm you are 18 or older.'); return }
+    if (!form.email) { say('error', 'Please enter your email.', 'email'); return }
+    if (!form.password) { say('error', 'Please enter your password.', 'password'); return }
+    if (!adult) { say('error', 'Confirm you are 18 or older.', 'adult'); return }
     if (Date.now() - lastAttempt < 1500) { say('error', 'Please wait before trying again.'); return }
     lastAttempt = Date.now()
     setLoading(true)
@@ -41,14 +52,14 @@ export default function Login() {
       say('ok', 'Signed in')
       navigate('/dashboard', { replace: true })
     } catch (err) {
-      say('error', err.code === 'auth/invalid-credential' ? 'Invalid email or password.' : err.message)
+      say('error', err.code === 'auth/invalid-credential' ? 'Invalid email or password.' : err.message, 'both')
     } finally { setLoading(false) }
   }
 
   const onForgotPassword = async () => {
     const email = form.email.trim()
     if (!email) {
-      say('error', 'Enter your email address first, then click Forgot password.')
+      say('error', 'Enter your email address first, then click Forgot password.', 'email')
       return
     }
     setResetting(true)
@@ -60,7 +71,7 @@ export default function Login() {
         err.code === 'auth/invalid-email' ? 'Enter a valid email address.' :
         err.code === 'auth/too-many-requests' ? 'Too many reset attempts. Please wait and try again.' :
         'Could not send reset email. Please check the email address and try again.'
-      say('error', msg)
+      say('error', msg, 'email')
     } finally {
       setResetting(false)
     }
@@ -114,8 +125,9 @@ export default function Login() {
 
               <form onSubmit={onSubmit} className="space-y-5" noValidate>
                 <div>
-                  <label className="form-label">Email Address</label>
+                  <label className="form-label" htmlFor="login-email">Email Address</label>
                   <input
+                    id="login-email"
                     name="email"
                     type="email"
                     autoComplete="email"
@@ -124,13 +136,16 @@ export default function Login() {
                     onChange={onChange}
                     placeholder="you@gohilinvestments.com"
                     className="form-input"
+                    aria-invalid={invalid('email') || undefined}
+                    aria-describedby={describedBy('email')}
                   />
                 </div>
 
                 <div>
-                  <label className="form-label">Password</label>
+                  <label className="form-label" htmlFor="login-password">Password</label>
                   <div className="relative">
                     <input
+                      id="login-password"
                       name="password"
                       type={showPw ? 'text' : 'password'}
                       autoComplete="current-password"
@@ -139,11 +154,15 @@ export default function Login() {
                       onChange={onChange}
                       placeholder="Enter password"
                       className="form-input pr-12"
+                      aria-invalid={invalid('password') || undefined}
+                      aria-describedby={describedBy('password')}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPw(v => !v)}
                       className="absolute inset-y-0 right-2 my-auto text-xs font-semibold text-slate-500"
+                      aria-pressed={showPw}
+                      aria-label={showPw ? 'Hide password' : 'Show password'}
                     >
                       {showPw ? 'Hide' : 'Show'}
                     </button>
@@ -152,10 +171,16 @@ export default function Login() {
 
                 <label className="flex items-start gap-2 text-sm text-slate-600">
                   <input
+                    id="login-adult"
                     type="checkbox"
                     className="mt-1"
                     checked={adult}
-                    onChange={e => setAdult(e.target.checked)}
+                    onChange={e => {
+                      setAdult(e.target.checked)
+                      setNotice(current => (current.field === 'adult' ? { tone: '', text: '', field: '' } : current))
+                    }}
+                    aria-invalid={(notice.tone === 'error' && notice.field === 'adult') || undefined}
+                    aria-describedby={notice.field === 'adult' ? 'login-notice' : undefined}
                   />
                   <span>I am 18 or older. This workspace is for staff only — not for children.</span>
                 </label>
@@ -164,7 +189,7 @@ export default function Login() {
                   {loading ? 'Signing in…' : 'Sign in'}
                 </button>
                 {notice.text ? (
-                  <p role={notice.tone === 'error' ? 'alert' : 'status'} className={`text-sm font-semibold ${notice.tone === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>
+                  <p id="login-notice" role={notice.tone === 'error' ? 'alert' : 'status'} className={`text-sm font-semibold ${notice.tone === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>
                     {notice.text}
                   </p>
                 ) : null}
