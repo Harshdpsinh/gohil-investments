@@ -27,6 +27,7 @@ import ImportModal from '../components/policies/ImportModals'
 import PolicyForm from '../components/policies/PolicyForm'
 import PolicyPdfUpload from '../components/policies/PolicyPdfUpload'
 import PolicyShareBar from '../components/policies/PolicyShareBar'
+import CopyButton from '../components/ui/CopyButton'
 import PdfExtractReview from '../components/policies/PdfExtractReview'
 import TableHScroll from '../components/ui/TableHScroll'
 
@@ -636,11 +637,19 @@ export default function PoliciesPage() {
               <button type="button" onClick={() => { setSelected(p); setDupWarning(''); setModal('edit') }} className="gi-policy-card-name text-left">
                 {p.clientName || 'Unnamed client'}
               </button>
-              <p className="gi-policy-card-number">{p.policyNumber || 'No policy number'}</p>
+              <p className="gi-policy-card-number">
+                {p.policyNumber || 'No policy number'}
+                <CopyButton value={p.policyNumber} label="Copy policy number" />
+              </p>
               <div className="gi-policy-card-meta">
                 <span>{p.insurer || 'No insurer'}</span>
                 <span>Due {fmtDate(dueDate)}</span>
-                {phone && <span>{phone}</span>}
+                {phone && (
+                  <span>
+                    <a href={`tel:${String(phone).replace(/[^\d+]/g, '')}`}>{phone}</a>
+                    <CopyButton value={phone} label="Copy phone" />
+                  </span>
+                )}
               </div>
               {isDup && <span className="badge-orange">Possible duplicate</span>}
               <PolicyShareBar policy={p} mobile={phone} onWhatsApp={() => openWhatsApp(p)} />
@@ -695,13 +704,19 @@ export default function PoliciesPage() {
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-semibold">{p.policyNumber}</span>
+                        <CopyButton value={p.policyNumber} label="Copy policy number" />
                         <button type="button" onClick={()=>{setSelected(p);setDupWarning('');setModal('edit')}} className="px-2 py-1 text-xs bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-100">Edit</button>
                         {isAdmin&&<button type="button" onClick={()=>{setSelected(p);setDelOpen(true)}} className="px-2 py-1 text-xs bg-red-50 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded hover:bg-red-100">Del</button>}
                       </div>
                     </td>
                     <td className="table-cell font-medium">{p.clientName||'—'}</td>
                     <td className="table-cell text-xs text-gray-500 dark:text-gray-400">
-                      {phone || <span className="text-gray-300 dark:text-gray-600">—</span>}
+                      {phone
+                        ? <>
+                          <a href={`tel:${String(phone).replace(/[^\d+]/g, '')}`}>{phone}</a>
+                          <CopyButton value={phone} label="Copy phone" />
+                        </>
+                        : <span className="text-gray-300 dark:text-gray-600">—</span>}
                     </td>
                     <td className="table-cell"><span className="badge-blue">{p.policyType}</span></td>
                     <td className="table-cell text-xs">{p.insurer}</td>

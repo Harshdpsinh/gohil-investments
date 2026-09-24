@@ -1,14 +1,51 @@
 // UI MODERNIZATION - logic unchanged
-import { useEffect } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import AppIcon from './AppIcon'
 import { acquireModalLock, releaseModalLock } from '../../utils/modalLock'
 
 export default function Modal({ open, onClose, title, children, size = 'md', subtitle = '', footerContent = null }) {
+  const titleId = useId()
+  const dialogRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
-    if (!open) return
-    const onKey = e => { if (e.key === 'Escape') onClose() }
-    const onNativeClose = () => onClose()
+    if (!open) return undefined
+    const previouslyFocused = document.activeElement
+    const dialog = dialogRef.current
+    const focusable = () => {
+      if (!dialog) return []
+      return [...dialog.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )].filter(el => el !== dialog && !el.hasAttribute('disabled'))
+    }
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus()
+    const onKey = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = focusable()
+      if (!items.length) {
+        event.preventDefault()
+        dialog?.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === dialog || !dialog?.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || active === dialog || !dialog?.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const onNativeClose = () => onCloseRef.current()
     acquireModalLock()
     window.addEventListener('keydown', onKey)
     window.addEventListener('gi:close-modal', onNativeClose)
@@ -16,8 +53,9 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('gi:close-modal', onNativeClose)
       releaseModalLock()
+      if (previouslyFocused instanceof HTMLElement && document.contains(previouslyFocused)) previouslyFocused.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
@@ -41,10 +79,17 @@ export default function Modal({ open, onClose, title, children, size = 'md', sub
       {/* UI-only verification: backdrop click still calls the original onClose prop. */}
       <div className="absolute inset-0 animate-fadeIn bg-slate-950/60" onClick={onClose} />
 
-      <div className={`gi-modal animate-scaleIn relative flex max-h-[90vh] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/10 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)] dark:bg-gradient-to-br dark:from-slate-900 dark:to-[#101827] dark:shadow-[0_24px_80px_rgba(0,0,0,0.62),0_0_0_1px_rgba(255,255,255,0.04)] ${widths[size]} max-w-[calc(100vw-2rem)]`}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={`gi-modal animate-scaleIn relative flex max-h-[90vh] w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200/10 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.28)] outline-none dark:bg-gradient-to-br dark:from-slate-900 dark:to-[#101827] dark:shadow-[0_24px_80px_rgba(0,0,0,0.62),0_0_0_1px_rgba(255,255,255,0.04)] ${widths[size]} max-w-[calc(100vw-2rem)]`}
+      >
         <div className="flex flex-shrink-0 items-start justify-between gap-4 border-b border-slate-200/80 bg-slate-50/80 px-6 py-4 dark:border-slate-400/10 dark:bg-slate-950/30">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-extrabold tracking-tight text-slate-950 dark:text-slate-100">{title}</h2>
+            <h2 id={titleId} className="truncate text-lg font-extrabold tracking-tight text-slate-950 dark:text-slate-100">{title}</h2>
             {subtitle && <p className="mt-1 text-sm leading-5 text-slate-600 dark:text-slate-300">{subtitle}</p>}
           </div>
           {/* UI-only verification: close button remains mapped to the same onClose prop. */}

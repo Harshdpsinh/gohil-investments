@@ -15,6 +15,7 @@ import { BUSINESS, phoneTel } from '../../utils/legal'
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [scrollProgress, setScrollProgress] = useState(0)
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
   useAndroidBack({ sidebarOpen, closeSidebar })
   const { isReader, user } = useAuth()
@@ -151,10 +152,15 @@ export default function Layout({ children }) {
           className="flex-1 overflow-y-auto"
           id="main-scroll"
           onScroll={e => {
+            const el = e.currentTarget
             const btn = document.getElementById('back-to-top')
-            if (btn) btn.classList.toggle('visible', e.target.scrollTop > 300)
+            if (btn) btn.classList.toggle('visible', el.scrollTop > 300)
+            const max = el.scrollHeight - el.clientHeight
+            const next = max > 0 ? el.scrollTop / max : 0
+            setScrollProgress(current => (Math.abs(current - next) < 0.01 ? current : next))
           }}
         >
+          <div className="scroll-progress" style={{ transform: `scaleX(${scrollProgress})` }} aria-hidden="true" />
           <div className="page-enter min-h-full" id="main-content" tabIndex="-1">
             {isReader && (
               <div className="m-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">

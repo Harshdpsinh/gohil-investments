@@ -4,6 +4,7 @@
 // only Firebase, the file reader and toasts are stubbed.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import StatementImportModal from './StatementImportModal'
 import { addClient, addCommissionTransaction, addPolicy, updatePolicy } from '../../firebase/firestore'
 import { upsertCommissionMaster } from '../../firebase/commissionOps'
@@ -287,7 +288,8 @@ describe('StatementImportModal review table', () => {
       'Total Comm': 95,
       'Commission %': 13,
     }])
-    fireEvent.click(screen.getByLabelText(/Also update commission structure/i))
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('checkbox', { name: /Also update commission structure/i }))
     fireEvent.click(screen.getByRole('button', { name: /OK · commission \+ structure/ }))
     await waitFor(() => expect(addCommissionTransaction).toHaveBeenCalled())
     expect(upsertCommissionMaster).toHaveBeenCalled()

@@ -1736,6 +1736,19 @@ textarea:focus {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  .scroll-progress { display: none; }
+}
+
+.scroll-progress {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 2px;
+  width: 100%;
+  margin-bottom: -2px;
+  background: #0f766e;
+  transform-origin: left center;
+  pointer-events: none;
 }
 
 /* ── CRM DNA (visual only) ──────────────────────────────────────────────
