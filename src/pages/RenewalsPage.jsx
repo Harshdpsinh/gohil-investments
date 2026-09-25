@@ -17,6 +17,7 @@ import {
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
 import { addFrequencyInterval, addPolicyCoverageInterval, fmtDate, fmtCurrency, normaliseFrequency, parseAnyDate, toInputDate, daysUntilPolicyDue, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { openWhatsAppLink } from '../services/whatsappService'
+import { UTILITY_PREMIUM_TEMPLATE } from '../utils/whatsappCloud'
 import { KNOWN_INSURERS } from '../utils/insurers'
 import {
   defaultRenewalReminderSettings,
@@ -635,17 +636,20 @@ function ReminderSettingsModal({ open, onClose, draft, setDraft, logs, onSave, s
         </label>
 
         <div>
-          <label className="form-label">Basic Message Prompt</label>
-          <textarea
-            value={draft.prompt}
-            onChange={e => set('prompt', e.target.value)}
-            rows={4}
-            className="form-input"
-            placeholder="Please renew your policy on time..."
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Optional tokens: {'{clientName}'}, {'{policyNumber}'}, {'{insurer}'}, {'{dueDate}'}, {'{premium}'}, {'{days}'}.
+          <p className="form-label">Automatic WhatsApp notice</p>
+          <p className="mb-2 text-xs text-gray-500">
+            Meta only delivers this as a Utility template, so the wording is fixed.
+            Do not add “please renew”, an offer, or a Renew button — Meta will reject it or charge it as marketing.
+            In BHASH / Meta, category Utility, name <span className="font-mono">{UTILITY_PREMIUM_TEMPLATE.name}</span>, language English (<span className="font-mono">{UTILITY_PREMIUM_TEMPLATE.language}</span>, not English US).
           </p>
+          <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+            <p><span className="font-bold">Header.</span> {UTILITY_PREMIUM_TEMPLATE.header}</p>
+            <p className="whitespace-pre-wrap"><span className="font-bold">Body.</span> {UTILITY_PREMIUM_TEMPLATE.body}</p>
+            <p><span className="font-bold">Footer.</span> {UTILITY_PREMIUM_TEMPLATE.footer}</p>
+            <p className="text-xs text-gray-500">
+              Samples, in order: {UTILITY_PREMIUM_TEMPLATE.examples.join(' · ')}
+            </p>
+          </div>
         </div>
 
         <div>

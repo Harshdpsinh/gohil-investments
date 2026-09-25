@@ -8,8 +8,8 @@ import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.j
 import { getDueDate, daysUntilPolicyDue, parseAnyDate } from '../src/utils/dateUtils.js'
 import { isOccasionToday } from '../src/utils/occasions.js'
 import { bearerMatches } from '../src/utils/timingSafe.js'
+import { renderUtilityPremiumNotice } from '../src/utils/whatsappCloud.js'
 
-const DEFAULT_PROMPT = 'Please renew your policy on time to keep your insurance protection active without interruption.'
 const DEFAULT_INTERVALS = [30, 15, 7, 1, 0].map(days => ({ id: `d${days}`, days, enabled: true }))
 const STOP_STATUSES = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
 
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
       }
 
       const detail = buildDetail({ policy, client, dueDate, daysBefore })
-      const message = buildMessage(detail, settings)
+      const message = buildMessage(detail)
       const id = reminderKey(policy.id, dueDate, daysBefore)
       const logRef = db.collection('renewal_reminder_logs').doc(id)
       const claimed = await db.runTransaction(async tx => {
@@ -193,7 +193,7 @@ function normaliseSettings(settings = {}) {
     })
   return {
     enabled: settings.enabled !== false,
-    prompt: String(settings.prompt || DEFAULT_PROMPT).trim(),
+    prompt: String(settings.prompt || '').trim(),
     intervals,
   }
 }
@@ -248,31 +248,8 @@ function buildDetail({ policy, client, dueDate, daysBefore }) {
   }
 }
 
-function buildMessage(detail, settings) {
-  const daysBefore = detail.days
-  const custom = applyTokens(settings.prompt, detail)
-  const timing = daysBefore === 0
-    ? 'is due for renewal today'
-    : `is due for renewal in ${daysBefore} day${daysBefore === 1 ? '' : 's'}`
-
-  return [
-    `Dear ${detail.clientName},`,
-    '',
-    custom,
-    '',
-    `Your ${detail.policyType} policy ${detail.policyNumber} with ${detail.insurer} ${timing}.`,
-    `Renewal date: ${detail.dueDate}`,
-    `Premium: ${detail.premium}`,
-    detail.planName ? `Plan: ${detail.planName}` : '',
-    '',
-    'Kindly contact us to complete the renewal and avoid any break in coverage.',
-    '',
-    'Gohil Investments',
-    'Wealth Management & Insurance Advisory',
-    'Harshdipsinh Gohil - 7698997894',
-    'Pradipsinh Gohil - 9426204547',
-    'Bhavnagar, Gujarat',
-  ].filter(Boolean).join('\n')
+function buildMessage(detail) {
+  return renderUtilityPremiumNotice(detail)
 }
 
 function reminderKey(policyId, dueDate, daysBefore) {
@@ -287,18 +264,6 @@ function formatDate(value) {
 
 function money(value) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(value) || 0)
-}
-
-function applyTokens(prompt, detail) {
-  return String(prompt || '')
-    .replaceAll('{clientName}', detail.clientName)
-    .replaceAll('{policyNumber}', detail.policyNumber)
-    .replaceAll('{policyType}', detail.policyType)
-    .replaceAll('{insurer}', detail.insurer)
-    .replaceAll('{planName}', detail.planName)
-    .replaceAll('{premium}', detail.premium)
-    .replaceAll('{dueDate}', detail.dueDate)
-    .replaceAll('{days}', String(detail.days ?? ''))
 }
 
 function clean(value) {

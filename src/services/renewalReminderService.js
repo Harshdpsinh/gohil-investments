@@ -8,9 +8,11 @@ import {
 } from '../firebase/firestore'
 import { daysUntilPolicyDue, fmtCurrency, fmtDate, getDueDate as getPolicyDueDate } from '../utils/dateUtils'
 import { sendWhatsApp } from '../utils/whatsappSender'
+import { renderUtilityPremiumNotice } from '../utils/whatsappCloud'
 
-export const DEFAULT_RENEWAL_REMINDER_PROMPT =
-  'Please renew your policy on time to keep your insurance protection active without interruption.'
+// Kept so older settings documents still load. It is not inserted into the
+// WhatsApp body: Meta rejects a Utility template that asks the client to renew.
+export const DEFAULT_RENEWAL_REMINDER_PROMPT = ''
 
 export const DEFAULT_RENEWAL_REMINDER_INTERVALS = [
   { id: 'd30', days: 30, enabled: true },
@@ -83,31 +85,8 @@ export function buildRenewalReminderDetail({ policy, client, daysBefore }) {
   }
 }
 
-export function buildRenewalReminderMessage({ policy, client, daysBefore, settings }) {
-  const detail = buildRenewalReminderDetail({ policy, client, daysBefore })
-  const custom = applyReminderTokens(settings?.prompt || DEFAULT_RENEWAL_REMINDER_PROMPT, detail)
-  const timing = daysBefore === 0
-    ? 'is due for renewal today'
-    : `is due for renewal in ${daysBefore} day${daysBefore === 1 ? '' : 's'}`
-
-  return [
-    `Dear ${detail.clientName},`,
-    '',
-    custom,
-    '',
-    `Your ${detail.policyType} policy ${detail.policyNumber} with ${detail.insurer} ${timing}.`,
-    `Renewal date: ${detail.dueDate}`,
-    `Premium: ${detail.premium}`,
-    detail.planName ? `Plan: ${detail.planName}` : '',
-    '',
-    'Kindly contact us to complete the renewal and avoid any break in coverage.',
-    '',
-    'Gohil Investments',
-    'Wealth Management & Insurance Advisory',
-    'Harshdipsinh Gohil - 7698997894',
-    'Pradipsinh Gohil - 9426204547',
-    'Bhavnagar, Gujarat',
-  ].filter(line => line !== '').join('\n')
+export function buildRenewalReminderMessage({ policy, client, daysBefore }) {
+  return renderUtilityPremiumNotice(buildRenewalReminderDetail({ policy, client, daysBefore }))
 }
 
 export async function runRenewalReminderSweep() {
@@ -211,16 +190,4 @@ export function startRenewalReminderAutomation() {
 
 function reminderKey(policyId, dueDate, daysBefore) {
   return `${policyId}_${dueDate}_${daysBefore}`.replace(/[^a-zA-Z0-9_-]/g, '_')
-}
-
-function applyReminderTokens(prompt, detail) {
-  return String(prompt || '')
-    .replaceAll('{clientName}', detail.clientName)
-    .replaceAll('{policyNumber}', detail.policyNumber)
-    .replaceAll('{policyType}', detail.policyType)
-    .replaceAll('{insurer}', detail.insurer)
-    .replaceAll('{planName}', detail.planName)
-    .replaceAll('{premium}', detail.premium)
-    .replaceAll('{dueDate}', detail.dueDate)
-    .replaceAll('{days}', String(detail.days ?? ''))
 }

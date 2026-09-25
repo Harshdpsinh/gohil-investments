@@ -222,11 +222,15 @@ browser.
 
 The rule that shapes the code: a message the business starts, outside a 24-hour window
 opened by the client's own reply, **must** be a Meta-approved template. Free text is
-rejected. So `buildRenewalReminderMessage` is only ever a preview written to
-`renewal_reminder_logs`; what a client actually receives is the template named by
-`WHATSAPP_TEMPLATE_NAME`, filled from `buildRenewalReminderDetail`. Change the template's
-wording in Meta Business Manager, not here — and if you change its **variable count or
-order**, set `WHATSAPP_TEMPLATE_PARAMS` to match or every send fails.
+rejected. The automatic notice is a **Utility** account update (`UTILITY_PREMIUM_TEMPLATE`
+in `whatsappCloud.js`): policy number, due date and premium already on file. It must not
+ask the client to renew, offer anything, or end on a variable — Meta reclassifies that as
+marketing and the send fails or is billed as marketing. `buildRenewalReminderMessage` is
+only the preview written to `renewal_reminder_logs`. What the phone receives is the
+template named by `WHATSAPP_TEMPLATE_NAME` (default `renewal_reminder`), language `en`,
+filled from `buildRenewalReminderDetail` in `DEFAULT_TEMPLATE_PARAMS` order. Submit that
+exact header, body and footer in Meta / BHASH. If the approved template's variable count
+or order differs, set `WHATSAPP_TEMPLATE_PARAMS` to match or every send fails.
 
 - `src/utils/whatsappCloud.js` — pure payload shaping (E.164, parameters, error decoding).
   No firebase, no react, no network. Tested.
