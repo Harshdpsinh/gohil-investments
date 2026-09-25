@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_TEMPLATE_PARAMS,
+  UTILITY_PREMIUM_TEMPLATE,
   buildTemplatePayload,
   describeGraphError,
   graphMessagesUrl,
   messageIdFrom,
   parseTemplateOrder,
+  renderUtilityPremiumNotice,
   templateParameters,
   toE164,
 } from './whatsappCloud'
@@ -32,6 +34,40 @@ describe('toE164', () => {
     'returns empty for unusable input %s',
     value => expect(toE164(value)).toBe('')
   )
+})
+
+describe('utility premium template', () => {
+  it('is a factual account notice Meta can approve as Utility', () => {
+    const { header, body, footer, params, examples } = UTILITY_PREMIUM_TEMPLATE
+    expect(header.length).toBeLessThanOrEqual(60)
+    expect(footer.length).toBeLessThanOrEqual(60)
+    expect(params).toEqual(DEFAULT_TEMPLATE_PARAMS)
+    expect(examples).toHaveLength(params.length)
+    expect(body.startsWith('{{')).toBe(false)
+    expect(body.endsWith('}}')).toBe(false)
+    params.forEach((_, index) => {
+      expect(body).toContain(`{{${index + 1}}}`)
+    })
+    expect(body).not.toMatch(/renew|offer|discount|urgent|limited time|shop now/i)
+    expect(header + footer).not.toMatch(/\{\{/)
+  })
+
+  it('fills the notice the reminder log shows', () => {
+    const text = renderUtilityPremiumNotice({
+      clientName: 'Asha Shah',
+      policyType: 'Health',
+      policyNumber: 'P/1',
+      dueDate: '15 Oct 2026',
+      premium: '₹12,450',
+    })
+    expect(text).toBe(
+      'Premium due notice\n\n'
+      + 'Hello Asha Shah, this is an account update for your existing Health policy P/1. '
+      + 'The due date on file is 15 Oct 2026 and the premium amount is ₹12,450. '
+      + 'This notice is for your records.\n\n'
+      + 'Gohil Investments, Bhavnagar',
+    )
+  })
 })
 
 describe('templateParameters', () => {

@@ -6,6 +6,7 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import {
   DEFAULT_API_VERSION,
+  UTILITY_PREMIUM_TEMPLATE,
   buildTemplatePayload,
   describeGraphError,
   graphMessagesUrl,
@@ -103,7 +104,7 @@ export function getWhatsAppConfig() {
     token,
     phoneNumberId,
     apiVersion: process.env.WHATSAPP_API_VERSION || DEFAULT_API_VERSION,
-    templateName: process.env.WHATSAPP_TEMPLATE_NAME || 'renewal_reminder',
+    templateName: process.env.WHATSAPP_TEMPLATE_NAME || UTILITY_PREMIUM_TEMPLATE.name,
     languageCode: process.env.WHATSAPP_TEMPLATE_LANG || 'en',
     templateOrder: parseTemplateOrder(process.env.WHATSAPP_TEMPLATE_PARAMS),
     countryCode: process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '91',

@@ -87,7 +87,7 @@ These are public in the browser bundle. They identify the Firebase project; they
 | `WHATSAPP_PHONE_NUMBER_ID` | Cloud API phone number id |
 | `WHATSAPP_APP_SECRET` | Verifies inbound webhook signatures |
 | `WHATSAPP_VERIFY_TOKEN` | Same string you type in Meta → Verify token |
-| `WHATSAPP_TEMPLATE_NAME` | Approved renewal template (default `renewal_reminder`) |
+| `WHATSAPP_TEMPLATE_NAME` | Approved utility template (default `renewal_reminder`) |
 | `WHATSAPP_TEMPLATE_LANG` | Template language (default `en`) |
 | `WHATSAPP_TEMPLATE_PARAMS` | Variable order if the Meta template changes |
 | `WHATSAPP_DEFAULT_COUNTRY_CODE` | Default `91` |

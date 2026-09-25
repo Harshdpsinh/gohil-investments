@@ -13,11 +13,37 @@
 // when Meta retires it — a dead version fails every send with HTTP 400.
 export const DEFAULT_API_VERSION = 'v23.0'
 
-// Matches a five-variable body template, which is the shape the renewal
-// template was written against:
-//   "Dear {{1}}, your {{2}} policy {{3}} is due for renewal on {{4}}.
-//    Premium: {{5}}. ..."
-export const DEFAULT_TEMPLATE_PARAMS = ['clientName', 'policyType', 'policyNumber', 'dueDate', 'premium']
+// The daily automation can only deliver a Utility template. Meta keeps that
+// category only when the text is a factual account notice about a policy the
+// client already holds. "Please renew", "avoid a break in cover", offers and
+// a Renew button are treated as marketing and the template is rejected or
+// re-priced. Header and footer are fixed (no variables). The body must not
+// start or end on a variable, and variables must be {{1}}… in order with
+// words between them. Submit this exact text in Meta / BHASH.
+export const UTILITY_PREMIUM_TEMPLATE = {
+  name: 'renewal_reminder',
+  language: 'en',
+  category: 'UTILITY',
+  header: 'Premium due notice',
+  body: 'Hello {{1}}, this is an account update for your existing {{2}} policy {{3}}. The due date on file is {{4}} and the premium amount is {{5}}. This notice is for your records.',
+  footer: 'Gohil Investments, Bhavnagar',
+  params: ['clientName', 'policyType', 'policyNumber', 'dueDate', 'premium'],
+  examples: ['Harshdipsinh Gohil', 'Health', 'P/2026/0002955', '15 Oct 2026', '₹12,450'],
+}
+
+// Same order as UTILITY_PREMIUM_TEMPLATE.params. Override with
+// WHATSAPP_TEMPLATE_PARAMS only if the approved template uses a different order.
+export const DEFAULT_TEMPLATE_PARAMS = UTILITY_PREMIUM_TEMPLATE.params
+
+/** The notice a client actually sees, for the reminder log. Not sent as free text. */
+export function renderUtilityPremiumNotice(detail = {}) {
+  const values = templateParameters(detail, UTILITY_PREMIUM_TEMPLATE.params).map(item => item.text)
+  let body = UTILITY_PREMIUM_TEMPLATE.body
+  values.forEach((value, index) => {
+    body = body.replaceAll(`{{${index + 1}}}`, value)
+  })
+  return `${UTILITY_PREMIUM_TEMPLATE.header}\n\n${body}\n\n${UTILITY_PREMIUM_TEMPLATE.footer}`
+}
 
 /**
  * Cloud API wants E.164 digits with no leading '+'. The client book stores bare
