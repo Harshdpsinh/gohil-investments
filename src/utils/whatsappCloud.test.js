@@ -55,17 +55,24 @@ describe('utility premium template', () => {
   it('fills the notice the reminder log shows', () => {
     const text = renderUtilityPremiumNotice({
       clientName: 'Asha Shah',
-      policyType: 'Health',
+      insurer: 'TATA AIA',
+      policyType: 'Life',
       policyNumber: 'P/1',
       dueDate: '15 Oct 2026',
       premium: '₹12,450',
     })
+    expect(text).toContain('Harshdipsinh Gohil – 7698997894')
+    expect(text).toContain('Pradipsinh Gohil – 9426204547')
     expect(text).toBe(
       'Premium due notice\n\n'
-      + 'Hello Asha Shah, this is an account update for your existing Health policy P/1. '
-      + 'The due date on file is 15 Oct 2026 and the premium amount is ₹12,450. '
-      + 'This notice is for your records.\n\n'
-      + 'Gohil Investments, Bhavnagar',
+      + 'Dear Asha Shah,\n'
+      + 'This is a reminder that your TATA AIA Life policy (Policy No. P/1) has a premium due on 15 Oct 2026.\n'
+      + 'Premium due: ₹12,450.\n'
+      + 'Please make the premium payment by the due date to continue your policy coverage.\n'
+      + 'For assistance with this policy, please contact:\n'
+      + 'Harshdipsinh Gohil – 7698997894\n'
+      + 'Pradipsinh Gohil – 9426204547\n\n'
+      + 'Gohil Investments, Bhavnagar, Gujarat',
     )
   })
 })

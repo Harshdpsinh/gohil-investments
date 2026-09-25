@@ -15,20 +15,30 @@ export const DEFAULT_API_VERSION = 'v23.0'
 
 // The daily automation can only deliver a Utility template. Meta keeps that
 // category only when the text is a factual account notice about a policy the
-// client already holds. "Please renew", "avoid a break in cover", offers and
-// a Renew button are treated as marketing and the template is rejected or
-// re-priced. Header and footer are fixed (no variables). The body must not
-// start or end on a variable, and variables must be {{1}}… in order with
-// words between them. Submit this exact text in Meta / BHASH.
+// client already holds. Asking them to "renew", an offer, or a Renew button
+// is treated as marketing and the template is rejected or re-priced. The two
+// office numbers are fixed text, not variables. Header and footer are fixed.
+// The body must not start or end on a variable, and variables must be {{1}}…
+// in order with words between them. Submit this exact text in Meta / BHASH.
+// {{2}} is the insurer plus policy type (for example "TATA AIA Life"), not a
+// hardcoded company — the book is more than one insurer.
 export const UTILITY_PREMIUM_TEMPLATE = {
   name: 'renewal_reminder',
   language: 'en',
   category: 'UTILITY',
   header: 'Premium due notice',
-  body: 'Hello {{1}}, this is an account update for your existing {{2}} policy {{3}}. The due date on file is {{4}} and the premium amount is {{5}}. This notice is for your records.',
-  footer: 'Gohil Investments, Bhavnagar',
-  params: ['clientName', 'policyType', 'policyNumber', 'dueDate', 'premium'],
-  examples: ['Harshdipsinh Gohil', 'Health', 'P/2026/0002955', '15 Oct 2026', '₹12,450'],
+  body: [
+    'Dear {{1}},',
+    'This is a reminder that your {{2}} policy (Policy No. {{3}}) has a premium due on {{4}}.',
+    'Premium due: {{5}}.',
+    'Please make the premium payment by the due date to continue your policy coverage.',
+    'For assistance with this policy, please contact:',
+    'Harshdipsinh Gohil – 7698997894',
+    'Pradipsinh Gohil – 9426204547',
+  ].join('\n'),
+  footer: 'Gohil Investments, Bhavnagar, Gujarat',
+  params: ['clientName', 'policyLabel', 'policyNumber', 'dueDate', 'premium'],
+  examples: ['Harshdipsinh Gohil', 'TATA AIA Life', 'P/2026/0002955', '15 Oct 2026', '₹12,450'],
 }
 
 // Same order as UTILITY_PREMIUM_TEMPLATE.params. Override with
@@ -63,6 +73,26 @@ export function parseTemplateOrder(raw) {
   return order.length ? order : DEFAULT_TEMPLATE_PARAMS
 }
 
+/** "TATA AIA" + "Life" → "TATA AIA Life". Skips a repeated word and the empty-insurer fallback. */
+export function policyNoticeLabel(detail = {}) {
+  const insurer = String(detail.insurer || '').replace(/\s+/g, ' ').trim()
+  const type = String(detail.policyType || '').replace(/\s+/g, ' ').trim()
+  const namedInsurer = insurer && !/^your insurer$/i.test(insurer) ? insurer : ''
+  if (namedInsurer && type && !namedInsurer.toLowerCase().includes(type.toLowerCase())) {
+    return `${namedInsurer} ${type}`
+  }
+  return namedInsurer || type || 'Insurance'
+}
+
+function parameterText(detail, token) {
+  if (token === 'policyLabel') {
+    const explicit = String(detail.policyLabel ?? '').replace(/\s+/g, ' ').trim()
+    if (explicit) return explicit
+    return policyNoticeLabel(detail)
+  }
+  return String(detail[token] ?? '').replace(/\s+/g, ' ').trim() || '-'
+}
+
 /**
  * Meta rejects a body parameter that is empty, or that contains a newline, a
  * tab, or four-plus consecutive spaces — one bad value fails the whole send, so
@@ -71,7 +101,7 @@ export function parseTemplateOrder(raw) {
 export function templateParameters(detail = {}, order = DEFAULT_TEMPLATE_PARAMS) {
   return order.map(token => ({
     type: 'text',
-    text: String(detail[token] ?? '').replace(/\s+/g, ' ').trim() || '-',
+    text: parameterText(detail, token),
   }))
 }
 
