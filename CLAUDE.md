@@ -228,9 +228,14 @@ ask the client to renew, offer anything, or end on a variable — Meta reclassif
 marketing and the send fails or is billed as marketing. `buildRenewalReminderMessage` is
 only the preview written to `renewal_reminder_logs`. What the phone receives is the
 template named by `WHATSAPP_TEMPLATE_NAME` (default `renewal_reminder`), language `en`,
-filled from `buildRenewalReminderDetail` in `DEFAULT_TEMPLATE_PARAMS` order. Submit that
-exact header, body and footer in Meta / BHASH. If the approved template's variable count
-or order differs, set `WHATSAPP_TEMPLATE_PARAMS` to match or every send fails.
+filled from `buildRenewalReminderDetail` in `DEFAULT_TEMPLATE_PARAMS` order
+(`clientName`, `policyLabel`, `policyNumber`, `dueDate`, `premium`). `policyLabel` is the
+insurer plus the policy type, so a Life policy with TATA AIA reads "TATA AIA Life", not a
+hardcoded company. The body also carries the two office numbers as fixed text:
+Harshdipsinh Gohil 7698997894 and Pradipsinh Gohil 9426204547. Submit that exact header,
+body and footer in Meta / BHASH. If `WHATSAPP_TEMPLATE_PARAMS` is still the old
+`policyType` list, unset it or set `clientName,policyLabel,policyNumber,dueDate,premium`,
+or the insurer name will not fill {{2}}.
 
 - `src/utils/whatsappCloud.js` — pure payload shaping (E.164, parameters, error decoding).
   No firebase, no react, no network. Tested.
