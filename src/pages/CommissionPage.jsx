@@ -20,6 +20,7 @@ import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import CommissionReviewDrawer from '../components/commission/CommissionReviewDrawer'
 import CommissionTracker from '../components/commission/CommissionTracker'
+import CommissionAudit from '../components/commission/CommissionAudit'
 import { CommissionBatches, CommissionLedgerTable } from '../components/commission/CommissionHistory'
 import { latestCommissionPosting } from '../utils/commissionReview'
 import toast from 'react-hot-toast'
@@ -495,6 +496,7 @@ export default function CommissionPage() {
         {[
           ['tracker', 'Month tracker'],
           ['chase', 'Chase / recon'],
+          ['audit', 'Statement audit'],
           ['posted', 'Posted ledger'],
           ['rates', 'Rates on file'],
         ].map(([key, label]) => (
@@ -716,6 +718,10 @@ export default function CommissionPage() {
           </div>
         )}
       </div>
+      )}
+
+      {workspace === 'audit' && (
+        <CommissionAudit policies={policies} transactions={transactions} clients={clients} />
       )}
 
       {workspace === 'posted' && (
