@@ -496,7 +496,7 @@ export default function CommissionPage() {
       <div className="commission-segmented">
         {[
           ['tracker', 'Month tracker'],
-          ['entry', 'Enter by company'],
+          ['entry', 'Enter commission'],
           ['chase', 'Chase / recon'],
           ['audit', 'Statement audit'],
           ['posted', 'Posted ledger'],

@@ -136,6 +136,7 @@ export default function CommissionBookBanner() {
         open={manualOpen || !!editingTxn}
         existing={editingTxn}
         policies={policies}
+        transactions={transactions}
         user={user}
         onClose={() => { setManualOpen(false); setEditingTxn(null) }}
         onPosted={reload}
