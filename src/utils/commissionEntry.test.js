@@ -60,6 +60,17 @@ describe('commissionEntry', () => {
     expect(totals).toEqual({ policies: 2, premium: 30000, commission: 2500, pct: 8.33 })
   })
 
+  it('narrows a month to one client without dropping the rest of that client’s policies', () => {
+    const other = { ...star, id: 'p9', policyNumber: 'S9', clientName: 'Mehul', insurer: 'LIC', policyType: 'Life' }
+    const rows = entryRows({
+      policies: [star, other],
+      transactions: [],
+      month: '2026-07',
+      client: 'asha',
+    })
+    expect(rows.map(r => r.policyNumber)).toEqual(['S1'])
+  })
+
   it('recalculates the percentage when the rupee amount is typed', () => {
     expect(draftFromAmount(10000, '1250')).toMatchObject({ pct: '12.5', error: '' })
     expect(draftFromAmount(10000, '-1').error).toMatch(/negative/)

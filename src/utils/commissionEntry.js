@@ -65,9 +65,11 @@ export function entryRows({
   insurerKey = '',
   month = '',
   query = '',
+  client = '',
 } = {}) {
   const monthKey = String(month || '').slice(0, 7)
   const q = String(query || '').trim().toLowerCase()
+  const clientQ = String(client || '').trim().toLowerCase()
   const receivedByPolicy = new Map()
   for (const txn of transactions) {
     if (!txn?.policyId) continue
@@ -85,6 +87,11 @@ export function entryRows({
     const hint = { policyType: policy.policyType }
     const key = groupKey(policy.insurer, hint) || canonicalInsurer(policy.insurer, hint)
     if (insurerKey && key !== insurerKey) continue
+    if (clientQ) {
+      const who = [policy.clientName, policy.clientMobile, policy.clientId]
+        .map(v => String(v || '').toLowerCase()).join(' ')
+      if (!who.includes(clientQ)) continue
+    }
     const hay = [policy.policyNumber, policy.clientName, policy.planName, policy.clientMobile]
       .map(v => String(v || '').toLowerCase()).join(' ')
     if (q && !hay.includes(q)) continue

@@ -1,40 +1,69 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import Modal from '../ui/Modal'
-import { addManualCommission, updateCommissionTransaction } from '../../firebase/commissionOps'
+import CommissionEntrySheet from './CommissionEntrySheet'
+import { updateCommissionTransaction } from '../../firebase/commissionOps'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import { validateCommissionAmount } from '../../utils/commissionTracker'
+import { draftFromAmount, draftFromPct, pctFromAmount } from '../../utils/commissionEntry'
 import { fmtCurrency } from '../../utils/dateUtils'
 
 export default function ManualCommissionModal({
-  open, onClose, policies = [], user, onPosted, existing = null,
+  open, onClose, policies = [], transactions = [], user, onPosted, existing = null,
 }) {
-  const [policyId, setPolicyId] = useState(existing?.policyId || '')
+  const editing = Boolean(existing?.id)
   const [amount, setAmount] = useState(existing ? String(existing.netReceived ?? existing.receivedCommission ?? '') : '')
+  const [pct, setPct] = useState(() => {
+    const premium = Number(policies.find(p => p.id === existing?.policyId)?.premium) || Number(existing?.premium) || 0
+    const received = existing?.netReceived ?? existing?.receivedCommission
+    return premium && received != null && received !== '' ? String(pctFromAmount(premium, received)) : ''
+  })
   const [tds, setTds] = useState(existing ? String(existing.tds || '') : '')
   const [gst, setGst] = useState(existing ? String(existing.gst || '') : '')
   const [payoutMonth, setPayoutMonth] = useState(existing?.payoutMonth || '')
   const [payoutDate, setPayoutDate] = useState(existing?.payoutDate || '')
   const [remarks, setRemarks] = useState(existing?.remarks || '')
   const [busy, setBusy] = useState(false)
-  const [query, setQuery] = useState('')
 
   const policy = useMemo(
-    () => policies.find(p => p.id === (existing?.policyId || policyId)) || null,
-    [policies, policyId, existing]
+    () => policies.find(p => p.id === existing?.policyId) || null,
+    [policies, existing]
   )
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return policies.slice(0, 8)
-    return policies.filter(p =>
-      (p.policyNumber || '').toLowerCase().includes(q)
-      || (p.clientName || '').toLowerCase().includes(q)
-      || (p.insurer || '').toLowerCase().includes(q)
-    ).slice(0, 12)
-  }, [policies, query])
 
   const expected = policy ? expectedCommission(policy) : 0
-  const editing = Boolean(existing?.id)
+  const premium = Number(policy?.premium) || 0
+
+  const onEditPct = value => {
+    setPct(value)
+    const next = draftFromPct(premium, value)
+    if (next.amount) setAmount(next.amount)
+  }
+
+  const onEditAmount = value => {
+    setAmount(value)
+    const next = draftFromAmount(premium, value)
+    if (!next.error) setPct(next.pct)
+  }
+
+  if (!editing) {
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        size="xl"
+        title="Add commission by hand"
+        subtitle="Pick the month, then a company or a client. The rate on the policy fills the amount. Change % or ₹ and the other follows."
+      >
+        <CommissionEntrySheet
+          plain
+          policies={policies}
+          transactions={transactions}
+          user={user}
+          onPosted={onPosted}
+        />
+      </Modal>
+    )
+  }
 
   const save = async () => {
     const amountError = validateCommissionAmount(amount)
@@ -44,33 +73,20 @@ export default function ManualCommissionModal({
     }
     setBusy(true)
     try {
-      if (editing) {
-        const received = Number(amount)
-        if (!Number.isFinite(received)) throw new Error('Commission amount is required.')
-        await updateCommissionTransaction(existing.id, {
-          receivedCommission: received,
-          netReceived: received,
-          tds: Number(tds) || 0,
-          gst: Number(gst) || 0,
-          expectedCommission: expected,
-          difference: received - expected,
-          payoutMonth: payoutMonth || payoutDate.slice(0, 7),
-          payoutDate,
-          remarks,
-        })
-        toast.success('Commission updated.')
-      } else {
-        if (!policy) throw new Error('Pick a policy first.')
-        await addManualCommission(policy, {
-          amount: Number(amount),
-          tds: Number(tds) || 0,
-          gst: Number(gst) || 0,
-          payoutMonth: payoutMonth || payoutDate.slice(0, 7),
-          payoutDate,
-          remarks,
-        }, { user })
-        toast.success('Commission saved.')
-      }
+      const received = Number(amount)
+      if (!Number.isFinite(received)) throw new Error('Commission amount is required.')
+      await updateCommissionTransaction(existing.id, {
+        receivedCommission: received,
+        netReceived: received,
+        tds: Number(tds) || 0,
+        gst: Number(gst) || 0,
+        expectedCommission: expected,
+        difference: received - expected,
+        payoutMonth: payoutMonth || payoutDate.slice(0, 7),
+        payoutDate,
+        remarks,
+      })
+      toast.success('Commission updated.')
       onPosted?.()
       onClose()
     } catch (err) {
@@ -84,53 +100,33 @@ export default function ManualCommissionModal({
     <Modal
       open={open}
       onClose={busy ? () => {} : onClose}
-      title={editing ? 'Edit commission' : 'Add commission by hand'}
-      subtitle={editing
-        ? 'Change the posted amount after a statement was uploaded.'
-        : 'Use this when there is no statement file. Future policies stay unpaid until you do this or import a file.'}
+      title="Edit commission"
+      subtitle="Change the posted amount. The percentage follows the rupees, and the rupees follow the percentage."
       footerContent={
         <>
           <button className="btn-secondary" disabled={busy} onClick={onClose}>Cancel</button>
           <button className="btn-primary" disabled={busy} onClick={save}>
-            {busy ? 'Saving…' : editing ? 'Save changes' : 'Save commission'}
+            {busy ? 'Saving…' : 'Save changes'}
           </button>
         </>
       }
     >
       <div className="space-y-3">
-        {!editing && (
-          <label className="block">
-            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Policy</span>
-            <input
-              className="form-input mt-1"
-              placeholder="Search policy no, client, insurer…"
-              value={policy ? `${policy.policyNumber} · ${policy.clientName}` : query}
-              onChange={e => { setPolicyId(''); setQuery(e.target.value) }}
-            />
-            {!policy && (
-              <ul className="mt-1 max-h-40 overflow-auto rounded-lg border border-slate-200 text-xs dark:border-slate-700">
-                {matches.map(p => (
-                  <li key={p.id}>
-                    <button type="button" className="block w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800" onClick={() => { setPolicyId(p.id); setQuery('') }}>
-                      <span className="font-mono font-semibold">{p.policyNumber}</span>
-                      <span className="text-gray-500"> · {p.clientName} · {p.insurer}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </label>
-        )}
         {policy && (
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs dark:bg-slate-800">
-            Expected from the rate on file: <strong>{fmtCurrency(expected)}</strong>
-            {' · '}{policy.insurer} · {policy.policyType}
+            <span className="font-mono font-semibold">{policy.policyNumber}</span>
+            {' · '}{policy.clientName}
+            {' · '}Expected from the rate on file: <strong>{fmtCurrency(expected)}</strong>
           </p>
         )}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
+            <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Commission %</span>
+            <input className="form-input mt-1" inputMode="decimal" value={pct} onChange={e => onEditPct(e.target.value)} />
+          </label>
+          <label className="block">
             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Received ₹ *</span>
-            <input className="form-input mt-1" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} />
+            <input className="form-input mt-1" inputMode="decimal" value={amount} onChange={e => onEditAmount(e.target.value)} />
           </label>
           <label className="block">
             <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Payout month *</span>
