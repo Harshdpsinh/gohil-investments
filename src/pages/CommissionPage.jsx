@@ -20,6 +20,7 @@ import SearchBar from '../components/ui/SearchBar'
 import StatementImportModal from '../components/commission/StatementImportModal'
 import CommissionReviewDrawer from '../components/commission/CommissionReviewDrawer'
 import CommissionTracker from '../components/commission/CommissionTracker'
+import CommissionEntrySheet from '../components/commission/CommissionEntrySheet'
 import CommissionAudit from '../components/commission/CommissionAudit'
 import { CommissionBatches, CommissionLedgerTable } from '../components/commission/CommissionHistory'
 import { latestCommissionPosting } from '../utils/commissionReview'
@@ -495,6 +496,7 @@ export default function CommissionPage() {
       <div className="commission-segmented">
         {[
           ['tracker', 'Month tracker'],
+          ['entry', 'Enter by company'],
           ['chase', 'Chase / recon'],
           ['audit', 'Statement audit'],
           ['posted', 'Posted ledger'],
@@ -509,6 +511,15 @@ export default function CommissionPage() {
           policies={policies}
           transactions={transactions}
           clients={clients}
+          user={user}
+          onPosted={reloadTransactions}
+        />
+      )}
+
+      {workspace === 'entry' && (
+        <CommissionEntrySheet
+          policies={policies}
+          transactions={transactions}
           user={user}
           onPosted={reloadTransactions}
         />
