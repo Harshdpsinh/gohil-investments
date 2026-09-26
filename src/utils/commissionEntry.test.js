@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  amountFromPct, bookedPct, draftFromAmount, entryRows, entryTotals, insurerChoices, pctFromAmount,
+  amountFromPct, bookedPct, draftFromAmount, dueInMonth, entryRows, entryTotals, insurerChoices, pctFromAmount,
 } from './commissionEntry'
 
 const star = {
@@ -28,12 +28,35 @@ describe('commissionEntry', () => {
     expect(pctFromAmount(20000, 1000)).toBe(5)
   })
 
+  it('lists a yearly policy on its start month and its end month only', () => {
+    expect(dueInMonth(star, '2026-04')).toBe(true)
+    expect(dueInMonth(star, '2027-03')).toBe(true)
+    expect(dueInMonth({ ...star, startDate: '15/04/2026', expiryDate: '14/04/2027' }, '2026-07')).toBe(false)
+    expect(dueInMonth({ ...star, startDate: '15/04/2026', expiryDate: '14/04/2027' }, '2027-04')).toBe(true)
+    expect(dueInMonth({ ...star, status: 'Renewed-Out' }, '2026-04')).toBe(false)
+  })
+
+  it('lists installment policies on each premium month between start and end', () => {
+    const monthly = { ...star, frequency: 'Monthly' }
+    expect(dueInMonth(monthly, '2026-07')).toBe(true)
+    expect(dueInMonth(monthly, '2027-04')).toBe(false)
+    const quarterly = { ...star, frequency: 'Quarterly' }
+    expect(dueInMonth(quarterly, '2026-07')).toBe(true)
+    expect(dueInMonth(quarterly, '2026-05')).toBe(false)
+  })
+
+  it('uses the life anniversary when there is no end date', () => {
+    expect(dueInMonth(lic, '2026-01')).toBe(true)
+    expect(dueInMonth(lic, '2026-07')).toBe(false)
+    expect(dueInMonth({ ...lic, nextPremiumDue: '2026-08-12' }, '2026-08')).toBe(true)
+  })
+
   it('lists only the chosen company and month, and marks what is already paid', () => {
     const rows = entryRows({
       policies: [star, lic, { ...star, id: 'p4', startDate: '2026-09-01', policyNumber: 'FUTURE' }],
-      transactions: [{ policyId: 'p1', payoutMonth: '2026-07', receivedCommission: 1500 }],
+      transactions: [{ policyId: 'p1', payoutMonth: '2026-04', receivedCommission: 1500 }],
       insurerKey: insurerChoices([star])[0].key,
-      month: '2026-07',
+      month: '2026-04',
     })
     expect(rows.map(r => r.policyNumber)).toEqual(['S1'])
     expect(rows[0].received).toBe(true)
@@ -45,7 +68,7 @@ describe('commissionEntry', () => {
       policies: [star],
       transactions: [{ policyId: 'p1', payoutMonth: '2026-06', receivedCommission: 1500 }],
       insurerKey: insurerChoices([star])[0].key,
-      month: '2026-07',
+      month: '2026-04',
     })
     expect(rows[0].received).toBe(false)
     expect(rows[0].bookedPct).toBe(15)
@@ -65,7 +88,7 @@ describe('commissionEntry', () => {
     const rows = entryRows({
       policies: [star, other],
       transactions: [],
-      month: '2026-07',
+      month: '2026-04',
       client: 'asha',
     })
     expect(rows.map(r => r.policyNumber)).toEqual(['S1'])
