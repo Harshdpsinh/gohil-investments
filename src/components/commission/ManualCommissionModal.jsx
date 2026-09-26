@@ -52,7 +52,7 @@ export default function ManualCommissionModal({
         onClose={onClose}
         size="xl"
         title="Add commission by hand"
-        subtitle="Pick the month, then a company or a client. The rate on the policy fills the amount. Change % or ₹ and the other follows."
+        subtitle="Only policies with a premium in this month, from the start date and end date on the policy. Change % or ₹ and the other follows."
       >
         <CommissionEntrySheet
           plain

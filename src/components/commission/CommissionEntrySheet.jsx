@@ -149,7 +149,7 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
       {!plain && (
         <div>
           <p className="text-sm font-extrabold text-slate-950 dark:text-white">Enter by company, client or month</p>
-          <p className="text-xs text-slate-500">Pick the month, then a company or a client. The rate on the policy fills the amount. Change the % or the ₹ and the other follows.</p>
+          <p className="text-xs text-slate-500">Only policies with a premium in this month: the start date, the end date, or each installment for monthly, quarterly and half-yearly. A yearly policy is not listed in the months in between.</p>
         </div>
       )}
 

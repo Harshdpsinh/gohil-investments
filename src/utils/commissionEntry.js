@@ -2,8 +2,51 @@
 // Pure. Does not post, and does not touch posting keys.
 import { canonicalInsurer, groupKey } from './insurers'
 import { expectedCommission, txnGross } from './commissionReconcile'
+import { frequencyMonths, parseAnyDate } from './dateUtils'
 
 const CLOSED = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
+
+function monthKeyOf(value) {
+  if (!value) return ''
+  const raw = String(value).trim()
+  if (/^\d{4}-\d{2}/.test(raw)) return raw.slice(0, 7)
+  const date = parseAnyDate(value)
+  if (!date) return ''
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function monthIndex(key) {
+  const [year, month] = key.split('-').map(Number)
+  return year * 12 + (month - 1)
+}
+
+/**
+ * A policy belongs to a month only when a premium falls in it.
+ * Yearly: the start month and the end month stored on the policy, not the
+ * months in between. Monthly, quarterly and half-yearly: each installment
+ * from the start date through the end date.
+ */
+export function dueInMonth(policy = {}, month = '') {
+  const status = String(policy.status || '').trim()
+  if (policy.deleted || policy.is_renewed || CLOSED.has(status)) return false
+  const target = String(month || '').slice(0, 7)
+  if (!/^\d{4}-\d{2}$/.test(target)) return false
+
+  const start = monthKeyOf(policy.startDate)
+  const end = monthKeyOf(policy.expiryDate)
+  const storedDue = monthKeyOf(policy.nextPremiumDue)
+  if (storedDue === target) return true
+  if (!start && end === target) return true
+  if (!start) return false
+  if (target < start) return false
+  if (end && target > end) return false
+
+  const step = frequencyMonths(policy.frequency) || 12
+  const delta = monthIndex(target) - monthIndex(start)
+  if (delta % step === 0) return true
+  // The end date is the renewal month even when it is not an anniversary.
+  return Boolean(end) && end === target
+}
 
 export function currentMonthKey(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -45,18 +88,8 @@ export function insurerChoices(policies = []) {
   return [...map.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
-function inForceThatMonth(policy, month) {
-  const status = String(policy.status || '').trim()
-  if (CLOSED.has(status)) return false
-  const start = String(policy.startDate || '').slice(0, 7)
-  const end = String(policy.expiryDate || '').slice(0, 7)
-  if (start && month < start) return false
-  if (end && month > end) return false
-  return true
-}
-
 /**
- * One row per in-force policy of this company for the chosen month.
+ * One row per policy that has a premium in this month.
  * received = a ledger row already exists for that policy in that month.
  */
 export function entryRows({
@@ -83,7 +116,7 @@ export function entryRows({
   const rows = []
   for (const policy of policies) {
     if (!policy?.id || policy.deleted) continue
-    if (!monthKey || !inForceThatMonth(policy, monthKey)) continue
+    if (!monthKey || !dueInMonth(policy, monthKey)) continue
     const hint = { policyType: policy.policyType }
     const key = groupKey(policy.insurer, hint) || canonicalInsurer(policy.insurer, hint)
     if (insurerKey && key !== insurerKey) continue
