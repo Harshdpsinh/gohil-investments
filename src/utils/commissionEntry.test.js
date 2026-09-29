@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  amountFromPct, bookedPct, draftFromAmount, dueInMonth, entryRows, entryTotals, insurerChoices, pctFromAmount,
+  amountFromPct, bookedPct, commissionYears, draftFromAmount, dueInMonth, entryRows, entryTotals,
+  insurerChoices, matchesPolicyLookup, netEntryAmount, pendingByInsurer, pctFromAmount,
 } from './commissionEntry'
 
 const star = {
@@ -92,6 +93,57 @@ describe('commissionEntry', () => {
       client: 'asha',
     })
     expect(rows.map(r => r.policyNumber)).toEqual(['S1'])
+  })
+
+  it('finds every policy that shares the last 4 digits, even outside this month', () => {
+    const other = {
+      ...star, id: 'p8', policyNumber: '9988772955', clientName: 'Rina', startDate: '2025-01-01', expiryDate: '2026-01-01',
+    }
+    expect(matchesPolicyLookup(star, '0001')).toBe(false)
+    expect(matchesPolicyLookup({ policyNumber: '9094162402000926' }, '0926')).toBe(true)
+    const rows = entryRows({
+      policies: [star, other, lic],
+      transactions: [],
+      month: '2026-07',
+      query: '2955',
+    })
+    expect(rows.map(r => r.policyNumber)).toEqual(['9988772955'])
+  })
+
+  it('splits a multi-year advance into one commission a year', () => {
+    const motor = {
+      ...star,
+      id: 'm1',
+      policyType: 'Motor',
+      isMultiYearPolicy: true,
+      coverageTermYears: 3,
+      fyCommission: 15,
+      ryCommission: 10,
+      premium: 12000,
+      startDate: '2024-04-15',
+      expiryDate: '2027-04-14',
+    }
+    const years = commissionYears(motor)
+    expect(years.map(y => y.payoutMonth)).toEqual(['2024-04', '2025-04', '2026-04'])
+    expect(years[0].amount).toBe(1800)
+    expect(years[1].pct).toBe(10)
+    expect(years[1].amount).toBe(1200)
+    const rows = entryRows({ policies: [motor], transactions: [], month: '2025-04' })
+    expect(rows[0].year).toBe(2)
+    expect(rows[0].expected).toBe(1200)
+    expect(rows[0].received).toBe(false)
+  })
+
+  it('keeps a monthly plus or minus in the total and groups what is still pending', () => {
+    expect(netEntryAmount(1500, -80)).toBe(1420)
+    const totals = entryTotals([
+      { premium: 10000, amount: 1500, adjust: -80, include: true },
+      { premium: 5000, amount: -200, include: true },
+    ])
+    expect(totals.commission).toBe(1220)
+    const rows = entryRows({ policies: [star, lic], transactions: [], month: '2026-04' })
+    const pending = pendingByInsurer(rows)
+    expect(pending.find(item => item.name.includes('Star'))?.count).toBe(1)
   })
 
   it('recalculates the percentage when the rupee amount is typed', () => {

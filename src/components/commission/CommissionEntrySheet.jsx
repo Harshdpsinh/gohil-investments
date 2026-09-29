@@ -4,9 +4,9 @@ import TableHScroll from '../ui/TableHScroll'
 import { fmtCurrency } from '../../utils/dateUtils'
 import { exportToExcel } from '../../utils/exportUtils'
 import { addManualCommission } from '../../firebase/commissionOps'
-import { validateCommissionAmount } from '../../utils/commissionTracker'
 import {
   currentMonthKey, draftFromAmount, draftFromPct, entryRows, entryTotals, insurerChoices,
+  netEntryAmount, pendingByInsurer, validateSignedAmount,
 } from '../../utils/commissionEntry'
 
 const UNPAID_COLS = [
@@ -39,6 +39,10 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
   )
   const unpaid = rows.filter(r => !r.received)
   const paid = rows.filter(r => r.received)
+  const pending = useMemo(
+    () => pendingByInsurer(entryRows({ policies, transactions, month })),
+    [policies, transactions, month],
+  )
   const allOn = unpaid.length > 0 && unpaid.every(row => drafts[row.policyId]?.include)
 
   useEffect(() => {
@@ -46,7 +50,13 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
     const next = {}
     for (const row of list) {
       const seeded = draftFromPct(row.premium, row.bookedPct)
-      next[row.policyId] = { ...seeded, include: Number(seeded.amount) > 0 }
+      next[row.policyId] = {
+        ...seeded,
+        adjust: '',
+        year: row.year,
+        payoutMonth: row.payoutMonth,
+        include: Number(seeded.amount) !== 0,
+      }
     }
     setDrafts(next)
   }, [insurerKey, month, query, client, transactions, policies])
@@ -54,6 +64,7 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
   const totals = entryTotals(unpaid.map(row => ({
     premium: row.premium,
     amount: drafts[row.policyId]?.amount,
+    adjust: drafts[row.policyId]?.adjust,
     include: drafts[row.policyId]?.include,
   })))
 
@@ -66,7 +77,20 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
 
   const onAmount = (row, value) => {
     const seeded = draftFromAmount(row.premium, value)
-    patch(row.policyId, { amount: value, pct: seeded.error ? drafts[row.policyId]?.pct || '' : seeded.pct, include: !seeded.error && Number(value) > 0 })
+    patch(row.policyId, { amount: value, pct: seeded.error ? drafts[row.policyId]?.pct || '' : seeded.pct, include: !seeded.error && Number(value) !== 0 })
+  }
+
+  const onYear = (row, year) => {
+    const slice = (row.slices || []).find(item => item.year === Number(year))
+    if (!slice) return
+    const seeded = draftFromPct(slice.premium, slice.pct)
+    patch(row.policyId, {
+      year: slice.year,
+      payoutMonth: slice.payoutMonth,
+      pct: slice.pct ? String(slice.pct) : '',
+      amount: seeded.amount,
+      include: !slice.received && Number(seeded.amount) !== 0,
+    })
   }
 
   const applyBulk = () => {
@@ -79,7 +103,12 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
       const next = { ...prev }
       for (const row of unpaid) {
         const seeded = draftFromPct(row.premium, rate)
-        next[row.policyId] = { ...seeded, include: Number(seeded.amount) > 0 }
+        const current = next[row.policyId] || {}
+        next[row.policyId] = {
+          ...current,
+          ...seeded,
+          include: Number(seeded.amount) !== 0,
+        }
       }
       return next
     })
@@ -90,30 +119,43 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
       const next = { ...prev }
       for (const row of unpaid) {
         const current = next[row.policyId] || { pct: '', amount: '', include: false }
-        next[row.policyId] = { ...current, include: !allOn && Number(current.amount) > 0 }
+        next[row.policyId] = {
+          ...current,
+          include: !allOn && netEntryAmount(current.amount, current.adjust) !== 0,
+        }
       }
       return next
     })
   }
 
   const save = async () => {
-    const picked = unpaid.filter(row => drafts[row.policyId]?.include && Number(drafts[row.policyId]?.amount) > 0)
+    const picked = unpaid.filter(row => {
+      const draft = drafts[row.policyId]
+      return draft?.include && netEntryAmount(draft.amount, draft.adjust) !== 0
+    })
     if (!picked.length) {
       toast.error('Tick at least one policy with an amount.')
       return
     }
     for (const row of picked) {
-      const err = validateCommissionAmount(drafts[row.policyId].amount)
+      const net = netEntryAmount(drafts[row.policyId].amount, drafts[row.policyId].adjust)
+      const err = validateSignedAmount(net)
       if (err) { toast.error(`${row.policyNumber}: ${err}`); return }
     }
     setBusy(true)
     let saved = 0
     try {
       for (const row of picked) {
+        const draft = drafts[row.policyId]
+        const net = netEntryAmount(draft.amount, draft.adjust)
+        const yearNote = row.years > 1 ? `Year ${draft.year || row.year} of ${row.years}` : ''
+        const adjustNote = Number(draft.adjust) ? `Month +/- ${draft.adjust}` : ''
         await addManualCommission(row.policy, {
-          amount: Number(drafts[row.policyId].amount),
-          payoutMonth: month,
-          remarks: `Manual entry · ${company?.name || row.insurer} · ${month} · ${drafts[row.policyId].pct || 0}%`,
+          amount: net,
+          expectedCommission: row.slices?.find(slice => slice.year === Number(draft.year || row.year))?.amount ?? row.expected,
+          payoutMonth: draft.payoutMonth || row.payoutMonth || month,
+          businessType: Number(draft.year || row.year) > 1 ? 'Renewal' : 'Fresh',
+          remarks: ['Manual entry', company?.name || row.insurer, draft.payoutMonth || month, `${draft.pct || 0}%`, yearNote, adjustNote].filter(Boolean).join(' · '),
         }, { user })
         saved += 1
       }
@@ -149,7 +191,7 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
       {!plain && (
         <div>
           <p className="text-sm font-extrabold text-slate-950 dark:text-white">Enter by company, client or month</p>
-          <p className="text-xs text-slate-500">Only policies with a premium in this month: the start date, the end date, or each installment for monthly, quarterly and half-yearly. A yearly policy is not listed in the months in between.</p>
+          <p className="text-xs text-slate-500">Type the last 4 digits to pick a policy, even if several match. A multi-year advance is entered one year at a time. Use Month +/- when the statement is a little over or short.</p>
         </div>
       )}
 
@@ -171,7 +213,7 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
         </label>
         <label className="block text-xs font-bold text-slate-600 dark:text-slate-300">
           Policy number
-          <input className="form-input mt-1" placeholder="Optional" value={query} onChange={e => setQuery(e.target.value)} />
+          <input className="form-input mt-1" placeholder="Last 4 digits" value={query} onChange={e => setQuery(e.target.value)} />
         </label>
         <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 sm:col-span-2">
           One % for every unpaid row in this list
@@ -181,6 +223,24 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
           </span>
         </label>
       </div>
+
+      {pending.length > 0 && (
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Pending this month, by company</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {pending.map(item => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setInsurerKey(item.key)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${insurerKey === item.key ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950' : 'bg-amber-100 text-amber-950 dark:bg-amber-900/40 dark:text-amber-100'}`}
+              >
+                {item.name} · {item.count} · {fmtCurrency(item.expected)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
@@ -222,13 +282,14 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
               <th className="table-header text-right">Booked %</th>
               <th className="table-header">Commission %</th>
               <th className="table-header">Commission ₹</th>
+              <th className="table-header">Month +/-</th>
             </tr>
           </thead>
           <tbody>
             {unpaid.length === 0 ? (
-              <tr><td className="table-cell text-slate-400" colSpan={6}>No unpaid policies for this month and filter.</td></tr>
+              <tr><td className="table-cell text-slate-400" colSpan={7}>No unpaid policies for this month and filter.</td></tr>
             ) : unpaid.map(row => {
-              const draft = drafts[row.policyId] || { pct: '', amount: '', include: false }
+              const draft = drafts[row.policyId] || { pct: '', amount: '', adjust: '', include: false, year: row.year }
               return (
                 <tr key={row.policyId} className="table-row">
                   <td className="table-cell">
@@ -236,7 +297,21 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
                   </td>
                   <td className="table-cell">
                     <p className="font-mono font-semibold">{row.policyNumber}</p>
-                    <p className="text-[11px] text-slate-500">{row.clientName}{company ? '' : ` · ${row.insurer}`}</p>
+                    <p className="text-[11px] text-slate-500">
+                      Last 4 {row.policyTail || '—'} · {row.clientName}{company ? '' : ` · ${row.insurer}`}
+                    </p>
+                    {row.years > 1 && (
+                      <label className="mt-1 block text-[11px] font-bold text-slate-500">
+                        Year
+                        <select className="form-select mt-1 w-full text-xs" value={draft.year || row.year} onChange={e => onYear(row, e.target.value)}>
+                          {row.slices.map(slice => (
+                            <option key={slice.year} value={slice.year}>
+                              Year {slice.year} of {slice.years} · {slice.payoutMonth}{slice.received ? ' · already in' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                   </td>
                   <td className="table-cell text-right">{fmtCurrency(row.premium)}</td>
                   <td className="table-cell text-right">{row.bookedPct ? `${row.bookedPct}%` : '—'}</td>
@@ -245,6 +320,9 @@ export default function CommissionEntrySheet({ policies = [], transactions = [],
                   </td>
                   <td className="table-cell">
                     <input className="form-input w-28 text-right" inputMode="decimal" aria-label={`Amount ${row.policyNumber}`} value={draft.amount} onChange={e => onAmount(row, e.target.value)} />
+                  </td>
+                  <td className="table-cell">
+                    <input className="form-input w-24 text-right" inputMode="decimal" placeholder="+/-" aria-label={`Adjust ${row.policyNumber}`} value={draft.adjust || ''} onChange={e => patch(row.policyId, { adjust: e.target.value, include: netEntryAmount(draft.amount, e.target.value) !== 0 })} />
                   </td>
                 </tr>
               )
