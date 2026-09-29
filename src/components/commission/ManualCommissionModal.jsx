@@ -52,7 +52,7 @@ export default function ManualCommissionModal({
         onClose={onClose}
         size="xl"
         title="Add commission by hand"
-        subtitle="Only policies with a premium in this month, from the start date and end date on the policy. Change % or ₹ and the other follows."
+        subtitle="Last 4 digits pick the policy. A multi-year advance is saved one year at a time. Month +/- covers a statement that is slightly over or short."
       >
         <CommissionEntrySheet
           plain

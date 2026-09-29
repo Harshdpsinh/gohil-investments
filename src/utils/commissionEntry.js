@@ -1,8 +1,8 @@
 // Insurer + month sheet for typing commission by hand.
 // Pure. Does not post, and does not touch posting keys.
 import { canonicalInsurer, groupKey } from './insurers'
-import { expectedCommission, txnGross } from './commissionReconcile'
-import { frequencyMonths, parseAnyDate } from './dateUtils'
+import { txnGross } from './commissionReconcile'
+import { coverageTermYears, frequencyMonths, isMultiYearPolicy, parseAnyDate } from './dateUtils'
 
 const CLOSED = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
 
@@ -50,6 +50,59 @@ export function dueInMonth(policy = {}, month = '') {
 
 export function currentMonthKey(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+function addMonthsToKey(key, count) {
+  const index = monthIndex(key) + count
+  const year = Math.floor(index / 12)
+  const month = (index % 12) + 1
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
+/** One commission a year. A 3-year advance premium still pays year 1, then year 2, then year 3. */
+export function commissionYears(policy = {}) {
+  const years = isMultiYearPolicy(policy) ? coverageTermYears(policy) : 1
+  const start = monthKeyOf(policy.startDate)
+  const annual = Number(policy.premium) || 0
+  return Array.from({ length: years }, (_, index) => {
+    const year = index + 1
+    const pct = year === 1
+      ? (Number(policy.fyCommission) || 0)
+      : (Number(policy.ryCommission || policy.fyCommission) || 0)
+    return {
+      year,
+      years,
+      payoutMonth: start ? addMonthsToKey(start, index * 12) : '',
+      premium: annual,
+      pct,
+      amount: amountFromPct(annual, pct),
+    }
+  })
+}
+
+export function policyTail(policyNumber) {
+  const digits = String(policyNumber || '').replace(/\D/g, '')
+  return digits.length >= 4 ? digits.slice(-4) : digits
+}
+
+/** Last 4 digits, or any fragment of the policy number, name or mobile. */
+export function matchesPolicyLookup(policy = {}, query = '') {
+  const q = String(query || '').trim().toLowerCase()
+  if (!q) return true
+  const digits = q.replace(/\D/g, '')
+  const policyDigits = String(policy.policyNumber || '').replace(/\D/g, '')
+  if (digits.length >= 4 && policyDigits.includes(digits)) return true
+  const hay = [policy.policyNumber, policy.clientName, policy.planName, policy.clientMobile]
+    .map(v => String(v || '').toLowerCase()).join(' ')
+  return hay.includes(q)
+}
+
+export function validateSignedAmount(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 'Enter a number'
+  if (n === 0) return 'Amount cannot be zero'
+  if (Math.abs(n) > 10_000_000) return 'Amount looks too large — check the figure'
+  return ''
 }
 
 export function bookedPct(policy = {}) {
@@ -106,42 +159,58 @@ export function entryRows({
   const receivedByPolicy = new Map()
   for (const txn of transactions) {
     if (!txn?.policyId) continue
-    if (String(txn.payoutMonth || '').slice(0, 7) !== monthKey) continue
-    const prev = receivedByPolicy.get(txn.policyId) || { amount: 0, count: 0 }
+    const paidMonth = String(txn.payoutMonth || '').slice(0, 7)
+    if (!paidMonth) continue
+    const key = `${txn.policyId}|${paidMonth}`
+    const prev = receivedByPolicy.get(key) || { amount: 0, count: 0 }
     prev.amount += txnGross(txn)
     prev.count += 1
-    receivedByPolicy.set(txn.policyId, prev)
+    receivedByPolicy.set(key, prev)
   }
+
+  const digits = q.replace(/\D/g, '')
+  const openBook = digits.length >= 4 || q.length >= 4
 
   const rows = []
   for (const policy of policies) {
     if (!policy?.id || policy.deleted) continue
-    if (!monthKey || !dueInMonth(policy, monthKey)) continue
+    const status = String(policy.status || '').trim()
+    if (policy.is_renewed || CLOSED.has(status)) continue
+    if (!openBook && (!monthKey || !dueInMonth(policy, monthKey))) continue
     const hint = { policyType: policy.policyType }
-    const key = groupKey(policy.insurer, hint) || canonicalInsurer(policy.insurer, hint)
-    if (insurerKey && key !== insurerKey) continue
+    const insurerId = groupKey(policy.insurer, hint) || canonicalInsurer(policy.insurer, hint)
+    if (insurerKey && insurerId !== insurerKey) continue
     if (clientQ) {
       const who = [policy.clientName, policy.clientMobile, policy.clientId]
         .map(v => String(v || '').toLowerCase()).join(' ')
       if (!who.includes(clientQ)) continue
     }
-    const hay = [policy.policyNumber, policy.clientName, policy.planName, policy.clientMobile]
-      .map(v => String(v || '').toLowerCase()).join(' ')
-    if (q && !hay.includes(q)) continue
-    const hit = receivedByPolicy.get(policy.id)
-    const pct = bookedPct(policy)
-    const premium = Number(policy.premium) || 0
+    if (q && !matchesPolicyLookup(policy, q)) continue
+    const slices = commissionYears(policy).map(slice => ({
+      ...slice,
+      received: Boolean(receivedByPolicy.get(`${policy.id}|${slice.payoutMonth}`)),
+    }))
+    const slice = slices.find(item => item.payoutMonth === monthKey)
+      || slices.find(item => !item.received)
+      || slices[0]
+    const hit = slice?.payoutMonth ? receivedByPolicy.get(`${policy.id}|${slice.payoutMonth}`) : null
     rows.push({
       policyId: policy.id,
       policyNumber: policy.policyNumber || '',
+      policyTail: policyTail(policy.policyNumber),
       clientName: policy.clientName || '',
       clientMobile: policy.clientMobile || '',
       insurer: canonicalInsurer(policy.insurer, hint) || policy.insurer || '',
+      insurerKey: insurerId,
       planName: policy.planName || '',
       policyType: policy.policyType || '',
-      premium,
-      bookedPct: pct,
-      expected: expectedCommission(policy),
+      premium: slice?.premium || Number(policy.premium) || 0,
+      bookedPct: slice?.pct || 0,
+      expected: slice?.amount || 0,
+      year: slice?.year || 1,
+      years: slice?.years || 1,
+      payoutMonth: slice?.payoutMonth || monthKey,
+      slices,
       received: Boolean(hit),
       receivedAmount: hit?.amount || 0,
       policy,
@@ -151,14 +220,34 @@ export function entryRows({
   return rows
 }
 
+export function pendingByInsurer(rows = []) {
+  const map = new Map()
+  for (const row of rows) {
+    if (row.received) continue
+    const key = row.insurerKey || row.insurer || 'unknown'
+    const prev = map.get(key) || { key, name: row.insurer || 'Unknown', count: 0, expected: 0 }
+    prev.count += 1
+    prev.expected += Number(row.expected) || 0
+    map.set(key, prev)
+  }
+  return [...map.values()].sort((a, b) => b.expected - a.expected || a.name.localeCompare(b.name))
+}
+
+export function netEntryAmount(amount, adjust = 0) {
+  const base = Number(amount)
+  const extra = Number(adjust)
+  const net = (Number.isFinite(base) ? base : 0) + (Number.isFinite(extra) ? extra : 0)
+  return Math.round(net * 100) / 100
+}
+
 export function entryTotals(items = []) {
   let policies = 0
   let premium = 0
   let commission = 0
   for (const item of items) {
     if (!item?.include) continue
-    const amount = Number(item.amount) || 0
-    if (amount <= 0) continue
+    const amount = netEntryAmount(item.amount, item.adjust)
+    if (!Number.isFinite(amount) || amount === 0) continue
     policies += 1
     premium += Number(item.premium) || 0
     commission += amount
