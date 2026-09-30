@@ -15,6 +15,16 @@ import {
   templateParameters,
   toE164,
 } from '../src/utils/whatsappCloud.js'
+import {
+  BHASH_AUTH_URL,
+  BHASH_SEND_URL,
+  bhashRequestCode,
+  bhashValues,
+  buildBhashAuthBody,
+  buildBhashSendBody,
+  describeBhashError,
+  parseBhashAuth,
+} from '../src/utils/bhashWhatsapp.js'
 import { lastInboundAtFromRows, windowState } from '../src/utils/whatsappInbox.js'
 import { OWNER_ADMIN_EMAILS as OWNER_ADMIN_EMAIL_LIST } from '../src/utils/roles.js'
 
@@ -94,17 +104,86 @@ function ensureAdminApp() {
  * temporary one from the app dashboard — those expire after 24 hours and every
  * send starts failing with code 190 the next day.
  */
+/**
+ * Bhash is the WhatsApp sender when BHASH_API_KEY is set. The key never ships
+ * to the browser. Access tokens last 10 minutes, so a warm function keeps one
+ * and signs in again when it is close to expiry.
+ */
+export function getBhashConfig() {
+  const apiKey = String(process.env.BHASH_API_KEY || '').trim()
+  const businessCode = String(process.env.BHASH_BUSINESS_CODE || '').trim()
+  const templateCode = String(process.env.BHASH_TEMPLATE_CODE || '').trim()
+  if (!apiKey || !businessCode || !templateCode) return null
+  return { apiKey, businessCode, templateCode }
+}
+
+let bhashSession = null
+
+async function bhashAccessToken(apiKey) {
+  if (bhashSession?.accessToken && bhashSession.expiresAt > Date.now() + 30_000) {
+    return bhashSession.accessToken
+  }
+  const response = await fetch(BHASH_AUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildBhashAuthBody(apiKey)),
+  })
+  const body = await response.json().catch(() => null)
+  const session = response.ok ? parseBhashAuth(body) : null
+  if (!session) {
+    bhashSession = null
+    throw new Error(describeBhashError(response.status, body))
+  }
+  bhashSession = { ...session, expiresAt: Date.now() + 9 * 60 * 1000 }
+  return session.accessToken
+}
+
+async function sendViaBhash(config, mobile, detail) {
+  const to = toE164(mobile, config.countryCode)
+  if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number for this client.' }
+  const payload = buildBhashSendBody({
+    businessCode: config.businessCode,
+    templateCode: config.templateCode,
+    mobile: to,
+    values: bhashValues(templateParameters(detail, config.templateOrder)),
+  })
+  try {
+    const token = await bhashAccessToken(config.apiKey)
+    const response = await fetch(BHASH_SEND_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const body = await response.json().catch(() => null)
+    if (!response.ok || body?.success === false) {
+      if (response.status === 401) bhashSession = null
+      return { ok: false, to, error: describeBhashError(response.status, body) }
+    }
+    return { ok: true, to, messageId: bhashRequestCode(body) }
+  } catch (error) {
+    return { ok: false, to, error: error.message || 'Could not reach Bhash.' }
+  }
+}
+
 export function getWhatsAppConfig() {
+  const bhash = getBhashConfig()
   const token = process.env.WHATSAPP_TOKEN
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
-  if (!token || !phoneNumberId) {
-    throw new Error('WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID are not configured.')
+  if (!bhash && (!token || !phoneNumberId)) {
+    throw new Error('Set BHASH_API_KEY, BHASH_BUSINESS_CODE and BHASH_TEMPLATE_CODE, or the Meta WhatsApp token.')
   }
   return {
-    token,
-    phoneNumberId,
+    provider: bhash ? 'bhash' : 'meta',
+    token: token || '',
+    phoneNumberId: phoneNumberId || '',
+    apiKey: bhash?.apiKey || '',
+    businessCode: bhash?.businessCode || '',
+    templateCode: bhash?.templateCode || '',
     apiVersion: process.env.WHATSAPP_API_VERSION || DEFAULT_API_VERSION,
-    templateName: process.env.WHATSAPP_TEMPLATE_NAME || UTILITY_PREMIUM_TEMPLATE.name,
+    templateName: bhash?.templateCode || process.env.WHATSAPP_TEMPLATE_NAME || UTILITY_PREMIUM_TEMPLATE.name,
     languageCode: process.env.WHATSAPP_TEMPLATE_LANG || 'en',
     templateOrder: parseTemplateOrder(process.env.WHATSAPP_TEMPLATE_PARAMS),
     countryCode: process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '91',
@@ -118,6 +197,7 @@ export function getWhatsAppConfig() {
  * Never throws — the caller writes the outcome into a reminder log either way.
  */
 export async function sendWhatsAppTemplate(config, mobile, detail) {
+  if (config?.provider === 'bhash') return sendViaBhash(config, mobile, detail)
   const to = toE164(mobile, config.countryCode)
   if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number for this client.' }
 
@@ -155,6 +235,9 @@ export async function sendWhatsAppTemplate(config, mobile, detail) {
 export async function sendWhatsAppFreeform(config, mobile, { text = '', linkUrl = '', caption = '' } = {}) {
   const to = toE164(mobile, config.countryCode)
   if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number.' }
+  if (!config.token || !config.phoneNumberId) {
+    return { ok: false, to, error: 'A free-text reply needs the Meta inbox. Bhash sends approved templates only.' }
+  }
 
   const payload = linkUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'document', document: { link: linkUrl, caption: caption || text } }
