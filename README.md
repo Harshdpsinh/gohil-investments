@@ -83,7 +83,10 @@ These are public in the browser bundle. They identify the Firebase project; they
 | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Admin SDK for webhooks, send, backup-related server work |
 | `CRON_SECRET` | Daily renewal cron. If missing, the cron fails closed (503) |
-| `WHATSAPP_TOKEN` | **System User** token (dashboard 24-hour tokens expire) |
+| `BHASH_API_KEY` | Bhash App Authenticate key. When set, approved templates send through Bhash instead of Meta. |
+| `BHASH_BUSINESS_CODE` | Business code, for example `BSLB00258`. |
+| `BHASH_TEMPLATE_CODE` | Approved template code from List Templates (`templateCode`, not the display name). |
+| `WHATSAPP_TOKEN` | **System User** token (dashboard 24-hour tokens expire). Needed for the inbox and free-text replies. |
 | `WHATSAPP_PHONE_NUMBER_ID` | Cloud API phone number id |
 | `WHATSAPP_APP_SECRET` | Verifies inbound webhook signatures |
 | `WHATSAPP_VERIFY_TOKEN` | Same string you type in Meta → Verify token |
