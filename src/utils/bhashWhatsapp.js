@@ -5,6 +5,7 @@
 
 export const BHASH_AUTH_URL = 'https://apiv2.bhashsms.com/auth/v1/appAuthenticate'
 export const BHASH_SEND_URL = 'https://apiv2.bhashsms.com/customer/api/v1/campaign/sendMessage'
+export const BHASH_REPLY_URL = 'https://apiv2.bhashsms.com/messages/sendReply'
 export const BHASH_TEMPLATES_URL = 'https://apiv2.bhashsms.com/customer/api/v1/template/getAllApiTemplates'
 
 export function buildBhashAuthBody(apiKey) {
@@ -36,6 +37,15 @@ export function buildBhashSendBody({ businessCode, templateCode, mobile, values 
     templateCode: String(templateCode || '').trim(),
     mobileNumbers: to,
     values,
+  }
+}
+
+export function buildBhashReplyBody({ businessCode, mobile, text }) {
+  return {
+    businessCode: String(businessCode || '').trim(),
+    to: String(mobile || '').replace(/\D/g, ''),
+    text: String(text || '').trim(),
+    type: 'text',
   }
 }
 
