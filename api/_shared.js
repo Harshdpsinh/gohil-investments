@@ -17,10 +17,12 @@ import {
 } from '../src/utils/whatsappCloud.js'
 import {
   BHASH_AUTH_URL,
+  BHASH_REPLY_URL,
   BHASH_SEND_URL,
   bhashRequestCode,
   bhashValues,
   buildBhashAuthBody,
+  buildBhashReplyBody,
   buildBhashSendBody,
   describeBhashError,
   parseBhashAuth,
@@ -168,6 +170,34 @@ async function sendViaBhash(config, mobile, detail) {
   }
 }
 
+async function sendBhashReply(config, mobile, { text = '', linkUrl = '' } = {}) {
+  const to = toE164(mobile, config.countryCode)
+  if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number.' }
+  if (linkUrl) return { ok: false, to, error: 'A file reply is not available through Bhash yet. Send the note as text.' }
+  const message = String(text || '').trim()
+  if (!message) return { ok: false, to, error: 'Type a message first.' }
+  const payload = buildBhashReplyBody({ businessCode: config.businessCode, mobile: to, text: message })
+  try {
+    const token = await bhashAccessToken(config.apiKey)
+    const response = await fetch(BHASH_REPLY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    })
+    const body = await response.json().catch(() => null)
+    if (!response.ok || body?.success === false) {
+      if (response.status === 401) bhashSession = null
+      return { ok: false, to, error: describeBhashError(response.status, body) }
+    }
+    return { ok: true, to, messageId: bhashRequestCode(body) }
+  } catch (error) {
+    return { ok: false, to, error: error.message || 'Could not reach Bhash.' }
+  }
+}
+
 export function getWhatsAppConfig() {
   const bhash = getBhashConfig()
   const token = process.env.WHATSAPP_TOKEN
@@ -233,6 +263,7 @@ export async function sendWhatsAppTemplate(config, mobile, detail) {
  * the inbox shows the countdown rather than discovering it on send.
  */
 export async function sendWhatsAppFreeform(config, mobile, { text = '', linkUrl = '', caption = '' } = {}) {
+  if (config?.provider === 'bhash') return sendBhashReply(config, mobile, { text: text || caption, linkUrl })
   const to = toE164(mobile, config.countryCode)
   if (!to) return { ok: false, to: '', error: 'No usable WhatsApp number.' }
   if (!config.token || !config.phoneNumberId) {

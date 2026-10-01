@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { templateParameters } from './whatsappCloud.js'
 import {
-  bhashRequestCode, bhashValues, buildBhashAuthBody, buildBhashSendBody, describeBhashError, parseBhashAuth,
+  bhashRequestCode, bhashValues, buildBhashAuthBody, buildBhashReplyBody, buildBhashSendBody, describeBhashError, parseBhashAuth,
 } from './bhashWhatsapp.js'
 
 describe('bhash WhatsApp', () => {
@@ -34,6 +34,19 @@ describe('bhash WhatsApp', () => {
       businessCode: 'BSLB00258',
       templateCode: 'TEMPLATE001',
       mobileNumbers: '917600092858',
+    })
+  })
+
+  it('builds a plain reply inside the open window', () => {
+    expect(buildBhashReplyBody({
+      businessCode: 'BSLB00258',
+      mobile: '+91 76989 97894',
+      text: ' H ',
+    })).toEqual({
+      businessCode: 'BSLB00258',
+      to: '917698997894',
+      text: 'H',
+      type: 'text',
     })
   })
 
