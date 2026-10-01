@@ -10,10 +10,16 @@ describe('parseBhashWebhook', () => {
     expect(messages[0]).toMatchObject({ waId: '917698997894', direction: 'in', text: 'Hi' })
   })
 
-  it('reads a flat customer reply and ignores a delivery receipt', () => {
-    const reply = parseBhashWebhook({ from: '7698997894', body: 'Received', messageId: 'm1', name: 'Harsh' })
-    expect(reply.messages[0]).toMatchObject({ waId: '917698997894', text: 'Received', profileName: 'Harsh', direction: 'in' })
+  it('reads a nested reply and ignores the office number', () => {
+    const { messages } = parseBhashWebhook({
+      contact: { name: 'Harshdeepsinh Gohil', mobile: '917698997894' },
+      message: { text: 'Kevi rite bharu?' },
+      businessNumber: '917600928585',
+    })
+    expect(messages[0]).toMatchObject({ waId: '917698997894', text: 'Kevi rite bharu?', direction: 'in' })
+  })
 
+  it('ignores a delivery receipt', () => {
     const receipt = parseBhashWebhook({ webhook_type: 'status_update', status: 'delivered', messageId: 'm1', mobile: '7698997894' })
     expect(receipt.messages).toEqual([])
     expect(receipt.statuses[0].status).toBe('delivered')
