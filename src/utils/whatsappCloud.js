@@ -30,8 +30,9 @@ export const UTILITY_PREMIUM_TEMPLATE = {
   body: [
     'Dear {{1}},',
     'This is a reminder that your {{2}} policy (Policy No. {{3}}) has a premium due on {{4}}.',
-    'Premium due: {{5}}.',
+    'Premium Due: {{5}}',
     'Please make the premium payment by the due date to continue your policy coverage.',
+    'If you have already made the payment, please ignore this message.',
     'For assistance with this policy, please contact:',
     'Harshdipsinh Gohil – 7698997894',
     'Pradipsinh Gohil – 9426204547',
