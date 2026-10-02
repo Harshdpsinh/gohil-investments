@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './config'
 import { addFrequencyInterval, computeNextPolicyDue, getDueDate as getPolicyDueDate, normaliseFrequency, parseAnyDate, toInputDate } from '../utils/dateUtils'
+import { canClaimReminder } from '../utils/reminderClaim'
 import {
   cleanFirestoreData, assertPolicyDateOrder, exactPolicyKey, normalisePolicyPayload,
   assertString, assertOptionalNumber, assertOptionalDate, assertInList,
@@ -405,7 +406,9 @@ export async function claimRenewalReminder(data = {}) {
   const ref = doc(db, RENEWAL_REMINDER_LOGS, data.id)
   return runTransaction(db, async tx => {
     const existing = await tx.get(ref)
-    if (existing.exists()) return { claimed: false, id: ref.id }
+    const previous = existing.exists() ? existing.data() : null
+    const updatedAtMs = previous?.updatedAt?.toMillis?.() || 0
+    if (!canClaimReminder(previous?.status, updatedAtMs)) return { claimed: false, id: ref.id }
     tx.set(ref, cleanFirestoreData({
       ...renewalReminderLogPayload(data),
       status: 'sending',

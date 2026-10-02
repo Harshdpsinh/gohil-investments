@@ -111,30 +111,35 @@ export async function runRenewalReminderSweep() {
     const mobile = policy.clientMobile || client?.mobile || ''
     const message = buildRenewalReminderMessage({ policy, client, daysBefore, settings })
     const key = reminderKey(policy.id, dueDate, daysBefore)
-    const claim = await claimRenewalReminder({
-      id: key,
-      policy,
-      client,
-      dueDate,
-      daysBefore,
-      mobile,
-      message,
-    })
-    if (!claim.claimed) {
-      skipped += 1
-      continue
-    }
+    try {
+      const claim = await claimRenewalReminder({
+        id: key,
+        policy,
+        client,
+        dueDate,
+        daysBefore,
+        mobile,
+        message,
+      })
+      if (!claim.claimed) {
+        skipped += 1
+        continue
+      }
 
-    const result = await sendWhatsApp({
-      number: mobile,
-      detail: buildRenewalReminderDetail({ policy, client, daysBefore }),
-    })
-    await finishRenewalReminderLog(key, {
-      status: result.ok ? 'sent' : 'failed',
-      messageId: result.messageId || '',
-      error: result.error || '',
-    })
-    if (result.ok) sent += 1
+      const result = await sendWhatsApp({
+        number: mobile,
+        detail: buildRenewalReminderDetail({ policy, client, daysBefore }),
+      })
+      await finishRenewalReminderLog(key, {
+        status: result.ok ? 'sent' : 'failed',
+        messageId: result.messageId || '',
+        error: result.error || '',
+      })
+      if (result.ok) sent += 1
+    } catch (error) {
+      skipped += 1
+      console.warn('Renewal reminder failed:', error)
+    }
   }
 
   return { sent, skipped }
@@ -179,11 +184,17 @@ export function startRenewalReminderAutomation() {
       running = false
     }
   }
-  const first = window.setTimeout(run, 5000)
-  const timer = window.setInterval(run, 60 * 60 * 1000)
+  const timer = window.setInterval(run, 15 * 60 * 1000)
+  let unsub = () => {}
+  import('../firebase/config').then(({ auth }) => import('firebase/auth').then(({ onAuthStateChanged }) => {
+    if (stopped) return
+    unsub = onAuthStateChanged(auth, user => {
+      if (user) run()
+    })
+  }))
   return () => {
     stopped = true
-    window.clearTimeout(first)
+    unsub()
     window.clearInterval(timer)
   }
 }

@@ -9,6 +9,7 @@ import { getDueDate, daysUntilPolicyDue, parseAnyDate } from '../src/utils/dateU
 import { isOccasionToday } from '../src/utils/occasions.js'
 import { bearerMatches } from '../src/utils/timingSafe.js'
 import { renderUtilityPremiumNotice } from '../src/utils/whatsappCloud.js'
+import { canClaimReminder } from '../src/utils/reminderClaim.js'
 
 const DEFAULT_INTERVALS = [30, 15, 7, 1, 0].map(days => ({ id: `d${days}`, days, enabled: true }))
 const STOP_STATUSES = new Set(['Renewed-Out', 'Cancelled', 'Matured'])
@@ -77,7 +78,9 @@ export default async function handler(req, res) {
       const logRef = db.collection('renewal_reminder_logs').doc(id)
       const claimed = await db.runTransaction(async tx => {
         const existing = await tx.get(logRef)
-        if (existing.exists) return false
+        const previous = existing.exists ? existing.data() : null
+        const updatedAtMs = previous?.updatedAt?.toMillis?.() || 0
+        if (!canClaimReminder(previous?.status, updatedAtMs)) return false
         tx.set(logRef, {
           policyId: policy.id,
           policyNumber: policy.policyNumber || '',
