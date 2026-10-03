@@ -18,6 +18,7 @@ const {
   normaliseReminderSettings,
   defaultRenewalReminderSettings,
   DEFAULT_RENEWAL_REMINDER_INTERVALS,
+  reminderSentToday,
 } = await import('./renewalReminderService')
 
 describe('normaliseReminderSettings', () => {
@@ -82,5 +83,23 @@ describe('normaliseReminderSettings', () => {
   it('falls back to the default prompt when blank', () => {
     expect(normaliseReminderSettings({ prompt: '   ' }).prompt)
       .toBe(defaultRenewalReminderSettings().prompt)
+  })
+})
+
+describe('reminderSentToday', () => {
+  const now = new Date(2026, 9, 3, 11, 0, 0)
+
+  it('notices a successful reminder from earlier today', () => {
+    expect(reminderSentToday([
+      { policyId: 'p1', status: 'sent', createdAt: new Date(2026, 9, 3, 9, 46) },
+    ], 'p1', now)).toBe(true)
+  })
+
+  it('ignores yesterday, a different policy, and a failed attempt', () => {
+    expect(reminderSentToday([
+      { policyId: 'p1', status: 'sent', createdAt: new Date(2026, 9, 2, 9, 46) },
+      { policyId: 'p2', status: 'sent', createdAt: now },
+      { policyId: 'p1', status: 'failed', createdAt: now },
+    ], 'p1', now)).toBe(false)
   })
 })

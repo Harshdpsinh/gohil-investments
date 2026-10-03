@@ -61,6 +61,25 @@ export function normaliseReminderSettings(settings) {
   }
 }
 
+function logTime(value) {
+  if (!value) return null
+  if (typeof value.toDate === 'function') return value.toDate()
+  if (value.seconds) return new Date(value.seconds * 1000)
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/** True when this policy already had a successful WhatsApp reminder today. */
+export function reminderSentToday(logs = [], policyId, now = new Date()) {
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  return logs.some(log => {
+    if (log.policyId !== policyId || log.status !== 'sent') return false
+    const created = logTime(log.createdAt)
+    return Boolean(created && created >= start)
+  })
+}
+
 export function findPolicyClient(policy, clients = []) {
   return clients.find(c => c.id === policy.clientId)
     || clients.find(c => c.name?.toLowerCase().trim() === policy.clientName?.toLowerCase().trim())
