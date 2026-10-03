@@ -4,7 +4,7 @@ import {
   sendWhatsAppFreeform, sendWhatsAppTemplate, verifyIdToken,
   assertStaff, inboundWindowOpen,
 } from './_shared.js'
-import { toE164 } from '../src/utils/whatsappCloud.js'
+import { toE164, renderUtilityPremiumNotice } from '../src/utils/whatsappCloud.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
       await recordOutboundMessage(db, {
         messageId: result.messageId,
         waId: result.to,
-        text: text || caption || `[${config.templateName}]`,
+        text: text || caption || renderUtilityPremiumNotice(detail || {}),
         type: linkUrl ? 'document' : 'text',
         sentBy: staff.email || decoded.uid,
       })

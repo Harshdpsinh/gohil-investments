@@ -6,6 +6,7 @@ import {
   lastInboundAtFromRows,
   matchConversationClient,
   parseWebhookPayload,
+  sentMessagesThisWeek,
   windowState,
 } from './whatsappInbox'
 
@@ -182,5 +183,17 @@ describe('lastInboundAtFromRows', () => {
   it('ignores outbound-only threads', () => {
     expect(lastInboundAtFromRows([{ direction: 'out', timestamp: NOW }])).toBe(0)
     expect(windowState(lastInboundAtFromRows([]), NOW).open).toBe(false)
+  })
+})
+
+describe('sentMessagesThisWeek', () => {
+  it('keeps this week’s outbound messages, newest first, and drops the rest', () => {
+    const rows = sentMessagesThisWeek([
+      { direction: 'out', text: 'old', timestamp: NOW - 8 * 86400000 },
+      { direction: 'in', text: 'reply', timestamp: NOW },
+      { direction: 'out', text: 'yesterday', timestamp: NOW - 86400000 },
+      { direction: 'out', text: 'today', timestamp: NOW },
+    ], NOW)
+    expect(rows.map(row => row.text)).toEqual(['today', 'yesterday'])
   })
 })
