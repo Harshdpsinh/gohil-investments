@@ -1,5 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminDb, getWhatsAppConfig, sendWhatsAppTemplate } from './_shared.js'
+import { getAdminDb, getWhatsAppConfig, recordOutboundMessage, sendWhatsAppTemplate } from './_shared.js'
 // The one source of truth for when a policy is due. This file used to carry its
 // own copy and the two drifted apart in two ways that both sent reminders on the
 // wrong day: it preferred nextPremiumDue where the app prefers expiryDate, and
@@ -115,7 +115,15 @@ export default async function handler(req, res) {
         sentAt: result.ok ? FieldValue.serverTimestamp() : null,
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true })
-      if (result.ok) sent += 1
+      if (result.ok) {
+        sent += 1
+        await recordOutboundMessage(db, {
+          messageId: result.messageId,
+          waId: result.to || digits(mobile),
+          text: message,
+          sentBy: 'renewal-reminder',
+        })
+      }
     }
 
     let birthdaysSent = 0
@@ -175,10 +183,27 @@ export default async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ sent, skipped, birthdaysSent, birthdaysSkipped })
+    const cleared = await clearOldOutbound(db)
+    res.status(200).json({ sent, skipped, birthdaysSent, birthdaysSkipped, cleared })
   } catch (error) {
     res.status(500).json({ error: error.message || 'Renewal reminder cron failed' })
   }
+}
+
+const SENT_KEEP_MS = 7 * 86400000
+
+async function clearOldOutbound(db) {
+  const cutoff = Date.now() - SENT_KEEP_MS
+  const snap = await db.collection('whatsapp_messages').where('direction', '==', 'out').get()
+  const stale = snap.docs.filter(doc => Number(doc.data()?.timestamp) < cutoff)
+  let cleared = 0
+  for (let i = 0; i < stale.length; i += 400) {
+    const batch = db.batch()
+    stale.slice(i, i + 400).forEach(doc => batch.delete(doc.ref))
+    await batch.commit()
+    cleared += Math.min(400, stale.length - i)
+  }
+  return cleared
 }
 
 function normaliseSettings(settings = {}) {

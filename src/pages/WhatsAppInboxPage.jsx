@@ -12,7 +12,7 @@ import { usePolicies } from '../hooks/usePolicies'
 import { markConversationRead, subscribeWhatsAppMessages } from '../firebase/firestore'
 import { sendWhatsApp } from '../utils/whatsappSender'
 import {
-  buildConversations, formatWindow, matchConversationClient,
+  buildConversations, formatWindow, matchConversationClient, sentMessagesThisWeek,
 } from '../utils/whatsappInbox'
 import { quickRepliesFor } from '../utils/whatsappFeatures'
 import { fmtCurrency, fmtDate, getDueDate, daysUntilPolicyDue } from '../utils/dateUtils'
@@ -22,6 +22,7 @@ import AppIcon from '../components/ui/AppIcon'
 
 const time = ts => new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
 const day = ts => new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+const when = ts => `${day(ts)} ${time(ts)}`
 
 // Delivery states, in the order Meta reports them.
 const TICK = { sent: '✓', delivered: '✓✓', read: '✓✓', failed: '!' }
@@ -36,6 +37,7 @@ export default function WhatsAppInboxPage() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [now, setNow] = useState(Date.now())
+  const [view, setView] = useState('chats')
   const threadRef = useRef(null)
 
   useEffect(() => {
@@ -57,6 +59,7 @@ export default function WhatsAppInboxPage() {
   }, [])
 
   const conversations = useMemo(() => buildConversations(messages, now), [messages, now])
+  const sentThisWeek = useMemo(() => sentMessagesThisWeek(messages, now), [messages, now])
   const active = conversations.find(c => c.waId === activeWaId) || null
 
   const activeClient = useMemo(
@@ -137,11 +140,22 @@ export default function WhatsAppInboxPage() {
         icon="message"
         title="WhatsApp Inbox"
         subtitle={
-          conversations.length
+          view === 'sent'
+            ? `${sentThisWeek.length} sent this week. Older sent messages clear automatically.`
+            : conversations.length
             ? `${conversations.length} conversation${conversations.length === 1 ? '' : 's'}${totalUnread ? ` · ${totalUnread} unread` : ''}`
             : 'Replies from clients arrive here'
         }
       />
+
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setView('chats')} className={view === 'chats' ? 'btn-primary text-sm' : 'btn-secondary text-sm'}>
+          Chats
+        </button>
+        <button type="button" onClick={() => setView('sent')} className={view === 'sent' ? 'btn-primary text-sm' : 'btn-secondary text-sm'}>
+          Sent this week ({sentThisWeek.length})
+        </button>
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
@@ -155,7 +169,33 @@ export default function WhatsAppInboxPage() {
         </div>
       )}
 
-      {error ? null : !loading && !conversations.length ? (
+      {error ? null : view === 'sent' ? (
+        <div className="fintech-panel max-h-[70vh] overflow-y-auto">
+          {loading && <p className="p-4 text-xs text-gray-500">Loading…</p>}
+          {!loading && sentThisWeek.length === 0 ? (
+            <p className="p-6 text-sm text-gray-500">Nothing sent in the last 7 days. Older sent messages are cleared every week.</p>
+          ) : sentThisWeek.map(message => {
+            const client = matchConversationClient(message.waId, clients)
+            return (
+              <button
+                key={message.id || message.messageId}
+                type="button"
+                onClick={() => { setActiveWaId(message.waId); setView('chats') }}
+                className="block w-full border-b border-slate-100 p-3 text-left hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="truncate text-sm font-bold text-gray-900 dark:text-gray-100">
+                    {client?.name || message.waId}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-gray-400">{when(message.timestamp)}</span>
+                </div>
+                <p className="text-[11px] text-gray-500">+{message.waId}{message.sentBy ? ` · ${message.sentBy}` : ''}</p>
+                <p className="mt-1 whitespace-pre-wrap text-xs text-gray-700 dark:text-gray-300">{message.text || `[${message.type}]`}</p>
+              </button>
+            )
+          })}
+        </div>
+      ) : !loading && !conversations.length ? (
         <EmptyState
           icon="message"
           title="No conversations yet"

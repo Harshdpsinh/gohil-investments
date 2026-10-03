@@ -144,3 +144,13 @@ export function matchConversationClient(waId, clients = []) {
   if (tail.length !== 10) return null
   return clients.find(c => String(c.mobile || '').replace(/\D/g, '').slice(-10) === tail) || null
 }
+
+export const SENT_LOG_DAYS = 7
+
+/** Outbound messages still inside the current week, newest first. Older ones are clutter. */
+export function sentMessagesThisWeek(messages = [], now = Date.now()) {
+  const since = now - SENT_LOG_DAYS * 86400000
+  return messages
+    .filter(message => message?.direction === 'out' && Number(message.timestamp) >= since)
+    .sort((a, b) => Number(b.timestamp) - Number(a.timestamp))
+}
