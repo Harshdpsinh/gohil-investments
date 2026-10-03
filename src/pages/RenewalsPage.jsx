@@ -23,6 +23,7 @@ import {
   defaultRenewalReminderSettings,
   normaliseReminderSettings,
   sendManualRenewalReminder,
+  reminderSentToday,
 } from '../services/renewalReminderService'
 import { shareGeneratedFile } from '../services/nativeShareService'
 import SearchBar from '../components/ui/SearchBar'
@@ -1044,6 +1045,7 @@ export default function RenewalsPage() {
   }, [reminderDraft])
 
   const handleManualReminder = useCallback(async (policy) => {
+    if (reminderSentToday(reminderLogs, policy.id) && !window.confirm('A reminder already went to this client today. Send another?')) return
     setManualSendingId(policy.id)
     try {
       const result = await sendManualRenewalReminder(policy, clients, reminderSettings)
@@ -1052,7 +1054,7 @@ export default function RenewalsPage() {
     } finally {
       setManualSendingId('')
     }
-  }, [clients, reminderSettings])
+  }, [clients, reminderSettings, reminderLogs])
 
   // ─── UI ───────────────────────────────────────────────────────
   if (loading) return (

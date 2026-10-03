@@ -183,7 +183,12 @@ export default async function handler(req, res) {
       }
     }
 
-    const cleared = await clearOldOutbound(db)
+    let cleared = 0
+    try {
+      cleared = await clearOldOutbound(db)
+    } catch (error) {
+      console.error('Could not clear old sent WhatsApp messages:', error.message)
+    }
     res.status(200).json({ sent, skipped, birthdaysSent, birthdaysSkipped, cleared })
   } catch (error) {
     res.status(500).json({ error: error.message || 'Renewal reminder cron failed' })
