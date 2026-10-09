@@ -133,6 +133,7 @@ export default function WhatsAppInboxPage() {
   }
 
   const totalUnread = conversations.reduce((n, c) => n + c.unread, 0)
+  const anyInbound = messages.some(message => message.direction === 'in')
 
   return (
     <div className="fintech-page space-y-4">
@@ -156,6 +157,14 @@ export default function WhatsAppInboxPage() {
           Sent this week ({sentThisWeek.length})
         </button>
       </div>
+
+      {!error && !loading && !anyInbound && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+          Customer replies are still only in BHASH Live Chat. In BHASH, set the incoming-message webhook to
+          {' '}<span className="font-mono">https://gohil-investments.vercel.app/api/bhash-webhook</span>
+          {' '}and ask the client to send one more message. Until that call arrives, this inbox only shows notices we sent.
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">

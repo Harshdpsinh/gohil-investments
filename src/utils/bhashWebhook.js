@@ -7,7 +7,7 @@ import { toE164 } from './whatsappCloud.js'
 
 const OFFICE_NUMBERS = new Set(['917600928585', '7600928585'])
 const FROM_KEYS = ['from', 'sender', 'customerNumber', 'customerMobile', 'mobile', 'waId', 'phone', 'recipient', 'msisdn']
-const TEXT_KEYS = ['body', 'text', 'message', 'content', 'caption']
+const TEXT_KEYS = ['body', 'text', 'message', 'content', 'caption', 'messageText', 'msg', 'url', 'link']
 const NAME_KEYS = ['profileName', 'customerName', 'senderName', 'name']
 const ID_KEYS = ['messageId', 'wamid', 'umid', 'id', 'requestCode']
 
@@ -106,13 +106,12 @@ function walk(node, acc, key = '', depth = 0) {
     if (phone && /from|sender|customer|mobile|phone|wa|msisdn/i.test(key)) acc.phones.push(phone)
     else if (phone && key) acc.phones.push(phone)
     const looksLikeCopy = text.length >= 2 && text.length < 2000
-      && !/^https?:/i.test(text)
       && !/^template\d+$/i.test(text)
       && !phone
-      && /[a-zA-Z]/.test(text)
+      && (/[a-zA-Z]/.test(text) || /^https?:/i.test(text))
     if (!looksLikeCopy) return
-    const weight = /text|body|caption|content|message/i.test(key) && !/id|type|name/i.test(key) ? 2 : 0
-    if (/name|status|event|type|url/i.test(key)) return
+    const weight = /text|body|caption|content|message|url|link/i.test(key) && !/id|type|name/i.test(key) ? 2 : 0
+    if (/name|status|event|type/i.test(key) && !/url|link/i.test(key)) return
     acc.texts.push({ text, weight })
     return
   }

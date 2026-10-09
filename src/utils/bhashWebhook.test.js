@@ -19,6 +19,15 @@ describe('parseBhashWebhook', () => {
     expect(messages[0]).toMatchObject({ waId: '917698997894', text: 'Kevi rite bharu?', direction: 'in' })
   })
 
+  it('keeps a customer link instead of dropping it', () => {
+    const { messages } = parseBhashWebhook({
+      from: '919727592455',
+      url: 'https://youtu.be/9jQOUAy2Azc',
+    })
+    expect(messages[0]).toMatchObject({ waId: '919727592455', direction: 'in' })
+    expect(messages[0].text).toContain('youtu.be')
+  })
+
   it('ignores a delivery receipt', () => {
     const receipt = parseBhashWebhook({ webhook_type: 'status_update', status: 'delivered', messageId: 'm1', mobile: '7698997894' })
     expect(receipt.messages).toEqual([])
