@@ -44,3 +44,18 @@ export async function sendWhatsApp({ number, chatId, detail = {}, text = '', lin
     return { ok: false, error: `Could not reach the WhatsApp sender: ${error.message}` }
   }
 }
+
+export async function fetchBhashAccount() {
+  const user = auth.currentUser
+  if (!user) return { wallets: [] }
+  try {
+    const response = await fetch('/api/bhash-account', {
+      headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+    })
+    const body = await response.json().catch(() => null)
+    if (!response.ok) return { wallets: [] }
+    return { wallets: body?.wallets || [] }
+  } catch {
+    return { wallets: [] }
+  }
+}

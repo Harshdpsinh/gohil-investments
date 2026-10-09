@@ -1,5 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore'
-import { getAdminDb, getWhatsAppConfig, recordOutboundMessage, sendWhatsAppTemplate } from './_shared.js'
+import { getAdminDb, getWhatsAppConfig, recordOutboundMessage, refreshBhashDelivery, sendWhatsAppTemplate } from './_shared.js'
 // The one source of truth for when a policy is due. This file used to carry its
 // own copy and the two drifted apart in two ways that both sent reminders on the
 // wrong day: it preferred nextPremiumDue where the app prefers expiryDate, and
@@ -188,6 +188,11 @@ export default async function handler(req, res) {
       cleared = await clearOldOutbound(db)
     } catch (error) {
       console.error('Could not clear old sent WhatsApp messages:', error.message)
+    }
+    try {
+      await refreshBhashDelivery(db)
+    } catch (error) {
+      console.error('Could not refresh Bhash delivery status:', error.message)
     }
     res.status(200).json({ sent, skipped, birthdaysSent, birthdaysSkipped, cleared })
   } catch (error) {
