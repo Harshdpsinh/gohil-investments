@@ -17,15 +17,21 @@ import {
 } from '../src/utils/whatsappCloud.js'
 import {
   BHASH_AUTH_URL,
+  BHASH_REFRESH_URL,
   BHASH_REPLY_URL,
   BHASH_SEND_URL,
+  BHASH_STATUS_URL,
+  BHASH_WALLET_URL,
   bhashRequestCode,
   bhashValues,
   buildBhashAuthBody,
+  buildBhashRefreshBody,
   buildBhashReplyBody,
   buildBhashSendBody,
   describeBhashError,
   parseBhashAuth,
+  parseBhashRequestStatus,
+  parseBhashWallet,
 } from '../src/utils/bhashWhatsapp.js'
 import { lastInboundAtFromRows, windowState } from '../src/utils/whatsappInbox.js'
 import { OWNER_ADMIN_EMAILS as OWNER_ADMIN_EMAIL_LIST } from '../src/utils/roles.js'
@@ -121,23 +127,54 @@ export function getBhashConfig() {
 
 let bhashSession = null
 
+async function readBhashSession(url, payload) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const body = await response.json().catch(() => null)
+  const session = response.ok ? parseBhashAuth(body) : null
+  if (!session) return { session: null, error: describeBhashError(response.status, body) }
+  return {
+    session: {
+      ...session,
+      expiresAt: Date.now() + 9 * 60 * 1000,
+      refreshExpiresAt: Date.now() + 6 * 24 * 60 * 60 * 1000,
+    },
+    error: '',
+  }
+}
+
 async function bhashAccessToken(apiKey) {
   if (bhashSession?.accessToken && bhashSession.expiresAt > Date.now() + 30_000) {
     return bhashSession.accessToken
   }
-  const response = await fetch(BHASH_AUTH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildBhashAuthBody(apiKey)),
+  if (bhashSession?.refreshToken && bhashSession.refreshExpiresAt > Date.now()) {
+    const refreshed = await readBhashSession(BHASH_REFRESH_URL, buildBhashRefreshBody(bhashSession.refreshToken))
+    if (refreshed.session) {
+      bhashSession = refreshed.session
+      return refreshed.session.accessToken
+    }
+    bhashSession = null
+  }
+  const signedIn = await readBhashSession(BHASH_AUTH_URL, buildBhashAuthBody(apiKey))
+  if (!signedIn.session) {
+    bhashSession = null
+    throw new Error(signedIn.error)
+  }
+  bhashSession = signedIn.session
+  return signedIn.session.accessToken
+}
+
+async function bhashGet(config, url) {
+  const token = await bhashAccessToken(config.apiKey)
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
   })
   const body = await response.json().catch(() => null)
-  const session = response.ok ? parseBhashAuth(body) : null
-  if (!session) {
-    bhashSession = null
-    throw new Error(describeBhashError(response.status, body))
-  }
-  bhashSession = { ...session, expiresAt: Date.now() + 9 * 60 * 1000 }
-  return session.accessToken
+  if (response.status === 401) bhashSession = null
+  return { ok: response.ok && body?.success !== false, body }
 }
 
 async function sendViaBhash(config, mobile, detail) {
@@ -310,6 +347,48 @@ export async function recordOutboundMessage(db, { messageId, waId, text, type = 
   } catch (error) {
     console.error('Could not record outbound WhatsApp message:', error.message)
   }
+}
+
+export async function getBhashAccount() {
+  const config = getBhashConfig()
+  if (!config) return { wallets: [] }
+  const url = `${BHASH_WALLET_URL}?businessCode=${encodeURIComponent(config.businessCode)}`
+  const { body } = await bhashGet(config, url)
+  return { wallets: parseBhashWallet(body) }
+}
+
+/** Asks Bhash whether a recent send was accepted or rejected. Skips rows checked in the last six hours. */
+export async function refreshBhashDelivery(db) {
+  const config = getBhashConfig()
+  if (!config) return 0
+  let snap
+  try {
+    snap = await db.collection('whatsapp_messages').orderBy('timestamp', 'desc').limit(30).get()
+  } catch (error) {
+    console.error('Could not list recent WhatsApp sends:', error.message)
+    return 0
+  }
+  const due = snap.docs.filter(doc => {
+    const data = doc.data()
+    if (data.direction !== 'out' || !data.messageId) return false
+    if (data.status === 'failed' || data.status === 'read' || data.status === 'delivered') return false
+    if (data.statusCheckedAt && Date.now() - data.statusCheckedAt < 6 * 60 * 60 * 1000) return false
+    return true
+  }).slice(0, 8)
+  let updated = 0
+  for (const doc of due) {
+    const url = `${BHASH_STATUS_URL}?businessCode=${encodeURIComponent(config.businessCode)}&requestCode=${encodeURIComponent(doc.data().messageId)}`
+    const { body } = await bhashGet(config, url)
+    const parsed = parseBhashRequestStatus(body)
+    if (!parsed?.status) continue
+    await doc.ref.set({
+      status: parsed.status,
+      error: parsed.error || '',
+      statusCheckedAt: Date.now(),
+    }, { merge: true })
+    updated += 1
+  }
+  return updated
 }
 
 /**

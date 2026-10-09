@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { templateParameters } from './whatsappCloud.js'
 import {
-  bhashRequestCode, bhashValues, buildBhashAuthBody, buildBhashReplyBody, buildBhashSendBody, describeBhashError, parseBhashAuth,
+  bhashRequestCode, bhashValues, buildBhashAuthBody, buildBhashRefreshBody, buildBhashReplyBody, buildBhashSendBody,
+  describeBhashError, parseBhashAuth, parseBhashRequestStatus, parseBhashWallet,
 } from './bhashWhatsapp.js'
 
 describe('bhash WhatsApp', () => {
@@ -54,5 +55,17 @@ describe('bhash WhatsApp', () => {
     expect(describeBhashError(401, { error_code: 'UNAUTHORIZED', message: 'Unauthorized' }))
       .toMatch(/BHASH_API_KEY/)
     expect(bhashRequestCode({ success: true, content: { requestCode: 'BSLB0025812' } })).toBe('BSLB0025812')
+  })
+
+  it('reads a refreshed token, a rejected send, and the wallet', () => {
+    expect(buildBhashRefreshBody(' refresh ')).toEqual({ refreshToken: 'refresh' })
+    expect(parseBhashRequestStatus({
+      success: true,
+      content: { requestCode: 'BSLB0025812', status: 'REJECTED', errorMessage: 'Unable to send message' },
+    })).toEqual({ requestCode: 'BSLB0025812', status: 'failed', error: 'Unable to send message' })
+    expect(parseBhashWallet({
+      success: true,
+      content: { wallets: [{ type: 'utilityAuthentication', label: 'Utility', walletBalance: 6660, freeCredit: 0 }] },
+    })).toEqual([{ type: 'utilityAuthentication', label: 'Utility', balance: 6660, freeCredit: 0 }])
   })
 })

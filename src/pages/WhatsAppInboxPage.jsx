@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import { useClients } from '../hooks/useClients'
 import { usePolicies } from '../hooks/usePolicies'
 import { markConversationRead, subscribeWhatsAppMessages } from '../firebase/firestore'
-import { sendWhatsApp } from '../utils/whatsappSender'
+import { fetchBhashAccount, sendWhatsApp } from '../utils/whatsappSender'
 import {
   buildConversations, formatWindow, matchConversationClient, sentMessagesThisWeek,
 } from '../utils/whatsappInbox'
@@ -38,6 +38,7 @@ export default function WhatsAppInboxPage() {
   const [sending, setSending] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [view, setView] = useState('chats')
+  const [wallets, setWallets] = useState([])
   const threadRef = useRef(null)
 
   useEffect(() => {
@@ -132,6 +133,14 @@ export default function WhatsAppInboxPage() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false
+    fetchBhashAccount().then(account => {
+      if (!cancelled) setWallets(account.wallets || [])
+    })
+    return () => { cancelled = true }
+  }, [])
+
   const totalUnread = conversations.reduce((n, c) => n + c.unread, 0)
   const anyInbound = messages.some(message => message.direction === 'in')
 
@@ -157,6 +166,13 @@ export default function WhatsAppInboxPage() {
           Sent this week ({sentThisWeek.length})
         </button>
       </div>
+
+      {wallets.length > 0 && (
+        <p className="text-xs font-semibold text-slate-500">
+          BHASH credit left:{' '}
+          {wallets.map(wallet => `${wallet.label} ${wallet.balance.toLocaleString('en-IN')}${wallet.freeCredit ? ` + ${wallet.freeCredit} free` : ''}`).join(' · ')}
+        </p>
+      )}
 
       {!error && !loading && !anyInbound && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">

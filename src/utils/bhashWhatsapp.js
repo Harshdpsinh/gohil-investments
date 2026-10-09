@@ -4,12 +4,19 @@
 // One mobile per call: mobileNumbers is capped at 15 characters.
 
 export const BHASH_AUTH_URL = 'https://apiv2.bhashsms.com/auth/v1/appAuthenticate'
+export const BHASH_REFRESH_URL = 'https://apiv2.bhashsms.com/auth/v1/appRefresh'
 export const BHASH_SEND_URL = 'https://apiv2.bhashsms.com/customer/api/v1/campaign/sendMessage'
 export const BHASH_REPLY_URL = 'https://apiv2.bhashsms.com/messages/sendReply'
 export const BHASH_TEMPLATES_URL = 'https://apiv2.bhashsms.com/customer/api/v1/template/getAllApiTemplates'
+export const BHASH_STATUS_URL = 'https://apiv2.bhashsms.com/customer/api/v1/campaign/apiRequestStatus'
+export const BHASH_WALLET_URL = 'https://apiv2.bhashsms.com/customer/api/v1/wallet/apiWalletBalance'
 
 export function buildBhashAuthBody(apiKey) {
   return { apiKey: String(apiKey || '').trim() }
+}
+
+export function buildBhashRefreshBody(refreshToken) {
+  return { refreshToken: String(refreshToken || '').trim() }
 }
 
 export function parseBhashAuth(body) {
@@ -51,6 +58,33 @@ export function buildBhashReplyBody({ businessCode, mobile, text }) {
 
 export function bhashRequestCode(body) {
   return body?.content?.requestCode || ''
+}
+
+export function parseBhashRequestStatus(body) {
+  const content = body?.content
+  if (!body?.success || !content) return null
+  const raw = String(content.status || '').toLowerCase()
+  const status = raw === 'rejected' || raw === 'failed' ? 'failed'
+    : raw === 'delivered' ? 'delivered'
+    : raw === 'read' ? 'read'
+    : raw === 'sent' || raw === 'submitted' || raw === 'accepted' ? 'sent'
+    : ''
+  return {
+    requestCode: content.requestCode || '',
+    status,
+    error: content.errorMessage || '',
+  }
+}
+
+export function parseBhashWallet(body) {
+  const wallets = body?.content?.wallets
+  if (!body?.success || !Array.isArray(wallets)) return []
+  return wallets.map(wallet => ({
+    type: wallet.type || '',
+    label: wallet.label || wallet.type || 'Credit',
+    balance: Number(wallet.walletBalance) || 0,
+    freeCredit: Number(wallet.freeCredit) || 0,
+  }))
 }
 
 export function describeBhashError(status, body) {
