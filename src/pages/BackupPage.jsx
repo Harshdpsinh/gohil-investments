@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
 import { createCRMBackup, restoreCRMBackup } from '../firebase/backup'
+import { logAdminAction } from '../firebase/auditLog'
 
 function downloadJson(data) {
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
@@ -38,12 +40,7 @@ export default function BackupPage() {
   const [progress, setProgress] = useState({ done: 0, total: 0 })
   const [backupStep, setBackupStep] = useState('')
 
-  if (!isAdmin) return (
-    <div className="p-8 text-center text-gray-400">
-      <p className="text-4xl mb-3">Lock</p>
-      <p className="font-semibold">Admin access only</p>
-    </div>
-  )
+  if (!isAdmin) return <Navigate to="/dashboard" replace />
 
   const onDownloadBackup = async () => {
     setBackupLoading(true)
@@ -106,6 +103,11 @@ export default function BackupPage() {
     setProgress({ done: 0, total: 0 })
     try {
       const restored = await restoreCRMBackup(restoreFile, (done, total) => setProgress({ done, total }))
+      await logAdminAction({
+        action: 'restore-backup',
+        entityType: 'backup',
+        summary: `${restored} records restored`,
+      })
       toast.success(`${restored} records restored successfully.`)
       setRestoreFile(null)
       setRestorePreview(null)

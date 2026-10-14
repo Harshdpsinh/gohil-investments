@@ -1,5 +1,5 @@
 import { getAdminDb, verifyIdToken, assertStaff } from './_shared.js'
-import crypto from 'node:crypto'
+import { signCloudinaryParams } from '../src/utils/cloudinaryAccess.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -36,20 +36,21 @@ export default async function handler(req, res) {
   const parsedBody = typeof req.body === 'string'
     ? JSON.parse(req.body || '{}')
     : (req.body || {})
-  const { publicId, resourceType = 'image' } = parsedBody
-  if (!publicId) {
+  const { publicId, resourceType = 'image', type = 'upload' } = parsedBody
+  if (!publicId || String(publicId).includes('..')) {
     res.status(400).json({ error: 'publicId is required.' })
     return
   }
 
   const safeResourceType = ['image', 'raw', 'video'].includes(resourceType) ? resourceType : 'image'
+  const safeType = ['upload', 'authenticated', 'private'].includes(type) ? type : 'upload'
   const timestamp = Math.floor(Date.now() / 1000)
-  const toSign = `public_id=${publicId}&timestamp=${timestamp}${apiSecret}`
-  const signature = crypto.createHash('sha1').update(toSign).digest('hex')
+  const signature = signCloudinaryParams({ public_id: publicId, timestamp, type: safeType }, apiSecret)
 
   const body = new URLSearchParams({
     public_id: publicId,
     timestamp: String(timestamp),
+    type: safeType,
     api_key: apiKey,
     signature,
     invalidate: 'true',

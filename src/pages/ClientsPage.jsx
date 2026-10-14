@@ -10,6 +10,7 @@ import {
   bulkMergeClients
 } from '../firebase/firestore'
 import { uploadClientDocument, deleteClientDocument, deleteStorageObjectByPath, openDocumentPreview, downloadDocumentFile } from '../firebase/storage'
+import { logAdminAction } from '../firebase/auditLog'
 import { computeCoverageGaps } from '../utils/policySchemas'
 import Modal         from '../components/ui/Modal'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -733,6 +734,12 @@ export default function ClientsPage() {
     try {
       await deleteClientStorageDocs(selected.id)
       await deleteClient(selected.id)
+      await logAdminAction({
+        action: 'delete-client',
+        entityType: 'client',
+        entityId: selected.id,
+        summary: `${selected.name || 'Client'} deleted`,
+      })
       toast.success('Client deleted')
       setDelOpen(false)
       setSelected(null)

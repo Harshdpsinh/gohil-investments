@@ -10,6 +10,7 @@ import {
   subscribeProposals, updateProposal, addClient, savePolicyPdfUrl,
 } from '../firebase/firestore'
 import { deletePolicyPdfAsset, uploadPolicyPdf } from '../firebase/storage'
+import { logAdminAction } from '../firebase/auditLog'
 import Modal        from '../components/ui/Modal'
 import PortalOverlay from '../components/ui/PortalOverlay'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -87,8 +88,10 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
         publicId: policy?.policyPdfPublicId,
         resourceType: policy?.policyPdfResourceType,
         deleteToken: policy?.policyPdfDeleteToken,
+        delivery: policy?.policyPdfDelivery,
       })
       await permanentDeletePolicy(permDel)
+      await logAdminAction({ action: 'permanent-delete', entityType: 'policy', entityId: permDel, summary: 'Policy removed from the recycle bin' })
       toast.success('Policy permanently deleted')
       setDeleted(prev => prev.filter(p => p.id !== permDel))
       setPermDel(null)
@@ -112,10 +115,12 @@ function RecycleBinModal({ onClose, fmtDate, fmtCurrency }) {
           publicId: p.policyPdfPublicId,
           resourceType: p.policyPdfResourceType,
           deleteToken: p.policyPdfDeleteToken,
+          delivery: p.policyPdfDelivery,
         })
         await permanentDeletePolicy(p.id)
       }))
       toast.success('Recycle bin emptied')
+      await logAdminAction({ action: 'empty-recycle-bin', entityType: 'policy', summary: 'Recycle bin emptied' })
       setDeleted([])
     } catch(err) {
       toast.error('Could not empty recycle bin: ' + (err.message || 'Unknown error'))
@@ -523,6 +528,12 @@ export default function PoliciesPage() {
     }
     try {
       await deletePolicy(selected.id)
+      await logAdminAction({
+        action: 'delete-policy',
+        entityType: 'policy',
+        entityId: selected.id,
+        summary: `${selected.clientName || 'Policy'} ${selected.policyNumber || ''} moved to the recycle bin`.trim(),
+      })
       toast.success('Policy moved to Recycle Bin')
       setDelOpen(false)
       setSelected(null)

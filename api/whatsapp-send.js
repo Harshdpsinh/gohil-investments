@@ -5,6 +5,9 @@ import {
   assertStaff, inboundWindowOpen,
 } from './_shared.js'
 import { toE164, renderUtilityPremiumNotice } from '../src/utils/whatsappCloud.js'
+import { takeToken } from '../src/utils/rateLimit.js'
+
+const sendHits = new Map()
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
@@ -20,6 +23,10 @@ export default async function handler(req, res) {
     const staff = await assertStaff(db, decoded)
     if (!staff) {
       return res.status(403).json({ error: 'This account is not provisioned to send messages.' })
+    }
+    const limit = takeToken(sendHits, staff.uid, { limit: 30, windowMs: 10 * 60 * 1000 })
+    if (!limit.ok) {
+      return res.status(429).json({ ok: false, error: 'Too many WhatsApp messages. Wait a few minutes and try again.' })
     }
 
     const { mobile, detail, text, linkUrl, caption } = req.body || {}

@@ -15,6 +15,7 @@ vi.mock('../../firebase/firestore', () => ({
   updatePolicy: vi.fn(async () => {}),
   addPolicy: vi.fn(async () => ({ id: 'new-pol' })),
   addClient: vi.fn(async () => ({ id: 'new-cli' })),
+  createAuditLog: vi.fn(async () => {}),
 }))
 vi.mock('../../firebase/commissionOps', () => ({
   upsertCommissionMaster: vi.fn(async () => ({ id: 'master-1' })),

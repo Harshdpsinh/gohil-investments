@@ -24,6 +24,7 @@ import {
 } from '../../utils/commissionImport'
 import { addClient, addCommissionTransaction, addPolicy, updatePolicy } from '../../firebase/firestore'
 import { upsertCommissionMaster, recordImportBatch } from '../../firebase/commissionOps'
+import { logAdminAction } from '../../firebase/auditLog'
 import { expectedCommission } from '../../utils/commissionReconcile'
 import {
   alreadyPostedHashes,
@@ -495,7 +496,14 @@ export default function StatementImportModal({ open, onClose, policies, clients 
         createdByEmail: user?.email || '',
       })
     } catch { /* history is optional — posting already happened */ }
-    if (posted) onPosted?.()
+    if (posted) {
+      await logAdminAction({
+        action: 'import-commission',
+        entityType: 'commission',
+        summary: `${posted} commission row${posted === 1 ? '' : 's'} imported for ${insurer || 'an insurer'}`,
+      })
+      onPosted?.()
+    }
     closeAll()
   }
 

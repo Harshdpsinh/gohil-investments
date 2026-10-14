@@ -1,13 +1,14 @@
 // src/firebase/storage.js
-// PDF FIX: Use /raw/ endpoint for PDFs — stores file exactly as-is.
-// Images use /image/ endpoint. Both are publicly accessible.
+// New Cloudinary files are uploaded as authenticated assets. The browser
+// never holds the upload preset or the API secret. A signed-in staff member
+// asks the server for a signature, and only an allowed file type gets one.
+// Older files that were uploaded publicly keep their existing links.
 import { addDocMeta, addDocumentRecord, deleteDocMeta, getDocMeta } from './firestore'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app, { auth, firebaseConfig } from './config'
 import { downloadNativeDocument, isNativeAndroid, openNativeDocument } from '../services/nativeDocumentService'
 
 const CLOUD  = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-const PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_POLICY_PDF_BYTES = 25 * 1024 * 1024
 const UPLOAD_TIMEOUT_MS = 30000
@@ -66,42 +67,77 @@ function validateSharedDocument(file) {
 
 function cloudinaryUpload(file, folder, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
-    if (!CLOUD || !PRESET) {
-      reject(new Error('Cloudinary not configured.')); return
-    }
-    const safeName = file.name.replace(/\s+/g, '_')
-    const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-    const baseName = safeName.replace(/\.[^/.]+$/, '')
-    const publicId = `${Date.now()}_${baseName}`
-    const fd = new FormData()
-    fd.append('file',          file)
-    fd.append('upload_preset', PRESET)
-    fd.append('folder',        folder)
-    fd.append('public_id',     publicId)
+    const run = async () => {
+      const user = auth.currentUser
+      if (!user) throw new Error('Sign in again to upload files.')
+      const token = await user.getIdToken()
+      const signRes = await fetch('/api/cloudinary-sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          folder,
+          filename: file.name,
+          contentType: file.type,
+          bytes: file.size,
+        }),
+      })
+      const signed = await signRes.json().catch(() => ({}))
+      if (!signRes.ok) throw new Error(signed.error || 'Could not authorise the upload.')
 
+      const uploaded = await postSignedCloudinary(file, signed, onProgress)
+      const checkRes = await fetch('/api/cloudinary-confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          publicId: uploaded.publicId,
+          resourceType: uploaded.resourceType,
+          format: uploaded.format,
+          version: uploaded.version,
+        }),
+      })
+      const checked = await checkRes.json().catch(() => ({}))
+      if (!checkRes.ok) throw new Error(checked.error || 'This file type is not allowed.')
+      return {
+        url: checked.url,
+        publicId: uploaded.publicId,
+        deleteToken: '',
+        resourceType: uploaded.resourceType,
+        delivery: 'authenticated',
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        format: checked.format || uploaded.format,
+      }
+    }
+    run().then(resolve).catch(reject)
+  })
+}
+
+function postSignedCloudinary(file, signed, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('api_key', signed.apiKey)
+    fd.append('timestamp', String(signed.timestamp))
+    fd.append('public_id', signed.publicId)
+    fd.append('type', signed.type || 'authenticated')
+    fd.append('signature', signed.signature)
     const xhr = new XMLHttpRequest()
-    // PDFs are uploaded through auto/upload so Cloudinary chooses a browser-safe
-    // delivery URL. raw/upload caused Chrome's PDF viewer to reject some files.
-    const endpoint  = 'auto/upload'
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUD}/${endpoint}`, true)
-    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded/e.total)*100)) }
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${signed.cloudName}/auto/upload`, true)
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)) }
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        const data = JSON.parse(xhr.responseText)
-        resolve({
-          url: data.secure_url,
-          publicId: data.public_id,
-          deleteToken: data.delete_token || '',
-          resourceType: data.resource_type || (isPdfFile ? 'image' : 'image'),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          format: data.format || '',
-        })
-      } else {
+      if (xhr.status < 200 || xhr.status >= 300) {
         try { reject(new Error(JSON.parse(xhr.responseText).error?.message || `Upload failed (${xhr.status})`)) }
         catch { reject(new Error(`Upload failed with status ${xhr.status}`)) }
+        return
       }
+      const data = JSON.parse(xhr.responseText)
+      resolve({
+        publicId: data.public_id,
+        resourceType: data.resource_type || 'image',
+        format: data.format || '',
+        version: data.version || '',
+      })
     }
     xhr.onerror = () => reject(new Error('Network error during upload'))
     xhr.send(fd)
@@ -165,25 +201,7 @@ async function firebaseUploadWithFallback(file, path, onProgress = () => {}) {
 }
 
 async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onProgress = () => {}) {
-  if (CLOUD && PRESET) {
-    try {
-      onProgress(0)
-      const meta = await cloudinaryUpload(file, cloudinaryFolder, onProgress)
-      return {
-        ...meta,
-        storageProvider: 'cloudinary',
-        storagePath: '',
-        storageBucket: '',
-      }
-    } catch (cloudinaryErr) {
-      console.warn('Cloudinary upload failed, trying Firebase Storage fallback:', cloudinaryErr?.message || cloudinaryErr)
-    }
-  }
-
   try {
-    return await firebaseUploadWithFallback(file, firebasePath, onProgress)
-  } catch (firebaseErr) {
-    if (!CLOUD || !PRESET) throw firebaseErr
     onProgress(0)
     const meta = await cloudinaryUpload(file, cloudinaryFolder, onProgress)
     return {
@@ -191,9 +209,11 @@ async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onPr
       storageProvider: 'cloudinary',
       storagePath: '',
       storageBucket: '',
-      firebaseError: firebaseErr?.code || firebaseErr?.message || '',
     }
+  } catch (cloudinaryErr) {
+    console.warn('Cloudinary upload failed, trying Firebase Storage fallback:', cloudinaryErr?.message || cloudinaryErr)
   }
+  return firebaseUploadWithFallback(file, firebasePath, onProgress)
 }
 
 export function getViewUrl(url) {
@@ -379,6 +399,7 @@ export async function uploadPolicyPdf(policyId, file, onProgress = () => {}, doc
     storageProvider: meta.storageProvider || 'firebase',
     publicId: meta.publicId || '',
     resourceType: meta.resourceType || '',
+    delivery: meta.delivery || '',
     deleteToken: meta.deleteToken || '',
   }
 }
@@ -429,7 +450,7 @@ async function deleteCloudinaryByToken(deleteToken) {
   return response.ok
 }
 
-async function deleteCloudinaryByPublicId(publicId, resourceType = 'image') {
+async function deleteCloudinaryByPublicId(publicId, resourceType = 'image', type = 'upload') {
   if (!publicId) return false
   const user = auth.currentUser
   if (!user) throw new Error('Sign in again to delete files.')
@@ -439,7 +460,7 @@ async function deleteCloudinaryByPublicId(publicId, resourceType = 'image') {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${await user.getIdToken()}`,
     },
-    body: JSON.stringify({ publicId, resourceType }),
+    body: JSON.stringify({ publicId, resourceType, type }),
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
@@ -452,7 +473,11 @@ export async function deletePolicyPdfAsset(asset = {}) {
   if (asset.storageProvider === 'cloudinary' || asset.publicId || asset.deleteToken) {
     if (await deleteCloudinaryByToken(asset.deleteToken)) return
     if (asset.publicId) {
-      await deleteCloudinaryByPublicId(asset.publicId, asset.resourceType || 'image')
+      await deleteCloudinaryByPublicId(
+        asset.publicId,
+        asset.resourceType || 'image',
+        asset.delivery === 'authenticated' ? 'authenticated' : 'upload',
+      )
     }
     return
   }

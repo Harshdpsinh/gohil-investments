@@ -3,6 +3,7 @@
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import { db } from './config'
 import { addCommissionTransaction, CRM_COLLECTIONS } from './firestore'
+import { logAdminAction } from './auditLog'
 import { insurerRewritePlan, legacySettlementPayload, manualCommissionPayload, policiesToSettle } from '../utils/commissionSettle'
 
 const TXNS = CRM_COLLECTIONS.COMMISSION_TRANSACTIONS
@@ -27,10 +28,23 @@ export async function updateCommissionTransaction(id, data = {}) {
   }
   payload.updatedAt = serverTimestamp()
   await updateDoc(doc(db, TXNS, id), payload)
+  await logAdminAction({
+    action: 'update-commission',
+    entityType: 'commission',
+    entityId: id,
+    summary: 'Commission row updated',
+  })
 }
 
 export async function addManualCommission(policy, values, { user } = {}) {
-  return addCommissionTransaction(manualCommissionPayload(policy, values, { user }))
+  const id = await addCommissionTransaction(manualCommissionPayload(policy, values, { user }))
+  await logAdminAction({
+    action: 'add-commission',
+    entityType: 'commission',
+    entityId: policy?.id || '',
+    summary: `Manual commission for ${policy?.clientName || policy?.policyNumber || 'a policy'}`,
+  })
+  return id
 }
 
 export async function settleExistingBookCommissions(policies, transactions, { user, cutoff = new Date() } = {}) {
@@ -53,6 +67,11 @@ export async function settleExistingBookCommissions(policies, transactions, { us
     skipped,
     settledBy: user?.email || user?.uid || '',
   }, { merge: true })
+  await logAdminAction({
+    action: 'settle-commissions',
+    entityType: 'commission',
+    summary: `Book settlement posted ${posted}, skipped ${skipped}`,
+  })
   return { posted, skipped, remaining: targets.length - posted - skipped }
 }
 

@@ -1256,6 +1256,7 @@ export async function savePolicyPdfUrl(policyId, url, name, storagePath = '', st
     policyPdfStorageProvider: extra.storageProvider || null,
     policyPdfPublicId: extra.publicId || null,
     policyPdfResourceType: extra.resourceType || null,
+    policyPdfDelivery: extra.delivery || null,
     policyPdfDeleteToken: extra.deleteToken || null,
     // SHA-256 of the file's bytes, so re-reading the same schedule can be
     // recognised as already filed rather than creating a second policy.

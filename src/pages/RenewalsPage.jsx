@@ -222,6 +222,7 @@ function RenewModal({ policy, onConfirm, onClose }) {
         policyPdfStorageProvider: uploaded.storageProvider || '',
         policyPdfPublicId: uploaded.publicId || '',
         policyPdfResourceType: uploaded.resourceType || '',
+        policyPdfDelivery: uploaded.delivery || '',
         policyPdfDeleteToken: uploaded.deleteToken || '',
       })
       toast.success('Renewal PDF uploaded for the new policy term')
@@ -978,6 +979,7 @@ export default function RenewalsPage() {
         policyPdfStorageProvider: renewForm.policyPdfStorageProvider || null,
         policyPdfPublicId: renewForm.policyPdfPublicId || null,
         policyPdfResourceType: renewForm.policyPdfResourceType || null,
+        policyPdfDelivery: renewForm.policyPdfDelivery || null,
         policyPdfDeleteToken: renewForm.policyPdfDeleteToken || null,
       }
 
@@ -1003,6 +1005,7 @@ export default function RenewalsPage() {
             publicId: renewForm.policyPdfPublicId,
             resourceType: renewForm.policyPdfResourceType,
             deleteToken: renewForm.policyPdfDeleteToken,
+            delivery: renewForm.policyPdfDelivery,
           })
         } catch {}
       }

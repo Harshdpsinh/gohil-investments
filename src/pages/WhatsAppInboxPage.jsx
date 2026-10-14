@@ -177,8 +177,8 @@ export default function WhatsAppInboxPage() {
       {!error && !loading && !anyInbound && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
           Customer replies are still only in BHASH Live Chat. In BHASH, set the incoming-message webhook to
-          {' '}<span className="font-mono">https://gohil-investments.vercel.app/api/bhash-webhook</span>
-          {' '}and ask the client to send one more message. Until that call arrives, this inbox only shows notices we sent.
+          {' '}<span className="font-mono">https://gohil-investments.vercel.app/api/bhash-webhook?secret=YOUR_SECRET</span>
+          {' '}where YOUR_SECRET is the Vercel value BHASH_WEBHOOK_SECRET. Then ask the client to send one more message. Until that call arrives, this inbox only shows notices we sent.
         </div>
       )}
 

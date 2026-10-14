@@ -1,7 +1,9 @@
 // src/pages/AdminUsersPage.jsx
 import { useState, useEffect } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useAuth }    from '../hooks/useAuth'
 import { getAllUsers, setUserRole } from '../firebase/firestore'
+import { logAdminAction } from '../firebase/auditLog'
 import { roleLabel } from '../utils/roles'
 import AppIcon from '../components/ui/AppIcon'
 import PortalOverlay from '../components/ui/PortalOverlay'
@@ -71,6 +73,12 @@ export default function AdminUsersPage() {
     const { uid, newRole, name, email } = pendingRoleChange
     try {
       await setUserRole(uid, { role: newRole, name, email })
+      await logAdminAction({
+        action: 'change-role',
+        entityType: 'user',
+        entityId: uid,
+        summary: `${name || email} is now ${newRole}`,
+      })
       toast.success('Role updated')
       await load()
     } catch (err) {
@@ -80,12 +88,7 @@ export default function AdminUsersPage() {
     }
   }
 
-  if (!isAdmin) return (
-    <div className="p-8 text-center text-gray-400">
-      <p className="mb-3 flex justify-center"><AppIcon name="lock" size={32} /></p>
-      <p className="font-semibold">Admin access only</p>
-    </div>
-  )
+  if (!isAdmin) return <Navigate to="/dashboard" replace />
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">

@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth'
 import { auth, firebaseConfig } from '../firebase/config'
 import { getUserRole, setUserRole } from '../firebase/firestore'
+import { logAdminAction } from '../firebase/auditLog'
 import { isWriteRole, normaliseRole, ownerAdminEmails } from '../utils/roles'
 import { staffWriteError } from '../utils/provisionUser'
 import { createOrLookupAuthUser } from '../utils/identityToolkitClient'
@@ -142,6 +143,12 @@ export function AuthProvider({ children }) {
     })
     try {
       await setUserRole(authUser.uid, { email: cleanEmail, role: safeRole, name: cleanName })
+      await logAdminAction({
+        action: 'create-staff',
+        entityType: 'user',
+        entityId: authUser.uid,
+        summary: `${cleanName} <${cleanEmail}> set as ${safeRole}`,
+      })
       return { uid: authUser.uid, attached: !authUser.created }
     } catch (err) {
       const idToken = await auth.currentUser?.getIdToken()
@@ -155,7 +162,15 @@ export function AuthProvider({ children }) {
           body: JSON.stringify({ email: cleanEmail, password, name: cleanName, role: safeRole }),
         })
         const body = await response.json().catch(() => null)
-        if (response.ok && body?.ok) return body
+        if (response.ok && body?.ok) {
+          await logAdminAction({
+            action: 'create-staff',
+            entityType: 'user',
+            entityId: body.uid || '',
+            summary: `${cleanName} <${cleanEmail}> set as ${safeRole}`,
+          })
+          return body
+        }
       }
       throw new Error(staffWriteError(err.code, err.message))
     }
