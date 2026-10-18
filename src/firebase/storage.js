@@ -4,6 +4,7 @@
 // asks the server for a signature, and only an allowed file type gets one.
 // Older files that were uploaded publicly keep their existing links.
 import { addDocMeta, addDocumentRecord, deleteDocMeta, getDocMeta } from './firestore'
+import { cloudinaryFailureShouldFallback } from '../utils/cloudinaryAccess.js'
 import { deleteObject, getDownloadURL, getStorage, ref, uploadBytesResumable } from 'firebase/storage'
 import app, { auth, firebaseConfig } from './config'
 import { downloadNativeDocument, isNativeAndroid, openNativeDocument } from '../services/nativeDocumentService'
@@ -82,7 +83,11 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
         }),
       })
       const signed = await signRes.json().catch(() => ({}))
-      if (!signRes.ok) throw new Error(signed.error || 'Could not authorise the upload.')
+      if (!signRes.ok) {
+        const err = new Error(signed.error || 'Could not authorise the upload.')
+        err.status = signRes.status
+        throw err
+      }
 
       const uploaded = await postSignedCloudinary(file, signed, onProgress)
       const checkRes = await fetch('/api/cloudinary-confirm', {
@@ -96,7 +101,11 @@ function cloudinaryUpload(file, folder, onProgress = () => {}) {
         }),
       })
       const checked = await checkRes.json().catch(() => ({}))
-      if (!checkRes.ok) throw new Error(checked.error || 'This file type is not allowed.')
+      if (!checkRes.ok) {
+        const err = new Error(checked.error || 'This file type is not allowed.')
+        err.status = checkRes.status
+        throw err
+      }
       return {
         url: checked.url,
         publicId: uploaded.publicId,
@@ -211,6 +220,7 @@ async function uploadWithFreeFallback(file, firebasePath, cloudinaryFolder, onPr
       storageBucket: '',
     }
   } catch (cloudinaryErr) {
+    if (!cloudinaryFailureShouldFallback(cloudinaryErr?.status)) throw cloudinaryErr
     console.warn('Cloudinary upload failed, trying Firebase Storage fallback:', cloudinaryErr?.message || cloudinaryErr)
   }
   return firebaseUploadWithFallback(file, firebasePath, onProgress)

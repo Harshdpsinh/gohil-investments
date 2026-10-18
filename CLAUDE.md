@@ -1,5 +1,10 @@
 # Gohil Investments CRM
 
+> Where this file still says "unsigned Cloudinary preset" or "no custom server", it is out of date.
+> Browser uploads are signed by `api/cloudinary-sign.js`. Vercel functions live in `api/`.
+> Follow [AGENTS.md](AGENTS.md) and [docs/](docs/) when they disagree with the stack notes below.
+> Do not put an upload preset back in the browser, and do not change stored client data unless asked.
+
 Insurance CRM for Gohil Investments (Bhavnagar, Gujarat). One React codebase serves
 both the web app and the Android app.
 

@@ -75,7 +75,7 @@ These are public in the browser bundle. They identify the Firebase project; they
 - `VITE_FIREBASE_STORAGE_BUCKET`
 - `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
-- Cloudinary unsigned preset values used by the browser upload path
+- `VITE_CLOUDINARY_CLOUD_NAME` (cloud name only; the upload preset is no longer used)
 
 ### Server (Vercel functions) variables
 
@@ -94,7 +94,12 @@ These are public in the browser bundle. They identify the Firebase project; they
 | `WHATSAPP_TEMPLATE_LANG` | Template language (default `en`) |
 | `WHATSAPP_TEMPLATE_PARAMS` | Variable order if the Meta template changes |
 | `WHATSAPP_DEFAULT_COUNTRY_CODE` | Default `91` |
-| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Signed server uploads for inbound WhatsApp media |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Signed uploads and deletes. New files are authenticated, not public. |
+| `BHASH_WEBHOOK_SECRET` | Required on `/api/bhash-webhook`. Without it every inbound call is rejected. |
+
+## Agent docs
+
+The next coding session should start at [AGENTS.md](AGENTS.md). The prompt set for this repo is in [docs/README.md](docs/README.md). Those files describe the product. They do not change client records or commission maths.
 
 ## WhatsApp Cloud API
 

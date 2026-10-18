@@ -39,6 +39,12 @@ export function signCloudinaryParams(params, apiSecret) {
   return crypto.createHash('sha1').update(serialized + apiSecret).digest('hex')
 }
 
+/** A 4xx is a real refusal (type, auth, rate limit). Only outages may use Firebase. */
+export function cloudinaryFailureShouldFallback(status) {
+  if (status == null || status === 0) return true
+  return Number(status) >= 500
+}
+
 export function formatAllowed(format) {
   return ALLOWED_FORMATS.has(String(format || '').toLowerCase())
 }

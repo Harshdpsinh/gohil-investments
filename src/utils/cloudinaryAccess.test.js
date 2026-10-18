@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAllowed, planUpload, signCloudinaryParams, signedDeliveryUrl } from './cloudinaryAccess.js'
+import { cloudinaryFailureShouldFallback, formatAllowed, planUpload, signCloudinaryParams, signedDeliveryUrl } from './cloudinaryAccess.js'
 
 describe('cloudinary access', () => {
   it('rejects a folder outside the office prefix and a disallowed type', () => {
@@ -38,5 +38,13 @@ describe('cloudinary access', () => {
     expect(url).not.toContain('sek')
     expect(formatAllowed('pdf')).toBe(true)
     expect(formatAllowed('exe')).toBe(false)
+  })
+
+  it('does not hide a rejected upload behind Firebase', () => {
+    expect(cloudinaryFailureShouldFallback(400)).toBe(false)
+    expect(cloudinaryFailureShouldFallback(401)).toBe(false)
+    expect(cloudinaryFailureShouldFallback(429)).toBe(false)
+    expect(cloudinaryFailureShouldFallback(500)).toBe(true)
+    expect(cloudinaryFailureShouldFallback(undefined)).toBe(true)
   })
 })
